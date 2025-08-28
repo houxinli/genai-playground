@@ -1,0 +1,11 @@
+# 只读/低风险命令白名单（前缀匹配）
+# 环境与依赖查询
+conda run -n llm python -V
+conda run -n llm python -m pip show
+conda run -n llm python scripts/test_gpu.py
+conda run -n llm python scripts/report_sizes.py
+
+# vLLM 服务（可选：你确认后可取消注释）
+# conda run -n llm python -m vllm.entrypoints.openai.api_server
+
+
