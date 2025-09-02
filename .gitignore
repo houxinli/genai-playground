@@ -1,26 +1,80 @@
 # Python
 __pycache__/
-*.pyc
-*.pyo
-.pytest_cache/
-.ipynb_checkpoints/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Envs & build
+# Virtual environments
 .env
 .venv
+env/
 venv/
-.conda/
-dist/
-build/
-
-# Logs & outputs
-logs/
-outputs/
-checkpoints/
-.cache/
+ENV/
+env.bak/
+venv.bak/
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+logs/*.log
+*.a.out
+*.out
+*.tmp
+*.pid
+
+# Compiled files
+*.so
+*.o
+*.exe
+*.dll
+*.dylib
+
+# Temporary files
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Translation task specific
+tasks/translation/data/*
+tasks/translation/logs/*
+!tasks/translation/data/input/.gitkeep
+!tasks/translation/data/output/.gitkeep
+!tasks/translation/logs/.gitkeep
+
+# Model cache
+~/.cache/huggingface/
+/mnt/shengdata1/lujiang/hf_cache/
 
 
