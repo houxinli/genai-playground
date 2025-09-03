@@ -33,13 +33,13 @@ if [[ "$MODEL" == *"32B"* && "$MODEL" != *"AWQ"* ]]; then
     echo "[vLLM] 使用完整 32B 模型配置：TP=4, max-len=16K, max-seqs=8, kv-cache=fp8"
 else
     # AWQ 或其他模型配置
-    TP_SIZE=${TP_SIZE:-3}
+    TP_SIZE=${TP_SIZE:-2}
     MAX_LEN=${MAX_LEN:-40960}
     MAX_NUM_SEQS=${MAX_NUM_SEQS:-16}
     KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-auto}
     DTYPE=${DTYPE:-auto}
     TRUST_REMOTE_CODE=${TRUST_REMOTE_CODE:-0}
-    echo "[vLLM] 使用 AWQ/其他模型配置：TP=3, max-len=40K, max-seqs=16"
+    echo "[vLLM] 使用 AWQ/其他模型配置：TP=2, max-len=40K, max-seqs=16"
 fi
 
 echo "[vLLM] Serving model: $MODEL on port $PORT"
