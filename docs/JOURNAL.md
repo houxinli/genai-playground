@@ -682,6 +682,11 @@ python -m vllm.entrypoints.openai.api_server \
 - **输出清理**：自动移除模型思考部分（`<think>...</think>`），保持输出纯净
 - **错误处理**：增强重试机制和错误检测，提高翻译成功率
 
+#### vLLM 配置优化
+- **AWQ 模型 TP 配置**：发现 AWQ 模型需要 TP 能整除某个数，将默认 TP_SIZE 从 3 改为 2
+- **完整 32B 模型配置**：支持 TP=4、kv-cache-dtype=fp8、trust-remote-code 等关键参数
+- **自动配置切换**：根据模型名自动选择最优配置（32B vs AWQ）
+
 #### 文件结构优化
 ```
 tasks/translation/data/pixiv/50235390/

@@ -7,7 +7,7 @@ PY := conda run -n $(CONDA_ENV) python
 
 # vLLM 服务管理
 vllm-start:
-	@echo "🚀 启动 vLLM 服务（默认 AWQ 模型）..."
+	@echo "🚀 启动 vLLM 服务（默认 AWQ 模型，TP=2）..."
 	./scripts/manage_vllm.sh start-bg
 
 vllm-start-32b:
