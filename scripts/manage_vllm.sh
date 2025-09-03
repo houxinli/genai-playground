@@ -46,6 +46,24 @@ case "${1:-}" in
         echo "✅ 服务已启动，PID: $(cat "$PID_FILE")"
         ;;
         
+    restart)
+        echo "🔄 重启 vLLM 服务..."
+        if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+            echo "🛑 停止当前服务..."
+            kill "$(cat "$PID_FILE")"
+            rm -f "$PID_FILE"
+            echo "⏳ 等待服务完全停止..."
+            sleep 3
+        fi
+        
+        echo "🚀 启动新服务..."
+        echo "📝 日志文件: $LOG_FILE"
+        create_latest_link
+        ./scripts/serve_vllm.sh > "$LOG_FILE" 2>&1 &
+        echo $! > "$PID_FILE"
+        echo "✅ 服务已重启，PID: $(cat "$PID_FILE")"
+        ;;
+        
     stop)
         echo "🛑 停止 vLLM 服务..."
         if [ -f "$PID_FILE" ]; then
@@ -107,12 +125,13 @@ case "${1:-}" in
         ;;
         
     *)
-        echo "用法: $0 {start|start-bg|stop|status|logs|logs-all|clean-logs|test}"
+        echo "用法: $0 {start|start-bg|stop|restart|status|logs|logs-all|clean-logs|test}"
         echo ""
         echo "命令说明:"
         echo "  start      - 前台启动 vLLM 服务（同时记录日志）"
         echo "  start-bg   - 后台启动 vLLM 服务"
         echo "  stop       - 停止 vLLM 服务"
+        echo "  restart    - 重启 vLLM 服务"
         echo "  status     - 查看服务状态"
         echo "  logs       - 实时查看最新日志"
         echo "  logs-all   - 查看所有日志文件"
