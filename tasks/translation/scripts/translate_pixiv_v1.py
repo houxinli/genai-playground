@@ -177,14 +177,19 @@ def split_paragraphs(body: str) -> List[str]:
     return paras
 
 
-def translate_with_local_llm(text: str, model: str, temperature: float, max_tokens: int, terminology: Optional[str] = None, stop: Optional[List[str]] = None, frequency_penalty: Optional[float] = None, presence_penalty: Optional[float] = None, few_shot_samples: Optional[List[Tuple[str, str]]] = None) -> Tuple[str, str]:
+def translate_with_local_llm(text: str, model: str, temperature: float, max_tokens: int, terminology: Optional[str] = None, stop: Optional[List[str]] = None, frequency_penalty: Optional[float] = None, presence_penalty: Optional[float] = None, few_shot_samples: Optional[List[Tuple[str, str]]] = None, max_context_length: Optional[int] = None, preface_file: Optional[str] = None) -> Tuple[str, str, Dict[str, int]]:
     # 组装带术语表的提示词
-    preface = (
-        "请将以下日语文本忠实翻译为中文：\n"
-        "- 严格保持原文的分段与分行，不合并、不省略、不添加解释；\n"
-        "- 对话与引号样式对齐，空行位置保持不变；\n"
-        "- 仅输出译文本身，不要额外说明或思考内容。\n"
-    )
+    if preface_file and Path(preface_file).exists():
+        with open(preface_file, 'r', encoding='utf-8') as f:
+            preface = f.read().strip() + "\n"
+    else:
+        # 默认preface
+        preface = (
+            "请将以下日语文本忠实翻译为中文：\n"
+            "- 严格保持原文的分段与分行，不合并、不省略、不添加解释；\n"
+            "- 对话与引号样式对齐，空行位置保持不变；\n"
+            "- 仅输出译文本身，不要额外说明或思考内容。\n"
+        )
     if terminology:
         preface += "以下是术语对照表，请严格参照：\n" + terminology.strip() + "\n\n"
     
@@ -197,6 +202,8 @@ def translate_with_local_llm(text: str, model: str, temperature: float, max_toke
     
     prompt += "原文：\n\n" + text + "\n\n翻译结果："
     
+    # 估算输入tokens（粗略）：按字符数 * 0.7
+    estimated_input_tokens = int(len(prompt) * 0.7)
     print(f"    调用模型，prompt长度: {len(prompt)}")
     client = OpenAI(base_url="http://localhost:8000/v1", api_key="dummy")
     kwargs = {}
@@ -207,28 +214,43 @@ def translate_with_local_llm(text: str, model: str, temperature: float, max_toke
     if presence_penalty is not None:
         kwargs["presence_penalty"] = presence_penalty
     # vLLM 端通常要求显式 max_tokens；当 <=0 时使用安全大值
-    if not isinstance(max_tokens, int) or max_tokens <= 0:
+    chosen_max_tokens = max_tokens
+    if not isinstance(chosen_max_tokens, int) or chosen_max_tokens <= 0:
         # 动态计算合适的 max_tokens，确保不超过模型的最大上下文长度
-        # 根据错误信息，模型最大上下文长度为 40960
-        max_context_length = 40960
-        # 根据错误信息，当前输入大约有 9959 tokens
+        # 如果没有传入max_context_length，则根据模型名称推断默认值
+        if max_context_length is None:
+            if "32B" in model and "AWQ" not in model:
+                # 完整32B模型：32768 tokens
+                max_context_length = 32768
+            else:
+                # AWQ或其他模型：40960 tokens
+                max_context_length = 40960
+        
         # 为了安全起见，我们使用更保守的估算
-        estimated_input_tokens = len(prompt) * 0.7  # 更保守的估算
         # 预留 2000 tokens 作为安全边界
         safe_max_tokens = max_context_length - int(estimated_input_tokens) - 2000
-        max_tokens = max(1000, safe_max_tokens)  # 至少保留 1000 tokens
-        print(f"    动态计算 max_tokens: {max_tokens} (基于输入长度 {len(prompt)}, 估算输入tokens: {int(estimated_input_tokens)})")
+        chosen_max_tokens = max(1000, safe_max_tokens)  # 至少保留 1000 tokens
+        print(f"    动态计算 max_tokens: {chosen_max_tokens} (基于输入长度 {len(prompt)}, 估算输入tokens: {estimated_input_tokens}, 模型上下文长度: {max_context_length})")
+    # 估计输出tokens上限（含思考+译文）：取 chosen_max_tokens
+    token_meta: Dict[str, int] = {
+        "estimated_input_tokens": int(estimated_input_tokens),
+        "estimated_output_tokens": int(max(0, chosen_max_tokens)),
+        "max_context_length": int(max_context_length if max_context_length else 0),
+        "used_max_tokens": int(chosen_max_tokens),
+        "prompt_chars": len(prompt),
+        "text_chars": len(text),
+    }
     try:
         resp = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=chosen_max_tokens,
             **kwargs,
         )
         result = resp.choices[0].message.content.strip()
         print(f"    模型返回，结果长度: {len(result)}")
-        return result, prompt
+        return result, prompt, token_meta
     except Exception as e:
         print(f"    模型调用失败: {e}")
         raise
@@ -313,12 +335,14 @@ def translate_chunk_with_retry(
     retries: int,
     retry_wait: float,
     few_shot_samples: Optional[List[Tuple[str, str]]],
-) -> Tuple[str, str, bool]:
+    max_context_length: Optional[int] = None,
+    preface_file: Optional[str] = None,
+) -> Tuple[str, str, bool, Dict[str, int]]:
     """返回 (output, prompt, ok)。ok=False 表示建议降级分块/或重试失败。"""
     last_err = None
     for attempt in range(1, max(1, retries) + 1):
         try:
-            out, prompt = translate_with_local_llm(
+            out, prompt, token_meta = translate_with_local_llm(
                 chunk_text,
                 model,
                 temperature,
@@ -328,18 +352,20 @@ def translate_chunk_with_retry(
                 frequency_penalty=frequency_penalty,
                 presence_penalty=presence_penalty,
                 few_shot_samples=few_shot_samples,
+                max_context_length=max_context_length,
+                preface_file=preface_file,
             )
             if looks_bad_output(out, chunk_text):
                 print(f"    检测到坏输出，但仍保存结果")
                 # 即使检测到坏输出，也返回成功，让上层函数保存结果
-                return out, prompt, True
-            return out, prompt, True
+                return out, prompt, True, token_meta
+            return out, prompt, True, token_meta
         except BadRequestError as e:  # 例如上下文溢出
             last_err = e
             msg = str(e).lower()
             if any(k in msg for k in ["context", "too many tokens", "maximum context length", "max_tokens must be"]):
                 # 上下文相关错误，提示外层降级为分段
-                return "", "", False
+                return "", "", False, {}
             time.sleep(retry_wait)
             continue
         except Exception as e:
@@ -347,10 +373,10 @@ def translate_chunk_with_retry(
             time.sleep(retry_wait)
             continue
     # 多次失败
-    return "", "", False
+    return "", "", False, {}
 
 
-def process_file(path: Path, model: str, temperature: float, max_tokens: int, overwrite: bool, log_dir: Path, terminology_file: Optional[Path], chunk_size_chars: int, stop: Optional[List[str]], frequency_penalty: Optional[float], presence_penalty: Optional[float], mode: str, overlap_chars: int, retries: int, retry_wait: float, fallback_on_context: bool, few_shot_samples: Optional[List[Tuple[str, str]]]) -> None:
+def process_file(path: Path, model: str, temperature: float, max_tokens: int, overwrite: bool, log_dir: Path, terminology_file: Optional[Path], chunk_size_chars: int, stop: Optional[List[str]], frequency_penalty: Optional[float], presence_penalty: Optional[float], mode: str, overlap_chars: int, retries: int, retry_wait: float, fallback_on_context: bool, few_shot_samples: Optional[List[Tuple[str, str]]], max_context_length: Optional[int] = None, preface_file: Optional[str] = None) -> None:
     zh_path = path.with_name(path.stem + "_zh.txt")
     if zh_path.exists() and not overwrite:
         print(f"SKIP {zh_path} (exists)")
@@ -391,14 +417,15 @@ def process_file(path: Path, model: str, temperature: float, max_tokens: int, ov
             i += step_local
         return out_chunks
 
-    def run_chunks(active_chunks: List[str]) -> Tuple[List[str], List[str], bool]:
+    def run_chunks(active_chunks: List[str]) -> Tuple[List[str], List[str], bool, List[Dict[str, int]]]:
         outs: List[str] = []
         prms: List[str] = []
+        metas: List[Dict[str, int]] = []
         print(f"  开始处理 {len(active_chunks)} 个块...")
         for i, ck in enumerate(active_chunks, 1):
             print(f"  处理第 {i}/{len(active_chunks)} 块，长度: {len(ck)}")
-            out, prompt, ok = translate_chunk_with_retry(
-                ck, model, temperature, max_tokens, terminology_txt, stop, frequency_penalty, presence_penalty, retries, retry_wait, few_shot_samples
+            out, prompt, ok, token_meta = translate_chunk_with_retry(
+                ck, model, temperature, max_tokens, terminology_txt, stop, frequency_penalty, presence_penalty, retries, retry_wait, few_shot_samples, max_context_length, preface_file
             )
             print(f"  第 {i} 块结果: ok={ok}, out_len={len(out)}, prompt_len={len(prompt)}")
             if not ok:
@@ -410,7 +437,8 @@ def process_file(path: Path, model: str, temperature: float, max_tokens: int, ov
                         cleaned_out = out
                     outs.append(cleaned_out)
                     prms.append(prompt)
-                return outs, prms, False
+                metas.append(token_meta)
+                return outs, prms, False, metas
             # 简单重复检测：若某块输出与上一块高度相似（前200字符相同），则截断
             if outs and out[:200] == outs[-1][:200]:
                 out = out[: max(200, len(out)//2)]
@@ -423,14 +451,15 @@ def process_file(path: Path, model: str, temperature: float, max_tokens: int, ov
                 cleaned_out = out
             outs.append(cleaned_out)
             prms.append(prompt)
-        return outs, prms, True
+            metas.append(token_meta)
+        return outs, prms, True, metas
 
     # 首次尝试：按当前模式执行
-    outs, prms, ok = run_chunks(chunks)
+    outs, prms, ok, metas = run_chunks(chunks)
     if (not ok) and fallback_on_context and mode == "full":
         # 降级为对"原始全文"的字符重叠切分
         chunks2 = split_text_by_lines(raw_text, chunk_size_chars, overlap_chars)
-        outs, prms, ok = run_chunks(chunks2)
+        outs, prms, ok, metas = run_chunks(chunks2)
     # 即使检测到坏输出，也保存结果
     if outs:
         outputs.extend(outs)
@@ -445,10 +474,70 @@ def process_file(path: Path, model: str, temperature: float, max_tokens: int, ov
     zh_path.write_text(translation, encoding="utf-8")
     log_dir.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d-%H%M%S")
-    log_path = log_dir / f"translation_{ts}.log"
+    # 日志文件名包含输入文件名，便于定位
+    log_path = log_dir / f"translation_{path.stem}_{ts}.log"
     
     # 显示log文件名
     print(f"日志文件: {log_path}")
+    
+    # 优化日志记录：去重prompt中的重复部分
+    def deduplicate_prompts(prompts: List[str]) -> str:
+        """去重prompt中的重复部分，特别是few-shot示例"""
+        # 当只有一个块时，仍需包含翻译结果，避免日志只有prompt没有结果
+        if len(prompts) <= 1:
+            single_prompt = prompts[0] if prompts else ""
+            single_output = outputs[0] if outputs else ""
+            return f"{single_prompt}\n\n翻译结果:\n{single_output}\n"
+        
+        # 提取第一个prompt作为模板
+        template_prompt = prompts[0]
+        
+        # 分离模板中的固定部分（preface + few-shot）和变化部分（原文）
+        lines = template_prompt.split('\n')
+        fixed_part = []
+        variable_part = []
+        in_variable = False
+        
+        for line in lines:
+            if line.strip() == "原文：":
+                in_variable = True
+                fixed_part.append(line)
+            elif in_variable:
+                variable_part.append(line)
+            else:
+                fixed_part.append(line)
+        
+        fixed_text = '\n'.join(fixed_part)
+        
+        # 构建去重后的日志
+        deduplicated_log = f"固定部分（preface + few-shot）:\n{'-' * 50}\n{fixed_text}\n{'-' * 50}\n\n"
+        
+        # 添加每次翻译的原文和结果
+        for i, (prompt, output) in enumerate(zip(prompts, outputs), 1):
+            # 提取原文部分
+            prompt_lines = prompt.split('\n')
+            prompt_variable_part = []
+            in_prompt_variable = False
+            
+            for line in prompt_lines:
+                if line.strip() == "原文：":
+                    in_prompt_variable = True
+                    prompt_variable_part.append(line)
+                elif in_prompt_variable and line.strip() == "翻译结果：":
+                    break
+                elif in_prompt_variable:
+                    prompt_variable_part.append(line)
+            
+            prompt_variable_text = '\n'.join(prompt_variable_part)
+            
+            deduplicated_log += f"第 {i} 次翻译:\n{'-' * 30}\n"
+            deduplicated_log += f"原文:\n{prompt_variable_text}\n\n"
+            deduplicated_log += f"翻译结果:\n{output}\n\n"
+        
+        return deduplicated_log
+    
+    # 生成去重后的日志内容
+    deduplicated_content = deduplicate_prompts(prompts)
     
     with log_path.open("w", encoding="utf-8") as f:
         f.write(f"时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -456,12 +545,22 @@ def process_file(path: Path, model: str, temperature: float, max_tokens: int, ov
         f.write(f"输入文件: {path}\n")
         f.write(f"输出文件: {zh_path}\n")
         f.write(f"耗时: {cost:.1f}s\n")
+        f.write(f"模式: {mode}\n")
+        f.write(f"块数: {len(chunks)}\n")
+        # 写入 tokens 估计
+        if 'metas' in locals() and metas:
+            if len(metas) == 1:
+                m = metas[0] or {}
+                f.write(f"估算输入tokens: {m.get('estimated_input_tokens', 0)}\n")
+                f.write(f"预计输出上限tokens(含思考+译文): {m.get('estimated_output_tokens', 0)}\n")
+                f.write(f"max_context_length: {m.get('max_context_length', 0)}\n")
+                f.write(f"used_max_tokens: {m.get('used_max_tokens', 0)}\n")
+            else:
+                for idx, m in enumerate(metas, 1):
+                    m = m or {}
+                    f.write(f"[块{idx}] 估算输入tokens: {m.get('estimated_input_tokens', 0)}, 预计输出上限: {m.get('estimated_output_tokens', 0)}, used_max_tokens: {m.get('used_max_tokens', 0)}\n")
         f.write("=" * 50 + "\n")
-        f.write("完整Prompt(可能为多段拼接):\n")
-        f.write(full_prompt)
-        f.write("\n" + "=" * 50 + "\n")
-        f.write("完整Response:\n")
-        f.write(translation)
+        f.write(deduplicated_content)
 
     print(f"WRITE {zh_path} ({cost:.1f}s)")
 
@@ -489,6 +588,7 @@ def main() -> None:
     parser.add_argument("--model", default="Qwen/Qwen3-32B-AWQ")
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("--max-tokens", type=int, default=0, help="<=0 表示不限制（不传该参数）")
+    parser.add_argument("--max-context-length", type=int, default=None, help="模型的最大上下文长度，如果不指定则根据模型名称自动推断")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--log-dir", default="tasks/translation/logs")
     parser.add_argument("--terminology-file", type=Path, default=Path("tasks/translation/data/terminology.txt"))
@@ -503,6 +603,7 @@ def main() -> None:
     parser.add_argument("--fallback-on-context", action="store_true", help="上下文溢出时自动降级为分块")
     parser.add_argument("--limit", type=int, default=0, help="限制处理的文件数量，0表示不限制")
     parser.add_argument("--sample-file", type=Path, default=Path("tasks/translation/data/samples/sample.txt"), help="few-shot 示例文件")
+    parser.add_argument("--preface-file", type=Path, default=Path("tasks/translation/data/preface.txt"), help="翻译指令模板文件")
     args = parser.parse_args()
 
     files = expand_inputs(args.inputs)
@@ -539,6 +640,8 @@ def main() -> None:
             retry_wait=args.retry_wait,
             fallback_on_context=args.fallback_on_context,
             few_shot_samples=few_shot_samples,
+            max_context_length=args.max_context_length,
+            preface_file=str(args.preface_file),
         )
 
 
