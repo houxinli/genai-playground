@@ -54,18 +54,28 @@ def setup_logging(log_path: Optional[Path] = None, stream_output: bool = True) -
 
     return logger
 
-def log_message(logger: logging.Logger, message: str, level: str = "INFO"):
-    """统一的日志输出函数"""
+def log_message(logger: Optional[logging.Logger], message: str, level: str = "INFO"):
+    """统一的日志输出函数，支持logger为None的情况"""
     if level.upper() == "INFO":
-        logger.info(message)
+        print(f"[INFO] {message}")
+        if logger:
+            logger.info(message)
     elif level.upper() == "WARNING":
-        logger.warning(message)
+        print(f"[WARNING] {message}")
+        if logger:
+            logger.warning(message)
     elif level.upper() == "ERROR":
-        logger.error(message)
+        print(f"[ERROR] {message}")
+        if logger:
+            logger.error(message)
     elif level.upper() == "DEBUG":
-        logger.debug(message)
+        print(f"[DEBUG] {message}")
+        if logger:
+            logger.debug(message)
     else:
-        logger.info(message)
+        print(f"[{level}] {message}")
+        if logger:
+            logger.log(getattr(logging, level.upper(), logging.INFO), message)
 
     # 强制刷新输出
     sys.stdout.flush()
@@ -111,10 +121,127 @@ def parse_yaml_front_matter(text: str) -> Optional[Dict]:
     except Exception:
         return None
 
+def get_repetition_config(strict_mode: bool = False) -> dict:
+    """
+    获取重复检测配置
+    
+    Args:
+        strict_mode: 是否启用严格模式
+        
+    Returns:
+        包含重复检测参数的字典
+    """
+    if strict_mode:
+        return {
+            "max_repeat_chars": 5,      # 严格模式：单字符最多重复5次
+            "max_repeat_segments": 3,   # 严格模式：片段最多重复3次
+            "stream_threshold": 5,      # 严格模式：流式检测阈值5
+            "basic_char_threshold": 5,  # 严格模式：基础检测单字符阈值5
+        }
+    else:
+        return {
+            "max_repeat_chars": 10,     # 正常模式：单字符最多重复10次
+            "max_repeat_segments": 5,   # 正常模式：片段最多重复5次  
+            "stream_threshold": 8,      # 正常模式：流式检测阈值8
+            "basic_char_threshold": 8,  # 正常模式：基础检测单字符阈值8
+        }
+
+def detect_and_truncate_repetition(text: str, max_repeat_chars: int = 10, max_repeat_segments: int = 5) -> str:
+    """
+    检测并截断重复模式，防止无限重复输出
+    
+    Args:
+        text: 输入文本
+        max_repeat_chars: 单个字符最大连续重复次数
+        max_repeat_segments: 短片段最大重复次数
+    
+    Returns:
+        截断重复后的文本
+    """
+    if not text or len(text) < 10:  # 降低最小长度要求
+        return text
+    
+    # 1. 检测和截断单字符重复
+    result = []
+    i = 0
+    # print(f"    开始检测单字符重复，文本长度: {len(text)}")  # 可选的调试输出
+    
+    while i < len(text):
+        char = text[i]
+        count = 1
+        j = i + 1
+        
+        # 计算连续相同字符的数量
+        while j < len(text) and text[j] == char:
+            count += 1
+            j += 1
+        
+        # 如果重复次数超过阈值，截断到阈值
+        if count > max_repeat_chars:
+            result.append(char * max_repeat_chars)
+            print(f"    检测到字符 '{char}' 重复 {count} 次，截断到 {max_repeat_chars} 次")
+            # 如果检测到严重重复，直接截断整个文本到这里
+            if count > max_repeat_chars * 3:  # 如果重复超过阈值的3倍，可能是无限重复
+                print(f"    检测到严重重复，截断整个文本")
+                return ''.join(result)
+        else:
+            # if count > 1:  # 只在有重复时打印 - 注释掉以减少输出
+            #     print(f"    字符 '{char}' 重复 {count} 次 (正常范围)")
+            result.append(char * count)
+        
+        i = j
+    
+    text = ''.join(result)
+    
+    # 2. 检测和截断短片段重复
+    # 从文本末尾开始检查，因为重复通常出现在末尾
+    # print(f"    开始检测片段重复，文本长度: {len(text)}")  # 可选的调试输出
+    if len(text) > 20:  # 降低检查阈值
+        tail = text[-min(1000, len(text)):]  # 检查最后部分字符
+        
+        # 检测不同长度的重复片段
+        for segment_len in range(5, min(101, len(tail) // 2 + 1), 5):  # 5到100字符的片段
+            if segment_len > len(tail) // 2:
+                continue
+                
+            segment = tail[-segment_len:]
+            if not segment.strip():
+                continue
+                
+            # 计算该片段在整个尾部重复的次数
+            repeat_count = 0
+            search_text = tail
+            start_pos = 0
+            
+            # 使用简单的字符串计数方法
+            while True:
+                pos = search_text.find(segment, start_pos)
+                if pos == -1:
+                    break
+                repeat_count += 1
+                start_pos = pos + segment_len
+            
+            # 如果重复次数超过阈值，截断
+            if repeat_count > max_repeat_segments:
+                # 找到重复开始的位置
+                repeat_start = len(text) - (repeat_count * segment_len)
+                truncated_text = text[:repeat_start + (max_repeat_segments * segment_len)]
+                print(f"    检测到片段重复 {repeat_count} 次（长度 {segment_len}），截断到 {max_repeat_segments} 次")
+                print(f"    片段内容: '{segment}'")
+                print(f"    原文长度: {len(text)}, 截断后长度: {len(truncated_text)}")
+                return truncated_text
+            # elif repeat_count > 1:  # 注释掉以减少输出
+            #     print(f"    发现片段重复 {repeat_count} 次（长度 {segment_len}），在正常范围内")
+    
+    return text
+
 def clean_output_text(text: str) -> str:
     """清理输出文本，去除思考部分等"""
     if not text or not text.strip():
         return text
+    
+    # 首先检测和截断重复模式
+    text = detect_and_truncate_repetition(text)
     
     # 去除 <think>...</think> 部分
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
@@ -138,6 +265,7 @@ def clean_output_text(text: str) -> str:
 def check_translation_quality_with_llm(original_text: str, translated_text: str, model: str = "Qwen/Qwen3-32B", bilingual: bool = False) -> Tuple[bool, str]:
     """
     使用大模型检查翻译质量，特别关注最后部分的完整性
+    支持bilingual和单语模式
     返回: (is_good, reason)
     """
     if not translated_text or not translated_text.strip():
@@ -147,8 +275,28 @@ def check_translation_quality_with_llm(original_text: str, translated_text: str,
     original_end = original_text[-800:] if len(original_text) > 800 else original_text
     translated_end = translated_text[-800:] if len(translated_text) > 800 else translated_text
     
-    # 构建检测提示词
-    prompt = f"""检查以下日语原文最后部分和中文翻译最后部分，判断翻译是否完整正确。
+    # 根据模式调整检测提示词
+    if bilingual:
+        prompt = f"""检查以下日语原文最后部分和中文翻译最后部分（bilingual对照模式），判断翻译是否完整正确。
+
+原文最后部分：
+{original_end}
+
+翻译最后部分（bilingual格式）：
+{translated_end}
+
+判断标准：
+1. 翻译是否完整（没有遗漏原文内容）
+2. 翻译是否准确（没有错误）
+3. 是否正常结束（没有"以下省略"等标记）
+4. bilingual格式是否正确（日语原文后跟中文译文）
+
+如果翻译完整正确，回复：GOOD
+如果有问题，回复：BAD
+
+只回复GOOD或BAD。"""
+    else:
+        prompt = f"""检查以下日语原文最后部分和中文翻译最后部分，判断翻译是否完整正确。
 
 原文最后部分：
 {original_end}
@@ -177,7 +325,8 @@ def check_translation_quality_with_llm(original_text: str, translated_text: str,
         result = resp.choices[0].message.content.strip()
         
         if result.upper().startswith("GOOD"):
-            return True, "大模型评估：最后部分翻译质量良好"
+            mode_text = "bilingual对照模式" if bilingual else "单语模式"
+            return True, f"大模型评估：{mode_text}最后部分翻译质量良好"
         elif result.upper().startswith("BAD"):
             reason = result[3:].strip() if len(result) > 3 else "大模型评估：最后部分翻译质量不佳"
             return False, reason
@@ -414,7 +563,22 @@ def translate_with_local_llm(text: str, model: str, temperature: float, max_toke
         with open(preface_file, 'r', encoding='utf-8') as f:
             preface = f.read().strip() + "\n"
     else:
-        raise ValueError("preface_file 参数是必需的，请提供包含翻译指令的文件路径")
+        # 如果没有提供preface_file，使用默认的翻译指令
+        if bilingual:
+            preface = """请将以下日语文本忠实翻译为中文，并按照示例格式输出双语对照格式：
+- 输出格式：请严格按照示例格式，逐行输出日语原文+中文译文对照格式，即每行日语原文后紧跟对应的中文译文；
+- 严格保持原文的分段与分行，不合并、不省略、不添加解释；
+- 对话与引号样式对齐，空行位置保持不变；
+- 拟声词翻译规则：将日语拟声词翻译为对应的中文拟声词，如「どびゅびゅっ」→「噗呲呲」；若遇到难以对应到中文发音的孤立音节（如「っ」「ん」等），可适当省略，仅保留能对应的部分；
+- 断点词处理：对于「せ・ん・せ」这种带断点的词，先翻译完整词（如「先生」→「老师」），然后在中文词上添加断点（如「老・师」）；
+- 仅输出双语对照格式的翻译结果，不要额外说明或思考内容。\n\n"""
+        else:
+            preface = """请将以下日语文本忠实翻译为中文：
+- 严格保持原文的分段与分行，不合并、不省略、不添加解释；
+- 对话与引号样式对齐，空行位置保持不变；
+- 拟声词翻译规则：将日语拟声词翻译为对应的中文拟声词；
+- 断点词处理：对于带断点的词，先翻译完整词，然后在中文词上添加断点；
+- 仅输出翻译结果，不要额外说明或思考内容。\n\n"""
     if terminology:
         preface += "以下是术语对照表，请严格参照：\n" + terminology.strip() + "\n\n"
     
@@ -429,11 +593,8 @@ def translate_with_local_llm(text: str, model: str, temperature: float, max_toke
     
     # 估算输入tokens（粗略）：按字符数 * 0.7
     estimated_input_tokens = int(len(prompt) * 0.7)
-    if logger:
-        log_message(logger, f"调用模型，prompt长度: {len(prompt)}")
-        log_message(logger, f"完整prompt:\n{prompt}")
-    else:
-        print(f"    调用模型，prompt长度: {len(prompt)}")
+    log_message(logger, f"调用模型，prompt长度: {len(prompt)}")
+    log_message(logger, f"完整prompt:\n{prompt}")
     client = OpenAI(base_url="http://localhost:8000/v1", api_key="dummy")
     kwargs = {}
     if stop:
@@ -471,10 +632,7 @@ def translate_with_local_llm(text: str, model: str, temperature: float, max_toke
     }
     try:
         if stream:
-            if logger:
-                log_message(logger, f"开始流式调用...")
-            else:
-                print(f"    开始流式调用...")
+            log_message(logger, f"开始流式调用...")
             result = ""
             resp = client.chat.completions.create(
                 model=model,
@@ -484,35 +642,60 @@ def translate_with_local_llm(text: str, model: str, temperature: float, max_toke
                 stream=True,
                 **kwargs,
             )
+            
+            # 流式重复检测参数（根据严格模式调整）
+            repetition_buffer = ""
+            max_buffer_size = 500  # 保留最近500字符用于检测
+            # 根据模型参数中的严格模式调整阈值
+            # 注意：这里我们需要从外层传递strict_mode参数，暂时使用默认值
+            repetition_threshold = 8  # 连续重复阈值，更严格
+            
             for chunk in resp:
                 if chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
+                    
+                    # 检测实时重复
+                    temp_result = result + content
+                    repetition_buffer += content
+                    
+                    # 保持buffer大小
+                    if len(repetition_buffer) > max_buffer_size:
+                        repetition_buffer = repetition_buffer[-max_buffer_size:]
+                    
+                    # 检测单字符重复
+                    should_stop = False
+                    if len(repetition_buffer) >= repetition_threshold:
+                        # 检查最后的字符是否重复过多
+                        last_char = repetition_buffer[-1]
+                        consecutive_count = 0
+                        for i in range(len(repetition_buffer) - 1, -1, -1):
+                            if repetition_buffer[i] == last_char:
+                                consecutive_count += 1
+                            else:
+                                break
+                        
+                        if consecutive_count >= repetition_threshold:
+                            print(f"\n[检测到重复输出，停止生成] 字符 '{last_char}' 连续重复 {consecutive_count} 次")
+                            should_stop = True
+                    
+                    if should_stop:
+                        break
+                    
                     result += content
                     # 流式输出只在控制台显示，不记录到日志文件
                     print(content, end="", flush=True)
             print()  # 换行
             result = result.strip()
             # 在流式输出完成后，在控制台显示完整的翻译结果
-            if logger:
-                log_message(logger, f"翻译完成，结果长度: {len(result)}")
-            else:
-                print(f"    翻译完成，结果长度: {len(result)}")
+            log_message(logger, f"翻译完成，结果长度: {len(result)}")
             # 在控制台显示前几行作为预览
             lines = result.split('\n')
             preview_lines = lines[:10]  # 显示前10行
-            if logger:
-                log_message(logger, f"翻译结果预览（前10行）:")
-                for line in preview_lines:
-                    log_message(logger, f"    {line}")
-            else:
-                print(f"    翻译结果预览（前10行）:")
-                for line in preview_lines:
-                    print(f"        {line}")
+            log_message(logger, f"翻译结果预览（前10行）:")
+            for line in preview_lines:
+                log_message(logger, f"    {line}")
             if len(lines) > 10:
-                if logger:
-                    log_message(logger, f"    ... (还有 {len(lines) - 10} 行)")
-                else:
-                    print(f"        ... (还有 {len(lines) - 10} 行)")
+                log_message(logger, f"    ... (还有 {len(lines) - 10} 行)")
         else:
             resp = client.chat.completions.create(
                 model=model,
@@ -523,10 +706,7 @@ def translate_with_local_llm(text: str, model: str, temperature: float, max_toke
             )
             result = resp.choices[0].message.content.strip()
         
-        if logger:
-            log_message(logger, f"模型返回，结果长度: {len(result)}")
-        else:
-            print(f"    模型返回，结果长度: {len(result)}")
+        log_message(logger, f"模型返回，结果长度: {len(result)}")
         
         # 计算实际使用的token数
         actual_output_tokens = int(len(result) * 0.7)  # 粗略估算
@@ -542,10 +722,7 @@ def translate_with_local_llm(text: str, model: str, temperature: float, max_toke
         
         return result, prompt, token_meta
     except Exception as e:
-        if logger:
-            log_message(logger, f"模型调用失败: {e}", "ERROR")
-        else:
-            print(f"    模型调用失败: {e}")
+        log_message(logger, f"模型调用失败: {e}", "ERROR")
         raise
 
 
@@ -568,9 +745,9 @@ def looks_bad_output(text: str, original_text: str = "") -> bool:
             print(f"    looks_bad_output: 检测到重复片段，长度={w}")
             return True
     
-    # 2. 检测单字符过长重复（超过15次，之前是8次）
+    # 2. 检测单字符过长重复（超过8次，恢复更严格的检测）
     for ch in set(tail):
-        if ch * 15 in tail:  # 从8次改为15次
+        if ch * 8 in tail:  # 恢复为8次，更严格检测
             print(f"    looks_bad_output: 检测到单字符重复: {ch}")
             return True
     
@@ -633,6 +810,7 @@ def translate_chunk_with_retry(
     bilingual: bool = False,
     stream: bool = False,
     logger: Optional[logging.Logger] = None,
+    chunk_index: Optional[int] = None,
 ) -> Tuple[str, str, bool, Dict[str, int]]:
     """返回 (output, prompt, ok)。ok=False 表示建议降级分块/或重试失败。"""
     last_err = None
@@ -656,6 +834,8 @@ def translate_chunk_with_retry(
         "result_chars": 0,
     }
     
+    chunk_info = f"块 {chunk_index}" if chunk_index is not None else "块"
+    
     for attempt in range(1, max(1, retries) + 1):
         try:
             out, prompt, token_meta = translate_with_local_llm(
@@ -674,28 +854,54 @@ def translate_chunk_with_retry(
                 stream=stream,
                 logger=logger,
             )
-            if looks_bad_output(out, chunk_text):
-                print(f"    检测到坏输出，但仍保存结果")
-                # 即使检测到坏输出，也返回成功，让上层函数保存结果
-                return out, prompt, True, token_meta
-            return out, prompt, True, token_meta
+            
+            # 进行质量检测
+            if out and out.strip():
+                log_message(logger, f"    对{chunk_info}进行质量检测...", "INFO")
+                is_good, reason = check_translation_quality_with_llm(
+                    chunk_text, out, model, bilingual=bilingual
+                )
+                
+                if is_good:
+                    log_message(logger, f"    {chunk_info}质量检测通过: {reason}", "INFO")
+                    return out, prompt, True, token_meta
+                else:
+                    log_message(logger, f"    {chunk_info}质量检测失败: {reason}", "WARNING")
+                    if attempt < retries:
+                        log_message(logger, f"    质量不佳，重试{chunk_info} (尝试 {attempt + 1}/{retries})", "WARNING")
+                        time.sleep(retry_wait)
+                        continue
+                    else:
+                        log_message(logger, f"    {chunk_info}质量不佳但已达到最大重试次数，返回结果", "WARNING")
+                        return out, prompt, True, token_meta
+            else:
+                log_message(logger, f"    {chunk_info}翻译结果为空", "WARNING")
+                if attempt < retries:
+                    log_message(logger, f"    结果为空，重试{chunk_info} (尝试 {attempt + 1}/{retries})", "WARNING")
+                    time.sleep(retry_wait)
+                    continue
+                else:
+                    log_message(logger, f"    {chunk_info}多次重试仍为空，返回失败", "ERROR")
+                    return "", "", False, base_token_meta
+            
         except BadRequestError as e:  # 例如上下文溢出
             last_err = e
             msg = str(e).lower()
             if any(k in msg for k in ["context", "too many tokens", "maximum context length", "max_tokens must be"]):
                 # 上下文相关错误，提示外层降级为分段
-                print(f"    上下文溢出错误: {e}")
+                log_message(logger, f"    {chunk_info}上下文溢出错误: {e}", "ERROR")
                 return "", "", False, base_token_meta
-            print(f"    重试 {attempt}/{retries}: BadRequestError: {e}")
+            log_message(logger, f"    {chunk_info}重试 {attempt}/{retries}: BadRequestError: {e}", "WARNING")
             time.sleep(retry_wait)
             continue
         except Exception as e:
             last_err = e
-            print(f"    重试 {attempt}/{retries}: Exception: {e}")
+            log_message(logger, f"    {chunk_info}重试 {attempt}/{retries}: Exception: {e}", "WARNING")
             time.sleep(retry_wait)
             continue
+    
     # 多次失败，返回基础token信息
-    print(f"    所有重试都失败了，最后错误: {last_err}")
+    log_message(logger, f"    {chunk_info}所有重试都失败了，最后错误: {last_err}", "ERROR")
     return "", "", False, base_token_meta
 
 
@@ -986,7 +1192,7 @@ def process_file(path: Path, model: str, temperature: float, max_tokens: int, ov
         for i, ck in enumerate(active_chunks, 1):
             log_message(logger, f"处理第 {i}/{len(active_chunks)} 块，长度: {len(ck)}")
             out, prompt, ok, token_meta = translate_chunk_with_retry(
-                ck, model, temperature, max_tokens, terminology_txt, stop, frequency_penalty, presence_penalty, retries, retry_wait, few_shot_samples, max_context_length, preface_file, bilingual, stream, logger
+                ck, model, temperature, max_tokens, terminology_txt, stop, frequency_penalty, presence_penalty, retries, retry_wait, few_shot_samples, max_context_length, preface_file, bilingual, stream, logger, chunk_index=i
             )
             log_message(logger, f"第 {i} 块结果: ok={ok}, out_len={len(out)}, prompt_len={len(prompt)}")
             if not ok:
@@ -1103,7 +1309,7 @@ def main() -> None:
     parser.add_argument("--max-tokens", type=int, default=0, help="<=0 表示不限制（不传该参数）")
     parser.add_argument("--max-context-length", type=int, default=None, help="模型的最大上下文长度，如果不指定则根据模型名称自动推断")
     parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--log-dir", default="tasks/translation/logs")
+    parser.add_argument("--log-dir", default="logs")
     parser.add_argument("--terminology-file", type=Path, default=Path("tasks/translation/data/terminology.txt"))
     parser.add_argument("--chunk-size-chars", type=int, default=20000, help="分块模式下每次请求的最大字符数")
     parser.add_argument("--stop", nargs="*", default=["（未完待续）", "[END]"], help="生成停止词")
@@ -1121,6 +1327,7 @@ def main() -> None:
     parser.add_argument("--stream", action="store_true", help="启用流式输出，实时显示模型生成过程")
     parser.add_argument("--realtime-log", action="store_true", help="启用实时日志输出，同时显示在控制台和文件中")
     parser.add_argument("--no-llm-check", action="store_true", help="禁用大模型质量检测，使用基础检测")
+    parser.add_argument("--strict-repetition-check", action="store_true", help="启用严格重复检测，更早发现并截断重复输出")
     args = parser.parse_args()
 
     files = expand_inputs(args.inputs)

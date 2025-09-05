@@ -3,6 +3,10 @@ set -euo pipefail
 
 # vLLM 服务管理脚本 - 带时间戳日志
 
+# 停止时默认清理显存，使用 CLEAN_GPU=0 可跳过；CLEAN_WAIT 自定义等待秒数
+CLEAN_GPU=${CLEAN_GPU:-1}
+CLEAN_WAIT=${CLEAN_WAIT:-20}
+
 LOG_DIR="logs"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 LOG_FILE="$LOG_DIR/vllm-$TIMESTAMP.log"
@@ -21,8 +25,8 @@ create_latest_link() {
 _start_fg() {
     echo "📝 日志文件: $LOG_FILE"
     create_latest_link
-    # 伪TTY -> 标准输出 -> 行缓冲 -> 追加日志（保留进度条，实时写入）
-    script -q -f -c "./scripts/serve_vllm.sh" /dev/stdout | stdbuf -oL -eL tee -a "$LOG_FILE"
+    # 用 script 直接写日志文件（script 自身会同时把内容回显到终端），避免 stdout 被重复写入
+    script -q -f -c "./scripts/serve_vllm.sh" "$LOG_FILE"
 }
 
 # 启动（后台 tmux）
@@ -32,9 +36,9 @@ _start_bg() {
     SESSION=${SESSION:-vllm}
     tmux has-session -t "$SESSION" 2>/dev/null && tmux kill-session -t "$SESSION"
     export LOG_FILE
-    # 伪TTY -> 标准输出 -> 行缓冲 -> 追加日志（保留进度条，实时写入）
+    # 在 tmux 中用 script 直接写日志文件，避免重复
     tmux new-session -d -s "$SESSION" \
-        "bash -lc 'script -q -f -c ./scripts/serve_vllm.sh /dev/stdout | stdbuf -oL -eL tee -a \"$LOG_FILE\"'"
+        "bash -lc 'script -q -f -c ./scripts/serve_vllm.sh \"$LOG_FILE\"'"
     echo "$SESSION" > "$PID_FILE"
     echo "✅ 服务已启动，tmux session: $SESSION"
     echo "💡 查看实时进度：tmux attach -t $SESSION  （退出按 Ctrl-b d）"
@@ -58,7 +62,7 @@ _wait_gpu_free() {
             break
         fi
         if [ "$waited" -ge "$timeout_sec" ]; then
-            echo "⚠️  显存仍未完全释放（超过 ${threshold_mb}MiB），继续启动..."
+            echo "⚠️  显存仍未完全释放（超过 ${threshold_mb}MiB），继续..."
             break
         fi
         sleep 2
@@ -172,6 +176,19 @@ case "${1:-}" in
         else
             echo "⚠️  PID 文件不存在"
         fi
+        # 默认：清理显存（可用 CLEAN_GPU=0 跳过）
+        if [ "$CLEAN_GPU" = "1" ]; then
+            echo "🧹 清理当前用户的 GPU 计算进程..."
+            ME=$(id -u)
+            PIDS=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader,nounits 2>/dev/null | xargs -r -n1 -I{} sh -c 'ps -o uid= -p {} | grep -qw "$ME" && echo {}' || true)
+            if [ -n "${PIDS:-}" ]; then
+                echo "⚠️  终止进程: $PIDS"
+                kill -9 $PIDS 2>/dev/null || true
+            fi
+            echo "⏳ 等待显存释放..."
+            _wait_gpu_free "$CLEAN_WAIT" 800
+            echo "✅ 显存清理完成"
+        fi
         ;;
         
     status)
@@ -193,8 +210,8 @@ case "${1:-}" in
     logs-requests)
         if [ -f "$LATEST_LOG" ]; then
             echo "📝 查看请求日志: $LATEST_LOG"
-            echo "🔍 过滤包含 'request' 或 'completion' 的日志行..."
-            tail -f "$LATEST_LOG" | stdbuf -oL -eL grep -E "(request|completion|generation|token|latency)"
+            echo "🔍 过滤包含请求/响应/耗时等关键字（不区分大小写）..."
+            tail -f "$LATEST_LOG" | stdbuf -oL -eL grep -Ei "(request|response|completion|outputs|prompt|/v1/(chat|completions)|tokens?|latency|duration|throughput|generation)"
         else
             echo "❌ 日志文件不存在"
         fi
@@ -239,7 +256,7 @@ case "${1:-}" in
         echo "  run           - 根据 MODE=fg/bg 启动服务（默认 fg）"
         echo "  start         - 前台启动 vLLM 服务（同时记录日志）"
         echo "  start-bg      - 后台启动 vLLM 服务（tmux+script 保留进度条）"
-        echo "  stop          - 停止 vLLM 服务（基于 tmux session）"
+        echo "  stop          - 停止 vLLM 服务（基于 tmux session），默认清理显存（CLEAN_GPU=0 可跳过）"
         echo "  restart       - 重启 vLLM 服务（MODE=fg/bg，默认 bg）"
         echo "  status        - 查看服务状态（基于 tmux session）"
         echo "  logs           - 实时查看最新日志"
@@ -256,6 +273,8 @@ case "${1:-}" in
         echo "  - MODE=fg/bg  选择前台或后台"
         echo "  - DEBUG=1     开启更详细日志（传递给 serve_vllm.sh）"
         echo "  - MODEL=...   选择模型，例如 Qwen/Qwen3-32B 或 Qwen/Qwen3-32B-AWQ"
+        echo "  - CLEAN_GPU=0 跳过停止时的显存清理（默认会清理）"
+        echo "  - CLEAN_WAIT=N 等待显存释放的最长秒数（默认 20）"
         exit 1
         ;;
 esac

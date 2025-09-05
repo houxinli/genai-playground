@@ -1,0 +1,9 @@
+#!/bin/bash
+# 翻译脚本的便捷调用器
+
+# 切换到脚本所在目录
+cd "$(dirname "$0")"
+
+# 调用src中的翻译脚本
+python src/translate_v3.py "$@"
+
