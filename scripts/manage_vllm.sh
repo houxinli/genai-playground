@@ -21,7 +21,8 @@ create_latest_link() {
 _start_fg() {
     echo "📝 日志文件: $LOG_FILE"
     create_latest_link
-    script -q -f -c "./scripts/serve_vllm.sh" "$LOG_FILE"
+    # 伪TTY -> 标准输出 -> 行缓冲 -> 追加日志（保留进度条，实时写入）
+    script -q -f -c "./scripts/serve_vllm.sh" /dev/stdout | stdbuf -oL -eL tee -a "$LOG_FILE"
 }
 
 # 启动（后台 tmux）
@@ -31,8 +32,9 @@ _start_bg() {
     SESSION=${SESSION:-vllm}
     tmux has-session -t "$SESSION" 2>/dev/null && tmux kill-session -t "$SESSION"
     export LOG_FILE
+    # 伪TTY -> 标准输出 -> 行缓冲 -> 追加日志（保留进度条，实时写入）
     tmux new-session -d -s "$SESSION" \
-        "script -q -f -c 'bash -lc ./scripts/serve_vllm.sh' \"$LOG_FILE\""
+        "bash -lc 'script -q -f -c ./scripts/serve_vllm.sh /dev/stdout | stdbuf -oL -eL tee -a \"$LOG_FILE\"'"
     echo "$SESSION" > "$PID_FILE"
     echo "✅ 服务已启动，tmux session: $SESSION"
     echo "💡 查看实时进度：tmux attach -t $SESSION  （退出按 Ctrl-b d）"
@@ -192,7 +194,7 @@ case "${1:-}" in
         if [ -f "$LATEST_LOG" ]; then
             echo "📝 查看请求日志: $LATEST_LOG"
             echo "🔍 过滤包含 'request' 或 'completion' 的日志行..."
-            tail -f "$LATEST_LOG" | grep -E "(request|completion|generation|token|latency)"
+            tail -f "$LATEST_LOG" | stdbuf -oL -eL grep -E "(request|completion|generation|token|latency)"
         else
             echo "❌ 日志文件不存在"
         fi

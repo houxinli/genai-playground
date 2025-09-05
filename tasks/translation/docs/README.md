@@ -128,5 +128,4 @@ tail -f tasks/translation/logs/translation.log
 
 ---
 
-**最后更新**: 2024-09-01  
-**维护者**: lujiang
+**最后更新**: 2024-09-01
