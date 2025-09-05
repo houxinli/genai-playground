@@ -12,32 +12,42 @@ genai-playground/
 ├── README.md                   # 项目入口文档
 ├── .gitignore                  # Git 忽略文件
 ├── docs/                       # 项目文档目录
-│   ├── JOURNAL.md              # 项目历史记录（已删除，内容迁移到 journal/）
 │   ├── journal/                # 按日期组织的项目日志
 │   │   ├── README.md           # Journal 索引
 │   │   ├── 2024-08-28.md       # 项目启动
 │   │   ├── 2024-09-01.md       # 项目成果
 │   │   ├── 2025-09-02.md       # 翻译服务与脚本收敛
 │   │   ├── 2025-09-03.md       # vLLM 前台可观测+tmux后台
+│   │   ├── 2025-09-05.md       # 翻译脚本重构与重复检测
 │   │   ├── 2025-09-04.md       # 翻译脚本增强与配置优化
 │   │   └── technical-docs.md   # 技术文档补充
 │   └── AGENT_CONTEXT.md        # Agent 对话上下文（本文件）
+├── .cursor/                    # Cursor 配置目录
+│   └── rules/                  # Cursor 规则文件
+│       └── organize-progress.mdc # 工作流程规则
 ├── scripts/                    # 通用脚本目录
 │   ├── manage_vllm.sh         # vLLM 服务管理脚本
 │   ├── serve_vllm.sh          # vLLM 服务启动脚本
 │   ├── check_vllm.py          # vLLM 健康检查脚本
 │   └── monitor_translation.sh  # 翻译进度监控脚本
 ├── tasks/translation/          # 翻译任务目录
-│   ├── scripts/               # 翻译相关脚本
-│   │   ├── test_translation.py # 通用翻译测试脚本
-│   │   ├── translate_pixiv_v1.py # Pixiv 批量翻译脚本
-│   │   └── count_tokens.py     # Token 计数工具
+│   ├── src/                   # 模块化翻译脚本源码
+│   │   ├── core/              # 核心功能模块
+│   │   │   ├── translator.py  # 翻译核心逻辑
+│   │   │   ├── quality_checker.py # 质量检测
+│   │   │   ├── streaming_handler.py # 流式处理
+│   │   │   └── pipeline.py    # 翻译流水线
+│   │   ├── cli/               # 命令行接口
+│   │   └── translate_v3.py    # 主翻译脚本
+│   ├── translate              # 便捷调用器
 │   ├── data/                  # 数据目录
 │   │   ├── input/             # 输入文件
 │   │   ├── output/            # 输出文件
 │   │   ├── samples/           # 示例文件
 │   │   ├── pixiv/             # Pixiv 小说数据
 │   │   └── terminology.txt    # 术语对照表
+│   ├── docs/                  # 翻译任务文档
+│   │   └── repetition-detection.md # 重复检测功能说明
 │   └── logs/                  # 翻译任务日志
 └── logs/                      # 主项目日志目录
 ```
@@ -256,7 +266,21 @@ gpustat
 nvidia-smi
 ```
 
+## 📋 工作流程规则
+
+当用户说"整理进展"时，请按照 `.cursor/rules/organize-progress.mdc` 中的详细流程执行：
+
+1. **检查当前状态** - 查看 git 状态和变更
+2. **分析变更内容** - 识别主要变更类别
+3. **更新项目日志** - 在 `docs/journal/` 下创建/更新日志
+4. **更新相关文档** - 更新 AGENT_CONTEXT.md 等
+5. **清理敏感信息** - 移除机器路径、用户名等
+6. **准备 commit message** - 按模板格式准备
+7. **执行提交** - 完成 git commit
+
+详细规则请参考：`.cursor/rules/organize-progress.mdc`
+
 ---
 
 **项目状态**: ✅ 运行中  
-**最后更新**: 2025-09-04
+**最后更新**: 2025-09-05
