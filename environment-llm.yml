@@ -187,4 +187,4 @@ dependencies:
       - xgrammar==0.1.19
       - xxhash==3.5.0
       - yarl==1.20.1
-prefix: /home/lujiang/.conda/envs/llm
+prefix: /path/to/your/conda/envs/llm
