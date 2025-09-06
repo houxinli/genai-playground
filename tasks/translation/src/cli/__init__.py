@@ -34,7 +34,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--line-overlap-lines", dest="line_overlap_lines", type=int, default=0, help="行级分块重叠（行）")
     
     # bilingual-simple模式配置
-    parser.add_argument("--line-batch-size-lines", dest="line_batch_size_lines", type=int, default=12, help="简化双语模式每批翻译的行数")
+    parser.add_argument("--line-batch-size-lines", dest="line_batch_size_lines", type=int, default=50, help="简化双语模式每批翻译的行数（基于token分析优化）")
     parser.add_argument("--context-lines", dest="context_lines", type=int, default=3, help="简化双语模式上下文行数（前后各N行）")
     parser.add_argument("--bilingual-simple-temperature", dest="bilingual_simple_temperature", type=float, default=0.0, help="简化双语模式温度（建议0.0）")
     parser.add_argument("--bilingual-simple-top-p", dest="bilingual_simple_top_p", type=float, default=1.0, help="简化双语模式top_p（建议1.0）")

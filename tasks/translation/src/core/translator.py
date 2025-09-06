@@ -13,7 +13,7 @@ from openai import BadRequestError
 from .config import TranslationConfig
 from .logger import UnifiedLogger
 from .quality_checker import QualityChecker
-from ..utils.text import clean_output_text, detect_and_truncate_repetition
+from ..utils.text import clean_output_text, detect_and_truncate_repetition, calculate_max_tokens_for_messages, log_model_call
 from .streaming_handler import StreamingHandler
 from .profile_manager import ProfileManager, GenerationParams
 
@@ -131,7 +131,7 @@ class Translator:
         
         try:
             # 基于消息计算生成上限
-            allowed = self._allowed_from_messages(messages, requested_max_tokens=max_tokens, cap=None)
+            allowed = self._calculate_max_tokens(messages, requested_max_tokens=max_tokens, cap=None)
             max_tokens = allowed
             # 使用统一的流式输出处理器
             try:
@@ -153,10 +153,8 @@ class Translator:
                 msg = str(e)
                 if "max_tokens" in msg or "max_completion_tokens" in msg:
                     # 降档到更保守上限
-                    estimated_prompt_tokens = self._estimate_prompt_tokens(messages)
-                    max_context_length = self.config.get_max_context_length()
-                    safe_allowed = max(1024, int((max_context_length - estimated_prompt_tokens) * 0.6) - 256)
-                    max_tokens = min(max_tokens, safe_allowed)
+                    safe_allowed = self._calculate_max_tokens(messages, requested_max_tokens=max_tokens, cap=int(max_tokens * 0.6))
+                    max_tokens = safe_allowed
                     self.logger.warning(f"max_tokens 调整为保守值: {max_tokens} 后重试流式调用")
                     from .streaming_handler import StreamingHandler
                     retry_params = self.profile_manager.get_generation_params(
@@ -185,25 +183,19 @@ class Translator:
         
         try:
             # 基于消息计算生成上限
-            max_tokens = self._allowed_from_messages(messages, requested_max_tokens=max_tokens, cap=None)
+            max_tokens = self._calculate_max_tokens(messages, requested_max_tokens=max_tokens, cap=None)
             # 记录调用参数
-            try:
-                messages_len = len(str(messages))
-                messages_cnt = len(messages) if isinstance(messages, list) else 1
-                self.logger.info(
-                    "调用参数(非流式): model=%s, messages=%s (chars=%s), temperature=%.3f, top_p=%s, max_tokens=%s, "
-                    "freq_penalty=%.2f, presence_penalty=%.2f",
-                    self.config.model,
-                    messages_cnt,
-                    messages_len,
-                    self.config.temperature,
-                    self.config.top_p if self.config.top_p is not None else "None",
-                    max_tokens,
-                    self.config.frequency_penalty,
-                    self.config.presence_penalty,
-                )
-            except Exception:
-                pass
+            log_model_call(
+                self.logger,
+                self.config.model,
+                messages,
+                max_tokens,
+                self.config.temperature,
+                self.config.top_p,
+                self.config.frequency_penalty,
+                self.config.presence_penalty,
+                "非流式"
+            )
             try:
                 resp = self.client.chat.completions.create(
                     model=self.config.model,
@@ -219,10 +211,8 @@ class Translator:
                 msg = str(e)
                 if "max_tokens" in msg or "max_completion_tokens" in msg:
                     # 重新估算更保守上限
-                    estimated_prompt_tokens = self._estimate_prompt_tokens(messages)
-                    max_context_length = self.config.get_max_context_length()
-                    safe_allowed = max(1024, int((max_context_length - estimated_prompt_tokens) * 0.6) - 256)
-                    max_tokens = min(max_tokens, safe_allowed)
+                    safe_allowed = self._calculate_max_tokens(messages, requested_max_tokens=max_tokens, cap=int(max_tokens * 0.6))
+                    max_tokens = safe_allowed
                     self.logger.warning(f"max_tokens 调整为保守值: {max_tokens} 后重试非流式调用")
             resp = self.client.chat.completions.create(
                 model=self.config.model,
@@ -341,7 +331,7 @@ class Translator:
         try:
             yaml_prof = self.profile_manager.get_profile("yaml")
             # 固定参数：T=0.0, top_p=1.0, freq=0.0, presence=0.0, 无重复惩罚，max_tokens=800，stop=None
-            allowed = self._allowed_from_messages(messages, requested_max_tokens=800, cap=800)
+            allowed = self._calculate_max_tokens(messages, requested_max_tokens=800, cap=800)
             from .streaming_handler import StreamingHandler
             params = self.profile_manager.get_generation_params(
                 "yaml",
@@ -407,7 +397,7 @@ class Translator:
         # 调用
         try:
             # 固定参数：T=0.0, top_p=1.0, freq=0.0, presence=0.0, 无重复惩罚，max_tokens=800，stop=None
-            allowed = self._allowed_from_messages(messages, requested_max_tokens=800, cap=800)
+            allowed = self._calculate_max_tokens(messages, requested_max_tokens=800, cap=800)
             from .streaming_handler import StreamingHandler
             params = self.profile_manager.get_generation_params(
                 "yaml",
@@ -453,7 +443,7 @@ class Translator:
             body_prof = self.profile_manager.get_profile("body")
             # 生成上限
             cap_tokens = int(body_prof.get("cap_tokens", 2000))
-            allowed = self._allowed_from_messages(messages, requested_max_tokens=cap_tokens, cap=cap_tokens)
+            allowed = self._calculate_max_tokens(messages, requested_max_tokens=cap_tokens, cap=cap_tokens)
             # 采样参数（从 profile 应用）
             temperature = float(body_prof.get("temperature", self.config.temperature))
             top_p = float(body_prof.get("top_p", self.config.top_p))
@@ -486,36 +476,16 @@ class Translator:
             self.logger.error(f"正文翻译失败: {e}")
             return "", "", False, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     
-    # ===== 抽取的通用工具方法 =====
-    def _estimate_prompt_tokens(self, messages: list) -> int:
-        try:
-            return len(str(messages))
-        except Exception:
-            return 0
-
-    def _allowed_from_messages(self, messages: list, requested_max_tokens: int = 0, cap: Optional[int] = None) -> int:
-        max_context_length = self.config.get_max_context_length()
-        estimated_prompt_tokens = self._estimate_prompt_tokens(messages)
-        allowed = int((max_context_length - estimated_prompt_tokens) * 0.95) - 128
-        if allowed < 256:
-            allowed = 256
-        if isinstance(requested_max_tokens, int) and requested_max_tokens > 0:
-            allowed = min(allowed, requested_max_tokens)
-        if isinstance(cap, int) and cap > 0:
-            allowed = min(allowed, cap)
-        return allowed
-
-    def _log_nonstream_call(self, messages: list, max_tokens: int) -> None:
-        try:
-            messages_len = len(str(messages))
-            messages_cnt = len(messages) if isinstance(messages, list) else 1
-            self.logger.info(
-                f"调用参数(非流式): model={self.config.model}, messages={messages_cnt} (chars={messages_len}), "
-                f"temperature={self.config.temperature:.3f}, top_p={self.config.top_p if self.config.top_p is not None else 'None'}, max_tokens={max_tokens}, "
-                f"freq_penalty={self.config.frequency_penalty:.2f}, presence_penalty={self.config.presence_penalty:.2f}"
-            )
-        except Exception:
-            pass
+    # ===== 工具方法 =====
+    def _calculate_max_tokens(self, messages: list, requested_max_tokens: int = 0, cap: Optional[int] = None) -> int:
+        """计算安全的max_tokens值"""
+        return calculate_max_tokens_for_messages(
+            messages, 
+            self.config.model,
+            self.config.get_max_context_length(),
+            requested_max_tokens,
+            cap
+        )
     
     def translate_lines_simple(self, target_lines: List[str], context_lines: List[str] = None) -> Tuple[List[str], str, bool, Dict[str, int]]:
         """
@@ -651,8 +621,19 @@ class Translator:
         return [{"role": "user", "content": content}]
     
     def _estimate_simple_max_tokens(self, target_lines: List[str]) -> int:
-        """估算简化翻译的max_tokens"""
-        # 基于目标行数估算，每行约100-150个token
-        estimated_output = len(target_lines) * 150
-        # 加上更多缓冲，确保不会截断
-        return min(estimated_output + 1000, 6000)
+        """估算简化翻译的max_tokens（使用准确tokenizer）"""
+        from ..utils.text.token_analyzer import get_token_analyzer
+        
+        try:
+            analyzer = get_token_analyzer(self.config.model)
+            estimation = analyzer.estimate_batch_tokens(target_lines)
+            
+            # 使用建议的max_tokens，但不超过6000
+            suggested_max = estimation["suggested_max_tokens"]
+            return min(suggested_max, 6000)
+            
+        except Exception as e:
+            self.logger.warning(f"Token估算失败，使用回退方法: {e}")
+            # 回退到简单估算
+            estimated_output = len(target_lines) * 150
+            return min(estimated_output + 1000, 6000)
