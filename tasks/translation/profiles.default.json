@@ -1,0 +1,51 @@
+{
+  "yaml": {
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "frequency_penalty": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "no_repeat_ngram_size": 0,
+    "max_tokens": 800,
+    "stop": null,
+    "watchdog_timeout_s": 180,
+    "log_prefix": "YAML翻译"
+  },
+  "body": {
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "frequency_penalty": 0.3,
+    "presence_penalty": 0.2,
+    "repetition_penalty": 1.1,
+    "no_repeat_ngram_size": 8,
+    "max_tokens": 2000,
+    "stop": ["（未完待续）", "[END]", "<|im_end|>", "</s>"],
+    "watchdog_timeout_s": 0,
+    "log_prefix": "正文翻译"
+  },
+  "bilingual_simple": {
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "frequency_penalty": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "no_repeat_ngram_size": 0,
+    "max_tokens": 6000,
+    "stop": null,
+    "watchdog_timeout_s": 120,
+    "log_prefix": "简化翻译",
+    "enable_repeat_guard": true
+  },
+  "quality_check": {
+    "temperature": 0.1,
+    "top_p": 0.8,
+    "frequency_penalty": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "no_repeat_ngram_size": 0,
+    "max_tokens": 500,
+    "stop": null,
+    "watchdog_timeout_s": 30,
+    "log_prefix": "质量检测"
+  }
+}

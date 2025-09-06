@@ -48,11 +48,16 @@ class UnifiedLogger:
         # 创建日志目录
         log_dir.mkdir(parents=True, exist_ok=True)
         
-        # 生成精简日志文件名：translation_<stem>_<YYYYMMDD-HHMMSS>.log
+        # 生成日志文件名
         base_name = Path(file_path).stem
         safe_name = base_name.replace(' ', '_')[:60]  # 控制长度，避免过长
         ts = datetime.now().strftime('%Y%m%d-%H%M%S')
-        log_file = log_dir / f"translation_{safe_name}_{ts}.log"
+        
+        # 在debug模式下，使用与输出文件相同的命名规则
+        if hasattr(cls, '_debug_mode') and cls._debug_mode:
+            log_file = log_dir / f"{safe_name}_{ts}_bilingual.log"
+        else:
+            log_file = log_dir / f"translation_{safe_name}_{ts}.log"
         
         # 设置日志器
         logger = logging.getLogger(f'translation_{file_path.stem}')
