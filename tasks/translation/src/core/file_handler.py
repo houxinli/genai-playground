@@ -11,6 +11,7 @@ from typing import List, Tuple, Optional, Dict
 from .config import TranslationConfig
 from .logger import UnifiedLogger
 from .quality_checker import QualityChecker
+from ..utils.file import parse_yaml_front_matter
 
 
 class FileHandler:
@@ -54,7 +55,7 @@ class FileHandler:
             return False
         
         # 解析YAML front matter
-        yaml_data, text_content = self._parse_yaml_front_matter(content)
+        yaml_data, text_content = parse_yaml_front_matter(content)
         
         # 显示文章信息
         self._log_article_info(yaml_data, len(text_content))
@@ -135,23 +136,6 @@ class FileHandler:
         except:
             return False
     
-    def _parse_yaml_front_matter(self, content: str) -> Tuple[Optional[Dict], str]:
-        """解析YAML front matter"""
-        if not content.startswith('---'):
-            return None, content
-        
-        try:
-            parts = content.split('---', 2)
-            if len(parts) < 3:
-                return None, content
-            
-            yaml_content = parts[1].strip()
-            text_content = parts[2].strip()
-            
-            yaml_data = yaml.safe_load(yaml_content)
-            return yaml_data, text_content
-        except:
-            return None, content
     
     def _log_article_info(self, yaml_data: Optional[Dict], text_length: int) -> None:
         """记录文章信息"""

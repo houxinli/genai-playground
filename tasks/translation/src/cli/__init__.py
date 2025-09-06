@@ -16,18 +16,28 @@ def create_argument_parser() -> argparse.ArgumentParser:
     
     # 模型配置
     parser.add_argument("--model", default="Qwen/Qwen3-32B", help="使用的模型名称")
-    parser.add_argument("--temperature", type=float, default=0.1, help="生成温度")
+    parser.add_argument("--temperature", type=float, default=0.7, help="生成温度")
+    parser.add_argument("--top-p", dest="top_p", type=float, default=0.9, help="nucleus sampling top_p")
     parser.add_argument("--max-tokens", type=int, default=0, help="最大生成token数，<=0 表示不限制")
     parser.add_argument("--max-context-length", type=int, default=None, help="模型的最大上下文长度")
     
     # 翻译模式配置
     parser.add_argument("--mode", choices=["full", "chunked"], default="full", help="翻译模式")
     parser.add_argument("--bilingual", action="store_true", help="启用双语对照模式")
+    parser.add_argument("--bilingual-simple", dest="bilingual_simple", action="store_true", help="启用简化双语模式（小批量翻译+代码拼接）")
     parser.add_argument("--stream", action="store_true", help="启用流式输出")
     
     # 分块配置
     parser.add_argument("--chunk-size-chars", type=int, default=20000, help="分块大小（字符）")
     parser.add_argument("--overlap-chars", type=int, default=1000, help="分块重叠大小（字符）")
+    parser.add_argument("--line-chunk-size-lines", dest="line_chunk_size_lines", type=int, default=0, help="行级分块大小（行），>0 时优先生效")
+    parser.add_argument("--line-overlap-lines", dest="line_overlap_lines", type=int, default=0, help="行级分块重叠（行）")
+    
+    # bilingual-simple模式配置
+    parser.add_argument("--line-batch-size-lines", dest="line_batch_size_lines", type=int, default=12, help="简化双语模式每批翻译的行数")
+    parser.add_argument("--context-lines", dest="context_lines", type=int, default=3, help="简化双语模式上下文行数（前后各N行）")
+    parser.add_argument("--bilingual-simple-temperature", dest="bilingual_simple_temperature", type=float, default=0.0, help="简化双语模式温度（建议0.0）")
+    parser.add_argument("--bilingual-simple-top-p", dest="bilingual_simple_top_p", type=float, default=1.0, help="简化双语模式top_p（建议1.0）")
     
     # 重试配置
     parser.add_argument("--retries", type=int, default=3, help="重试次数")
@@ -41,12 +51,18 @@ def create_argument_parser() -> argparse.ArgumentParser:
     # 文件配置
     parser.add_argument("--overwrite", action="store_true", help="覆盖已存在的输出文件")
     parser.add_argument("--log-dir", default="logs", help="日志目录")
+    parser.add_argument("--profiles-file", type=Path, default=None, help="可选：分节超参配置 JSON 文件路径")
     parser.add_argument("--terminology-file", type=Path, help="术语文件路径")
     parser.add_argument("--sample-file", type=Path, help="示例文件路径")
     parser.add_argument("--preface-file", type=Path, help="前言文件路径")
+    # 独立 YAML/正文提示资产（可选）
+    parser.add_argument("--preface-yaml-file", type=Path, default=None, help="YAML 专用前言提示文件路径")
+    parser.add_argument("--sample-yaml-file", type=Path, default=None, help="YAML 专用示例文件路径")
+    parser.add_argument("--preface-body-file", type=Path, default=None, help="正文专用前言提示文件路径")
+    parser.add_argument("--sample-body-file", type=Path, default=None, help="正文专用示例文件路径")
     
     # 生成参数
-    parser.add_argument("--stop", nargs="*", default=["（未完待续）", "[END]"], help="停止词")
+    parser.add_argument("--stop", nargs="*", default=["（未完待续）", "[END]", "<|im_end|>", "</s>"], help="停止词")
     parser.add_argument("--frequency-penalty", type=float, default=0.3, help="频率惩罚")
     parser.add_argument("--presence-penalty", type=float, default=0.2, help="存在惩罚")
     
@@ -56,6 +72,9 @@ def create_argument_parser() -> argparse.ArgumentParser:
     
     # 处理限制
     parser.add_argument("--limit", type=int, default=0, help="限制处理的文件数量")
+
+    # 仅处理元数据（YAML front matter）
+    parser.add_argument("--metadata-only", action="store_true", help="仅翻译 YAML front matter，跳过正文")
     
     # 输入文件
     parser.add_argument("inputs", nargs="+", help="输入文件/目录/通配符")
@@ -98,6 +117,8 @@ def validate_args(args: argparse.Namespace) -> List[str]:
     
     if args.preface_file and not args.preface_file.exists():
         errors.append(f"前言文件不存在: {args.preface_file}")
+    if args.profiles_file and not args.profiles_file.exists():
+        errors.append(f"profiles 文件不存在: {args.profiles_file}")
     
     return errors
 
@@ -122,3 +143,12 @@ def setup_default_paths(args: argparse.Namespace) -> None:
             args.preface_file = base_dir / "data" / "preface_bilingual.txt"
         else:
             args.preface_file = base_dir / "data" / "preface.txt"
+
+    # 设置 YAML/正文专用前言与示例（可选默认）
+    if not getattr(args, 'preface_yaml_file', None):
+        args.preface_yaml_file = base_dir / "data" / "preface_yaml.txt"
+    if not getattr(args, 'preface_body_file', None):
+        args.preface_body_file = base_dir / "data" / "preface_body.txt"
+    if not getattr(args, 'sample_yaml_file', None):
+        args.sample_yaml_file = base_dir / "data" / "samples" / "sample_yaml.txt"
+    # 示例可选：不强制存在
