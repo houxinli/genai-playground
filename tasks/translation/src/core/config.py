@@ -31,7 +31,7 @@ class TranslationConfig:
     line_overlap_lines: int = 0
     
     # bilingual-simple模式配置
-    line_batch_size_lines: int = 20  # 每批翻译的行数
+    line_batch_size_lines: int = 50  # 每批翻译的行数（基于token分析优化）
     context_lines: int = 3  # 上下文行数（前后各3行）
     
     # 重试配置
