@@ -5,6 +5,7 @@
 
 import re
 import json
+from pathlib import Path
 from typing import Tuple, Optional
 from openai import OpenAI
 from openai import BadRequestError
@@ -12,6 +13,7 @@ from openai import BadRequestError
 from .config import TranslationConfig
 from .streaming_handler import StreamingHandler
 from .profile_manager import ProfileManager, GenerationParams
+from .logger import UnifiedLogger
 
 
 class QualityChecker:
@@ -46,12 +48,17 @@ class QualityChecker:
         if not translated_text or not translated_text.strip():
             return False, "翻译结果为空"
         
-        # 检查长度比例
-        if len(translated_text) < len(original_text) * 0.3:
-            return False, "翻译结果过短"
-        
-        if len(translated_text) > len(original_text) * 3:
-            return False, "翻译结果过长"
+        # 检查长度比例（utils优先）
+        try:
+            from ..utils.validation.length_check import validate_length_ratio
+            ok_len, reason_len = validate_length_ratio(original_text, translated_text, 0.3, 3.0)
+            if not ok_len:
+                return False, reason_len
+        except Exception:
+            if len(translated_text) < len(original_text) * 0.3:
+                return False, "翻译结果过短"
+            if len(translated_text) > len(original_text) * 3:
+                return False, "翻译结果过长"
         
         # 检查错误模式
         error_patterns = [
@@ -67,8 +74,9 @@ class QualityChecker:
             if pattern in translated_text:
                 return False, f"包含错误模式: {pattern}"
         
-        # 检查日语字符比例（双语模式更宽松）
-        japanese_chars = len(re.findall(r'[ひらがなカタカナ一-龯]', translated_text))
+        # 检查日语字符比例（仅以假名判定，避免将中文汉字误判为日文汉字）
+        # Hiragana: \u3040-\u309F, Katakana: \u30A0-\u30FF, 半角片假名: \uFF66-\uFF9D
+        japanese_chars = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF\uFF66-\uFF9D]', translated_text))
         total_chars = len(translated_text)
         
         if bilingual:
@@ -80,21 +88,31 @@ class QualityChecker:
             if japanese_chars / total_chars > 0.3:
                 return False, "日语字符过多（单语模式）"
         
-        # 检查重复字符
-        if self._has_excessive_repetition(translated_text):
-            return False, "包含过多重复字符"
-
-        # 检测中文长串无标点（句中标点缺失风险，仅作告警判定）
+        # 检查重复字符（utils优先）
         try:
-            import re as _re
-            # 抽样检查最近 1200 字符
-            tail = translated_text[-1200:] if len(translated_text) > 1200 else translated_text
-            # 匹配长串中文（含字母数字）但缺少常见分隔标点
-            runs = _re.findall(r"[\u4e00-\u9fa5A-Za-z0-9]{80,}", tail)
-            if runs:
-                # 如果这些长串内不包含任何分隔标点，则视为不佳
-                if not _re.search(r"[，、；。！？……]", ''.join(runs)):
-                    return False, "中文句中疑似缺少分隔标点"
+            from ..utils.validation.repetition_check import has_excessive_repetition
+            if has_excessive_repetition(translated_text):
+                return False, "包含过多重复字符"
+        except Exception:
+            if self._has_excessive_repetition(translated_text):
+                return False, "包含过多重复字符"
+
+        # 检查中文复制日语片段（启发式规则迁移到 utils）
+        try:
+            from ..utils.validation.jp_copy_check import has_chinese_copying_japanese
+            if has_chinese_copying_japanese(original_text, translated_text, bilingual):
+                return False, "中文部分直接复制了日语片段"
+        except Exception:
+            # 回退到内部旧实现（保持兼容）
+            if self._has_chinese_copying_japanese(original_text, translated_text, bilingual):
+                return False, "中文部分直接复制了日语片段"
+
+        # 检测中文长串无标点（utils优先）
+        try:
+            from ..utils.validation.cjk_punctuation_check import validate_cjk_separators
+            ok_punc, reason_punc = validate_cjk_separators(translated_text)
+            if not ok_punc:
+                return False, reason_punc
         except Exception:
             pass
         
@@ -102,57 +120,39 @@ class QualityChecker:
     
     def check_translation_quality_with_llm(self, original_text: str, translated_text: str, bilingual: bool = False) -> Tuple[bool, str]:
         """
-        使用大模型进行质量检测
-        
-        Args:
-            original_text: 原文
-            translated_text: 译文
-            bilingual: 是否为双语模式
-            
-        Returns:
-            (是否通过, 失败原因)
+        使用大模型进行质量检测（逐行检查版）。
         """
         if self.config.no_llm_check:
             return True, "跳过LLM检测"
         
         try:
-            # 提取尾部片段（bilingual 模式下译文段取更长片段；强调关注中后段到结尾）
-            if bilingual:
-                orig_tail_len = 400
-                tran_tail_len = 800
-            else:
-                orig_tail_len = 500
-                tran_tail_len = 500
+            # 逐行对齐检查
+            orig_lines = [ln.strip() for ln in original_text.split('\n')]
+            tran_lines = [ln.strip() for ln in translated_text.split('\n')]
+            # 仅针对非空行进行一一对应检查
+            packed = [(o, t) for o, t in zip(orig_lines, tran_lines) if o or t]
 
-            original_tail = original_text[-orig_tail_len:] if len(original_text) > orig_tail_len else original_text
-            translated_tail = translated_text[-tran_tail_len:] if len(translated_text) > tran_tail_len else translated_text
+            for idx, (orig_line, tran_line) in enumerate(packed, 1):
+                # 构造逐行消息
+                messages = self._build_quality_messages(orig_line, tran_line, bilingual)
+                # 可选记录
+                try:
+                    system_content = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
+                    user_content = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
+                except Exception:
+                    system_content, user_content = "", ""
+                if self.logger:
+                    # 仅写文件，避免刷屏
+                    self.logger.debug(f"QC System prompt (line {idx}):\n" + system_content, mode=UnifiedLogger.LogMode.FILE)
+                    self.logger.debug(f"QC User prompt (line {idx}):\n" + user_content, mode=UnifiedLogger.LogMode.FILE)
 
-            messages = self._build_quality_messages(original_tail, translated_tail, bilingual)
-            # 分开记录 system 与 user，避免单行过长
-            try:
-                system_content = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
-                user_content = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
-            except Exception:
-                system_content, user_content = "", ""
-            if self.logger:
-                self.logger.debug("QC System prompt:\n" + system_content)
-                self.logger.debug("QC User prompt:\n" + user_content)
+                result = self._quality_check_with_stream(messages)
+                cleaned = self._clean_quality_output(result)
+                verdict = self._extract_verdict(cleaned)
+                if verdict != "GOOD":
+                    return False, f"LLM逐行质检失败：第{idx}行判定为{verdict or 'UNSURE'}"
 
-            # 使用流式输出进行质量检测（system+user）
-            result = self._quality_check_with_stream(messages)
-
-            cleaned = self._clean_quality_output(result)
-            verdict = self._extract_verdict(cleaned)
-
-            mode_text = "bilingual对照模式" if bilingual else "单语模式"
-            if verdict == "GOOD":
-                return True, f"大模型评估：{mode_text}最后部分翻译质量良好"
-            elif verdict == "BAD":
-                return False, f"大模型评估：{mode_text}最后部分翻译质量不佳"
-            else:
-                # 回退：无法解析明确结论时，保守为不佳并附上简短截断说明
-                short = (cleaned[:120] + '...') if len(cleaned) > 120 else cleaned
-                return False, f"大模型评估：{mode_text}结论不明（{short}）"
+            return True, "LLM逐行质检通过"
                 
         except Exception as e:
             return False, f"LLM质量检测失败: {str(e)}"
@@ -162,10 +162,14 @@ class QualityChecker:
         try:
             # 使用统一的流式输出处理器
             max_tokens = getattr(self.config, 'quality_max_tokens', 0)
+            # 设定一个合理下限，避免QC在模型思考阶段被截断
+            if max_tokens <= 0:
+                max_tokens = 4096
             from .streaming_handler import StreamingHandler
             params = self.profile_manager.get_generation_params(
                 "quality_check",
-                max_tokens=max_tokens if max_tokens > 0 else 0
+                max_tokens=max_tokens if max_tokens > 0 else 0,
+                stop=[],
             )
             result, token_stats = self.streaming_handler.stream_with_params(
                 model=self.config.model,
@@ -183,47 +187,199 @@ class QualityChecker:
                 self.logger.error(f"质量检测流式调用失败: {e}")
             raise
 
-    def _build_quality_messages(self, original_tail: str, translated_tail: str, bilingual: bool) -> list:
-        """构建质量检测消息：system=规范+few-shot；user=待评片段。"""
-        mode_text = "bilingual对照模式（原文-译文交替）" if bilingual else "单语模式"
+    def _build_quality_messages_block(self, original_lines: list[str], translated_lines: list[str], bilingual: bool) -> list:
+        """整块QC：将一批原文/译文行打包到同一条user消息中，期望单词（GOOD/BAD）裁决。"""
+        base = Path(__file__).parent.parent.parent / "data"
+        preface_path = base / "preface_qc.txt"
+        sample_path = base / "samples" / "sample_qc.txt"
 
-        system_parts = []
-        system_parts.append(
-            (
-                f"你是严格的翻译质检员。输入是{mode_text}的尾段片段。\n"
-                "- 片段开头可能是机械截断，判断重点放在片段的中后段直到结尾。\n"
-                "- 仅在最后一行输出结论：GOOD 或 BAD（大写）。不要附加任何解释。\n"
-                "- 检查：行对齐/错配、含义对应/明显误译、结尾是否完整无截断。\n"
-            )
-        )
-        # few-shot（用User/Assistant标注）
-        system_parts.append(
-            (
-                "示例 A\n"
-                "User:\n<原文尾段>...\n<译文尾段>...\n"
-                "Assistant:\nGOOD\n\n"
-                "示例 B\n"
-                "User:\n<原文尾段>...\n<译文尾段（结尾截断/错配）>...\n"
-                "Assistant:\nBAD\n"
-            )
-        )
-        system_content = "\n\n".join(system_parts)
+        system_content = "你是翻译质检员。仅输出一个词（GOOD 或 BAD）。不要解释。"
+        try:
+            if preface_path.exists():
+                system_content = preface_path.read_text(encoding='utf-8').strip()
+        except Exception:
+            pass
 
+        messages = [{"role": "system", "content": system_content}]
+
+        # 复用逐行few-shot
+        try:
+            if sample_path.exists():
+                raw = sample_path.read_text(encoding='utf-8')
+                lines = [ln.rstrip('\n') for ln in raw.splitlines()]
+                current_role: str | None = None
+                buffer: list[str] = []
+                def flush():
+                    nonlocal buffer, current_role
+                    if current_role and buffer:
+                        content = '\n'.join(buffer).strip()
+                        if content:
+                            messages.append({"role": current_role, "content": content})
+                    buffer = []
+                for ln in lines:
+                    low = ln.strip().lower()
+                    if low.startswith('user:'):
+                        flush(); current_role = 'user'; rem = ln[5:].lstrip();
+                        if rem: buffer.append(rem); continue
+                    if low.startswith('assistant:'):
+                        flush(); current_role = 'assistant'; rem = ln[10:].lstrip();
+                        if rem: buffer.append(rem); continue
+                    buffer.append(ln)
+                flush()
+        except Exception:
+            pass
+
+        # 当前整块内容：编号对齐
+        def number_lines(ls: list[str]) -> str:
+            buf = []
+            for idx, t in enumerate(ls, 1):
+                buf.append(f"{idx}. {t}")
+            return '\n'.join(buf)
+
+        user_content = f"原文：\n{number_lines(original_lines)}\n\n译文：\n{number_lines(translated_lines)}"
+        messages.append({"role": "user", "content": user_content})
+        return messages
+
+    def check_translation_quality_block(self, original_text: str, translated_text: str, bilingual: bool = False) -> Tuple[bool, str]:
+        """整块质检：一次性对当前批次所有行进行裁决，输出单词（GOOD/BAD）。"""
+        if self.config.no_llm_check:
+            return True, "跳过LLM检测"
+        try:
+            orig_lines = [ln.strip() for ln in original_text.split('\n') if ln.strip()]
+            tran_lines = [ln.strip() for ln in translated_text.split('\n') if ln.strip()]
+            # 对齐到最短长度，避免越界
+            n = min(len(orig_lines), len(tran_lines))
+            orig_lines = orig_lines[:n]
+            tran_lines = tran_lines[:n]
+            messages = self._build_quality_messages_block(orig_lines, tran_lines, bilingual)
+            # 可选记录
+            try:
+                system_content = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
+                user_content = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
+            except Exception:
+                system_content, user_content = "", ""
+            if self.logger:
+                self.logger.debug("QC System prompt (block):\n" + system_content, mode=UnifiedLogger.LogMode.FILE)
+                self.logger.debug("QC User prompt (block):\n" + user_content, mode=UnifiedLogger.LogMode.FILE)
+            result = self._quality_check_with_stream(messages)
+            cleaned = self._clean_quality_output(result)
+            verdict = self._extract_verdict(cleaned)
+            return (verdict == "GOOD"), ("LLM整块质检: " + (verdict or 'UNSURE'))
+        except Exception as e:
+            return False, f"LLM质量检测失败: {str(e)}"
+
+    def check_translation_quality_block_with_bisect(self, original_text: str, translated_text: str, bilingual: bool = False, min_block: int = 10) -> Tuple[bool, str]:
+        """整块QC（二分降级）：
+        - 先整块QC
+        - 失败则二分（或多次二分）到阈值min_block，再逐行QC兜底
+        """
+        try:
+            ok, reason = self.check_translation_quality_block(original_text, translated_text, bilingual)
+            if ok:
+                return ok, reason
+            # 二分递归
+            orig_lines = [ln.strip() for ln in original_text.split('\n') if ln.strip()]
+            tran_lines = [ln.strip() for ln in translated_text.split('\n') if ln.strip()]
+            n = min(len(orig_lines), len(tran_lines))
+            if n <= min_block:
+                return self.check_translation_quality(original_text, translated_text, bilingual)
+            mid = n // 2
+            left_ok, left_reason = self.check_translation_quality_block_with_bisect('\n'.join(orig_lines[:mid]), '\n'.join(tran_lines[:mid]), bilingual, min_block)
+            right_ok, right_reason = self.check_translation_quality_block_with_bisect('\n'.join(orig_lines[mid:]), '\n'.join(tran_lines[mid:]), bilingual, min_block)
+            return (left_ok and right_ok), f"bisect: left={left_reason}, right={right_reason}"
+        except Exception as e:
+            return False, f"LLM质量检测失败: {str(e)}"
+
+    def _build_quality_messages(self, original_line: str, translated_line: str, bilingual: bool) -> list:
+        """从外部preface_qc与few-shot文件构建QC消息；逐行输入。"""
+        base = Path(__file__).parent.parent.parent / "data"
+        preface_path = base / "preface_qc.txt"
+        sample_path = base / "samples" / "sample_qc.txt"
+
+        system_content = "你是翻译质检员。仅输出一个词（GOOD 或 BAD）。不要解释。"
+        try:
+            if preface_path.exists():
+                system_content = preface_path.read_text(encoding='utf-8').strip()
+        except Exception:
+            pass
+
+        messages = [{"role": "system", "content": system_content}]
+
+        # 追加few-shot（多轮对话，保证格式与下方user一致）
+        try:
+            if sample_path.exists():
+                raw = sample_path.read_text(encoding='utf-8')
+                lines = [ln.rstrip('\n') for ln in raw.splitlines()]
+                current_role: str | None = None
+                buffer: list[str] = []
+                parsed: list[dict] = []
+
+                def flush() -> None:
+                    nonlocal buffer, current_role
+                    if current_role and buffer:
+                        content = '\n'.join(buffer).strip()
+                        if content:
+                            parsed.append({"role": current_role, "content": content})
+                    buffer = []
+
+                for ln in lines:
+                    low = ln.strip().lower()
+                    if low.startswith('user:'):
+                        flush()
+                        current_role = 'user'
+                        remainder = ln[5:].lstrip()
+                        if remainder:
+                            buffer.append(remainder)
+                        continue
+                    if low.startswith('assistant:'):
+                        flush()
+                        current_role = 'assistant'
+                        remainder = ln[10:].lstrip()
+                        if remainder:
+                            buffer.append(remainder)
+                        continue
+                    buffer.append(ln)
+                flush()
+
+                # 规范化 few-shot：严格 user(含“原文/译文”) -> assistant(仅 GOOD/BAD)
+                normalized: list[dict] = []
+                i = 0
+                while i < len(parsed):
+                    blk = parsed[i]
+                    if blk.get('role') == 'user' and ('原文' in blk.get('content','')) and ('译文' in blk.get('content','')):
+                        user_blk = blk
+                        # 寻找下一个 assistant GOOD/BAD
+                        j = i + 1
+                        verdict_blk = None
+                        while j < len(parsed):
+                            cand = parsed[j]
+                            if cand.get('role') == 'assistant':
+                                up = cand.get('content','').strip().upper()
+                                if up in ('GOOD','BAD'):
+                                    verdict_blk = {"role": "assistant", "content": up}
+                                    break
+                            j += 1
+                        normalized.append({"role": 'user', "content": user_blk.get('content','')})
+                        if verdict_blk is not None:
+                            normalized.append(verdict_blk)
+                            i = j + 1
+                        else:
+                            i += 1
+                    else:
+                        i += 1
+
+                messages.extend(normalized)
+        except Exception:
+            pass
+
+        # 当前逐行待检内容
         if bilingual:
-            user_content = (
-                f"原文尾段（可能截断开头）：\n{original_tail}\n\n"
-                f"对照译文尾段（可能截断开头）：\n{translated_tail}"
-            )
+            user_content = f"原文：\n{original_line}\n\n译文：\n{translated_line}"
         else:
-            user_content = (
-                f"原文尾段（可能截断开头）：\n{original_tail}\n\n"
-                f"译文尾段（可能截断开头）：\n{translated_tail}"
-            )
+            user_content = f"原文：\n{original_line}\n\n译文：\n{translated_line}"
 
-        return [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": user_content},
-        ]
+        messages.append({"role": "user", "content": user_content})
+        return messages
 
     def _clean_quality_output(self, text: str) -> str:
         """移除大模型的思维/标记等噪声，得到判定可读文本。"""
@@ -359,20 +515,4 @@ class QualityChecker:
         except Exception as e:
             return False, f"YAML 规则检测异常: {e}"
     
-    def _has_excessive_repetition(self, text: str) -> bool:
-        """检查是否有过多重复字符（更宽松的检测）"""
-        if len(text) < 10:
-            return False
-        
-        # 检查单字符重复（更宽松：连续12个相同字符）
-        for char in set(text):
-            if char * 12 in text:  # 从8个提高到12个
-                return True
-        
-        # 检查短片段重复（更宽松：同一片段出现超过5次）
-        for i in range(len(text) - 30):
-            segment = text[i:i+15]  # 从10个字符提高到15个字符
-            if text.count(segment) > 5:  # 从3次提高到5次
-                return True
-        
-        return False
+    # 旧的本地实现已迁移到 utils/validation 模块

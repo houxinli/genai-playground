@@ -5,5 +5,5 @@
 cd "$(dirname "$0")"
 
 # 调用src中的翻译脚本
-python src/translate_v3.py "$@"
+python src/translate.py "$@"
 

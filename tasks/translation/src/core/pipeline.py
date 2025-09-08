@@ -27,7 +27,7 @@ class TranslationPipeline:
         """
         self.config = config
         
-        # 初始化组件
+        # 初始化组件（默认开启文件日志；仅当realtime_log关闭且无法定位文件时才退回控制台）
         self.logger = UnifiedLogger.create_console_only()
         self.quality_checker = QualityChecker(config, self.logger)
         self.translator = Translator(config, self.logger, self.quality_checker)
@@ -95,33 +95,23 @@ class TranslationPipeline:
         """
         # 设置日志
         log_file_path = None
-        if self.config.realtime_log:
-            # 设置debug模式标志
-            UnifiedLogger._debug_mode = self.config.debug
-            
-            # 在debug模式下，日志文件也放到输入文件同一目录
-            if self.config.debug:
-                log_dir = path.parent
-            else:
-                log_dir = self.config.log_dir
-            
-            # 文件日志 + 控制台输出由自定义 _emit 打印，避免 handler 再次打印导致重复
-            self.logger = UnifiedLogger.create_for_file(path, log_dir, stream_output=False)
-            self.translator.logger = self.logger
-            self.file_handler.logger = self.logger
-            # 同步更新质量检测与流式处理器上的logger，避免控制台重复调试输出
-            if hasattr(self.quality_checker, 'logger'):
-                self.quality_checker.logger = self.logger
-            if hasattr(self.translator, 'streaming_handler') and self.translator.streaming_handler:
-                self.translator.streaming_handler.logger = self.logger
-            if hasattr(self.quality_checker, 'streaming_handler') and self.quality_checker.streaming_handler:
-                self.quality_checker.streaming_handler.logger = self.logger
-            # 获取日志文件路径
-            log_file_path = self.logger.get_log_file_path()
-            self.logger.info(f"开始处理文件: {path}")
-            self.logger.info(f"📝 日志文件路径: {log_file_path}")
-        else:
-            self.logger.info(f"开始处理文件: {path}")
+        # 默认开启文件日志；仅当显式要求关闭时才不创建
+        UnifiedLogger._debug_mode = self.config.debug
+        log_dir = path.parent if self.config.debug else self.config.log_dir
+        self.logger = UnifiedLogger.create_for_file(path, log_dir, stream_output=False)
+        self.translator.logger = self.logger
+        self.file_handler.logger = self.logger
+        # 同步更新质量检测与流式处理器上的logger，避免控制台重复调试输出
+        if hasattr(self.quality_checker, 'logger'):
+            self.quality_checker.logger = self.logger
+        if hasattr(self.translator, 'streaming_handler') and self.translator.streaming_handler:
+            self.translator.streaming_handler.logger = self.logger
+        if hasattr(self.quality_checker, 'streaming_handler') and self.quality_checker.streaming_handler:
+            self.quality_checker.streaming_handler.logger = self.logger
+        # 获取日志文件路径
+        log_file_path = self.logger.get_log_file_path()
+        self.logger.info(f"开始处理文件: {path}")
+        self.logger.info(f"📝 日志文件路径: {log_file_path}")
         
         # 显示配置信息
         self._log_config_info()
@@ -339,13 +329,24 @@ class TranslationPipeline:
         stem = input_path.stem
         suffix = self.config.get_output_suffix()
         
-        # 在debug模式下，输出文件使用stem + timestamp格式
+        # 在debug模式下，输出文件使用stem + timestamp格式，放在原目录
         if self.config.debug:
             from datetime import datetime
             ts = datetime.now().strftime('%Y%m%d-%H%M%S')
             return input_path.parent / f"{stem}_{ts}{suffix}.txt"
         else:
-            return input_path.parent / f"{stem}{suffix}.txt"
+            # 非debug模式下，根据翻译模式创建不同的子目录
+            if self.config.bilingual or self.config.bilingual_simple:
+                # bilingual模式：创建 _bilingual 子目录
+                output_dir = input_path.parent.parent / f"{input_path.parent.name}_bilingual"
+            else:
+                # 纯中文模式：创建 _zh 子目录
+                output_dir = input_path.parent.parent / f"{input_path.parent.name}_zh"
+            
+            # 确保输出目录存在
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            return output_dir / f"{stem}.txt"
     
     def _translate_text(self, text_content: str, use_body_prompt: bool = False) -> str:
         """翻译文本内容"""
@@ -471,9 +472,9 @@ class TranslationPipeline:
 
                 if not translated_ok:
                     if self.config.debug:
-                        self.logger.error(f"调试模式下分块 {idx} 降级三次仍失败，停止处理")
-                        return ""
-                    else:
+                        self.logger.error(f"调试模式下分块 {idx} 降级三次仍失败，保留原文继续处理")
+                        final_piece = chunk_text  # 保留原文而不是返回空字符串
+                else:
                         self.logger.warning(f"分块 {idx} 多次降级仍失败，返回空字符串以继续拼接")
                         final_piece = ""
 
@@ -486,8 +487,8 @@ class TranslationPipeline:
         else:
             result, prompt, success, token_meta = self.translator.translate_text(text_content)
         if not success:
-            self.logger.error("翻译失败")
-            return ""
+            self.logger.error("翻译失败，保留原文")
+            return text_content  # 保留原文而不是返回空字符串
         self.logger.info(f"Token使用情况: {token_meta}")
         return result
     
@@ -577,12 +578,43 @@ class TranslationPipeline:
         context_size = self.config.context_lines
         
         translated_lines = []
-        i = 0
+        # 预处理：收集所有有内容的行及其索引
+        content_lines = []
+        content_indices = []
+        for idx, line in enumerate(body_lines):
+            if line.strip():  # 只收集非空白行
+                content_lines.append(line.rstrip())
+                content_indices.append(idx)
         
-        while i < len(body_lines):
-            # 确定当前批次
-            end_idx = min(i + batch_size, len(body_lines))
-            batch_lines = body_lines[i:end_idx]
+        self.logger.info(f"总行数: {len(body_lines)}, 有内容行数: {len(content_lines)}")
+        
+        # 按有内容的行分批处理
+        content_batch_size = batch_size
+        original_batch_size = batch_size  # 保存原始批次大小
+        # 自适应回升：记录连续成功批次数，用于逐步回升到初始批量
+        consecutive_success_batches = 0
+        content_i = 0
+        previous_io = None  # 跟踪前一次的输入输出
+        start_time = time.time()  # 记录开始时间
+        # 单篇文章超时（秒），默认3600；可通过config.article_timeout_s配置
+        max_duration = getattr(self.config, 'article_timeout_s', 3600)
+        
+        while content_i < len(content_lines):
+            # 检查时间限制
+            elapsed_time = time.time() - start_time
+            if elapsed_time > max_duration:
+                self.logger.warning(f"翻译超时（{elapsed_time:.1f}秒），停止处理，已翻译 {content_i} 行有内容行")
+                break
+                
+            # 确定当前批次的有内容行
+            content_end_idx = min(content_i + content_batch_size, len(content_lines))
+            batch_content_lines = content_lines[content_i:content_end_idx]
+            batch_content_indices = content_indices[content_i:content_end_idx]
+            
+            # 获取对应的原始行（包含空白行）
+            start_file_idx = batch_content_indices[0]
+            end_file_idx = batch_content_indices[-1] + 1
+            batch_lines = body_lines[start_file_idx:end_file_idx]
             
             # 获取上下文
             context_before = []
@@ -590,68 +622,164 @@ class TranslationPipeline:
             
             if context_size > 0:
                 # 前文上下文
-                context_start = max(0, i - context_size)
-                context_before = body_lines[context_start:i]
+                context_start = max(0, start_file_idx - context_size)
+                context_before = body_lines[context_start:start_file_idx]
                 
                 # 后文上下文
-                context_end = min(len(body_lines), end_idx + context_size)
-                context_after = body_lines[end_idx:context_end]
+                context_end = min(len(body_lines), end_file_idx + context_size)
+                context_after = body_lines[end_file_idx:context_end]
             
             # 合并上下文
             context_lines = context_before + context_after
             
-            self.logger.info(f"翻译批次 {i//batch_size + 1}: 行 {i+1}-{end_idx} (共{len(batch_lines)}行)")
+            self.logger.info(f"翻译批次 {content_i//content_batch_size + 1}: 有内容行 {content_i+1}-{content_end_idx} (共{len(batch_content_lines)}行)")
             
             # 调用简化翻译
-            chinese_lines, prompt, success, token_stats = self.translator.translate_lines_simple(
-                target_lines=[line.rstrip() for line in batch_lines],
-                context_lines=[line.rstrip() for line in context_lines]
+            chinese_lines, prompt, success, token_stats, current_io = self.translator.translate_lines_simple(
+                batch_content_lines, previous_io=previous_io
             )
             
-            if success and len(chinese_lines) == len(batch_lines):
-                # 拼接原文和译文
-                for j, (orig_line, chinese_line) in enumerate(zip(batch_lines, chinese_lines)):
-                    orig_stripped = orig_line.rstrip()
-                    # 避免空行重复：如果原文是空行，只添加一个空行
-                    if orig_stripped == "" and chinese_line == "":
-                        translated_lines.append("")
-                    else:
-                        translated_lines.append(orig_stripped)
-                        translated_lines.append(chinese_line)
+            if success and len(chinese_lines) == len(batch_content_lines):
+                # 使用统一的bilingual工具函数拼接原文和译文
+                from ..utils.format import create_bilingual_output
+                
+                # 准备原文和译文行
+                orig_lines = batch_content_lines
+                bilingual_result = create_bilingual_output(orig_lines, chinese_lines)
+                
+                # 记录对照版结果到日志
+                self.logger.debug(f"批次对照结果（有内容行 {content_i+1}-{content_end_idx}）:\n{bilingual_result}")
+                
+                # 将对照结果按行添加到翻译结果中
+                translated_lines.extend(bilingual_result.split('\n'))
+                
+                # 更新前一次的输入输出（用于下一批次的上下文）
+                # 使用翻译器返回的 current_io
+                previous_io = current_io
                 
                 self.logger.info(f"批次翻译成功，Token使用: {token_stats}")
-                i = end_idx
+                content_i = content_end_idx
+                # 累计成功批次数，按阶梯逐步回升批量（例如 25→50→100）
+                consecutive_success_batches += 1
+                if content_batch_size < original_batch_size and consecutive_success_batches >= 1:
+                    # 简单策略：每次成功将批量翻倍，直至不超过初始值
+                    new_size = min(original_batch_size, max(1, content_batch_size * 2))
+                    if new_size != content_batch_size:
+                        self.logger.info(f"连续成功 {consecutive_success_batches} 次，提升批次大小：{content_batch_size} → {new_size}")
+                        content_batch_size = new_size
             else:
                 # 翻译失败
-                if self.config.debug:
-                    # debug模式下直接报错返回
-                    self.logger.error(f"调试模式：批次翻译失败，行数不匹配（期望{len(batch_lines)}行，实际{len(chinese_lines)}行），停止处理")
-                    return ""
+                # 尝试降级处理（debug和非debug模式都使用fallback机制）
+                self.logger.warning(f"批次翻译失败，尝试降级处理")
+                # 失败则重置连续成功计数
+                consecutive_success_batches = 0
+                
+                if content_batch_size > 1:
+                    # 减小批次大小
+                    content_batch_size = max(1, content_batch_size // 2)
+                    self.logger.info(f"降级批次大小到 {content_batch_size}")
+                    continue
                 else:
-                    # 非debug模式下尝试降级处理
-                    self.logger.warning(f"批次翻译失败，尝试降级处理")
+                    # 使用有内容的行进行小批次处理
+                    self.logger.warning(f"使用有内容的行进行小批次处理，从第 {content_i+1} 行开始")
                     
-                    if batch_size > 1:
-                        # 减小批次大小
-                        batch_size = max(1, batch_size // 2)
-                        self.logger.info(f"降级批次大小到 {batch_size}")
-                        continue
-                    else:
-                        # 逐行处理
-                        self.logger.warning(f"逐行处理第 {i+1} 行")
-                        single_line = [body_lines[i].rstrip()]
-                        chinese_lines, _, success, _ = self.translator.translate_lines_simple(single_line)
+                    # 收集接下来的有内容的行（最多5行）
+                    fallback_content_lines = []
+                    fallback_content_indices = []
+                    j = content_i
+                    while j < len(content_lines) and len(fallback_content_lines) < 5:
+                        fallback_content_lines.append(content_lines[j])
+                        fallback_content_indices.append(content_indices[j])
+                        j += 1
+                    
+                    if fallback_content_lines:
+                        # 翻译有内容的行
+                        chinese_lines, _, success, _, current_io = self.translator.translate_lines_simple(fallback_content_lines, previous_io=previous_io)
                         
-                        if success and len(chinese_lines) == 1:
-                            translated_lines.append(body_lines[i].rstrip())
-                            translated_lines.append(chinese_lines[0])
-                            i += 1
+                        if success and len(chinese_lines) == len(fallback_content_lines):
+                            # 使用统一的bilingual工具函数拼接
+                            from ..utils.format import create_bilingual_output
+                            
+                            bilingual_result = create_bilingual_output(fallback_content_lines, chinese_lines)
+                            
+                            # 记录小批次对照结果到日志
+                            self.logger.debug(f"小批次对照结果（有内容行 {content_i+1}-{content_i+len(fallback_content_lines)}）:\n{bilingual_result}")
+                            
+                            # 将对照结果按行添加到翻译结果中
+                            translated_lines.extend(bilingual_result.split('\n'))
+                            
+                            # 更新前一次的输入输出（使用翻译器返回的 current_io）
+                            previous_io = current_io
+                            
+                            # 跳过已处理的行
+                            content_i = content_i + len(fallback_content_lines)
+                            # fallback成功：保持当前较小批量，后续通过连续成功逐步回升
+                            self.logger.info("fallback成功，保持当前较小批量，后续根据成功次数逐步回升")
                         else:
-                            # 完全失败，保留原文
-                            self.logger.error(f"第 {i+1} 行翻译完全失败，保留原文")
-                            translated_lines.append(body_lines[i].rstrip())
-                            translated_lines.append(body_lines[i].rstrip())  # 原文作为译文
-                            i += 1
+                            # 小批次也失败，根据模式决定处理方式
+                            if self.config.debug:
+                                # debug模式：逐行处理有内容的行
+                                self.logger.warning(f"小批次翻译失败，逐行处理有内容的行")
+                                for idx, orig_line in enumerate(fallback_content_lines):
+                                    single_line = [orig_line]
+                                    chinese_lines, _, success, _, current_io = self.translator.translate_lines_simple(single_line, previous_io=previous_io)
+                                
+                                if success and len(chinese_lines) == 1:
+                                    # 使用统一的bilingual工具函数拼接单行
+                                    from ..utils.format import create_bilingual_output
+                                    
+                                    bilingual_result = create_bilingual_output([orig_line], chinese_lines)
+                                    
+                                    # 记录单行对照结果到日志
+                                    self.logger.debug(f"单行对照结果（第 {content_i+idx+1} 行）:\n{bilingual_result}")
+                                    
+                                    # 将对照结果按行添加到翻译结果中
+                                    translated_lines.extend(bilingual_result.split('\n'))
+                                    
+                                    # 更新前一次的输入输出
+                                    previous_io = current_io
+                                else:
+                                    # 完全失败，保留原文
+                                    self.logger.error(f"第 {content_i+idx+1} 行翻译完全失败，保留原文")
+                                    
+                                    # 使用统一的bilingual工具函数处理失败情况
+                                    from ..utils.format import create_bilingual_output
+                                    
+                                    # 非debug模式下，在译文部分标明"翻译失败"
+                                    if self.config.debug:
+                                        # debug模式：译文部分也是原文
+                                        bilingual_result = create_bilingual_output([orig_line], [orig_line])
+                                    else:
+                                        # 非debug模式：译文部分标明"翻译失败"
+                                        bilingual_result = create_bilingual_output([orig_line], ["[翻译失败]"])
+                                    
+                                    # 记录失败对照结果到日志
+                                    self.logger.debug(f"失败对照结果（第 {content_i+idx+1} 行）:\n{bilingual_result}")
+                                    
+                                    # 将对照结果按行添加到翻译结果中
+                                    translated_lines.extend(bilingual_result.split('\n'))
+                            
+                                # 跳过已处理的行
+                                content_i = content_i + len(fallback_content_lines)
+                                # 逐行处理完成：保持当前较小批量，后续逐步回升
+                                self.logger.info("逐行处理完成，保持当前较小批量，后续根据成功次数逐步回升")
+                            else:
+                                # 非debug模式：直接标记所有行为"翻译失败"
+                                self.logger.warning(f"小批次翻译失败，非debug模式下标记所有行为翻译失败")
+                                from ..utils.format import create_bilingual_output
+                                
+                                for idx, orig_line in enumerate(fallback_content_lines):
+                                    bilingual_result = create_bilingual_output([orig_line], ["[翻译失败]"])
+                                    translated_lines.extend(bilingual_result.split('\n'))
+                                
+                                # 跳过已处理的行
+                                content_i = content_i + len(fallback_content_lines)
+                                # 非debug失败标记处理完成：保持当前较小批量，后续逐步回升
+                                self.logger.info("非debug模式失败处理完成，保持当前较小批量，后续根据成功次数逐步回升")
+                    else:
+                        # 没有找到有内容的行，跳过空白行
+                        self.logger.warning(f"从第 {content_i+1} 行开始没有找到有内容的行，跳过空白行")
+                        content_i += 1
         
         # 重新组装完整文本
         result_lines = []
@@ -660,7 +788,36 @@ class TranslationPipeline:
         if start_idx > 0:
             result_lines.extend(lines[:start_idx])
         
+        # 创建完整行映射：将翻译结果映射回原始文件结构
+        full_translated_lines = []
+        content_idx = 0
+        
+        for i, line in enumerate(body_lines):
+            if line.strip():  # 有内容的行
+                if content_idx < len(translated_lines):
+                    # 添加原文和译文
+                    full_translated_lines.append(translated_lines[content_idx])
+                    if content_idx + 1 < len(translated_lines):
+                        full_translated_lines.append(translated_lines[content_idx + 1])
+                    content_idx += 2
+                else:
+                    # 未翻译的行，按要求标记译文为[翻译失败]
+                    full_translated_lines.append(line.rstrip())
+                    full_translated_lines.append("[翻译失败]")
+            else:  # 空白行
+                full_translated_lines.append("")
+        
         # 添加翻译后的正文
-        result_lines.extend(translated_lines)
+        result_lines.extend(full_translated_lines)
+        
+        # 统计翻译情况
+        total_content_lines = len(content_lines)
+        translated_count = len(translated_lines) // 2  # 每行原文+译文
+        remaining_content_lines = total_content_lines - content_i  # 未处理的有内容行数
+        
+        if self.config.debug and content_i < total_content_lines:
+            self.logger.warning(f"调试模式：翻译中断，剩余 {remaining_content_lines} 行有内容行未处理")
+        
+        self.logger.info(f"翻译完成：总计 {total_content_lines} 行有内容行，已翻译 {translated_count} 行")
         
         return '\n'.join(result_lines)

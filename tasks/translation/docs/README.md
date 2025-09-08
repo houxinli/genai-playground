@@ -8,16 +8,21 @@
 
 ```
 tasks/translation/
-├── scripts/                    # 翻译相关脚本
-│   ├── test_translation.py    # 翻译测试脚本
-│   ├── serve_qwen3.sh         # Qwen3 服务启动脚本
-│   └── translate_qwen3.py    # Qwen3 翻译脚本
+├── translate                   # 可执行包装器（调用 src/translate.py）
+├── src/                        # 翻译系统源码
+│   ├── translate.py           # 主入口（模块化）
+│   ├── core/                  # 核心翻译模块
+│   └── cli/                   # 命令行接口
+├── scripts/                    # 辅助脚本（非 src/ 下）
+│   ├── cleanup_bad_outputs.py # 清理异常双语输出
+│   └── README.md              # 脚本说明
 ├── docs/                       # 翻译任务文档
 │   └── README.md              # 本文件
-├── data/                       # 数据目录（待创建）
-│   ├── input/                 # 输入文件
-│   └── output/                # 输出文件
-└── logs/                       # 日志目录（待创建）
+├── data/                       # 数据目录
+│   ├── debug/                 # 调试文件
+│   ├── samples/               # 示例文件
+│   └── terminology.txt        # 术语对照表
+└── logs/                       # 日志目录
 ```
 
 ## 🚀 快速开始
@@ -27,8 +32,8 @@ tasks/translation/
 # 使用主项目的管理脚本
 make vllm-start
 
-# 或直接使用翻译脚本
-./tasks/translation/scripts/serve_qwen3.sh
+# 或直接使用服务脚本
+./scripts/serve_vllm.sh
 ```
 
 ### 2. 测试翻译功能
@@ -37,14 +42,31 @@ make vllm-start
 make vllm-test
 
 # 或直接运行测试脚本
-python tasks/translation/scripts/test_translation.py
+python -m src.scripts.test_translation --input input.txt --output output.txt
 ```
 
-### 3. 批量翻译
+### 3. 批量/多文件翻译（示例）
 ```bash
-# 使用翻译脚本
-python tasks/translation/scripts/translate_qwen3.py --input input.txt --output output.txt
+# 推荐：通过可执行包装器（等价于 python src/translate.py）
+./translate input1.txt input2.txt --bilingual --stream
+
+# 或直接调用模块入口
+python -m src.translate input_dir_or_files --bilingual --stream
 ```
+
+## 🧭 入口与调用方式
+
+- translate（可执行）
+  - 位置：`tasks/translation/translate`
+  - 作用：便捷包装器，内部调用 `python src/translate.py "$@"`
+  - 适合：命令行快速使用、脚本化调用
+
+- src/translate.py（模块入口）
+  - 位置：`tasks/translation/src/translate.py`
+  - 作用：正式入口，解析 CLI（`src/cli`），构建配置并运行 `TranslationPipeline`
+  - 适合：作为模块被其他 Python 代码调用，或通过 `python -m src.translate` 使用
+
+两者功能等价，推荐优先使用 `./translate` 以获得更短的命令；在需要从其他 Python 代码调用时，使用 `src/translate.py`。
 
 ## 📝 使用示例
 
@@ -128,4 +150,4 @@ tail -f tasks/translation/logs/translation.log
 
 ---
 
-**最后更新**: 2024-09-01
+**最后更新**: 2025-09-08

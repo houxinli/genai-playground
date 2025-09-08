@@ -42,7 +42,7 @@ class Translator:
         self.client = OpenAI(base_url="http://localhost:8000/v1", api_key="dummy")
         self.profile_manager = ProfileManager(config.profiles_file)
         self.streaming_handler = StreamingHandler(self.client, logger, config, self.profile_manager)
-
+    
     def translate_text(self, text: str, chunk_index: Optional[int] = None) -> Tuple[str, str, bool, Dict[str, int]]:
         """
         翻译文本
@@ -238,8 +238,8 @@ class Translator:
         # 清理输出
         cleaned_result = clean_output_text(result)
         
-        self.logger.info(f"翻译完成，结果长度: {len(result)}")
-        self.logger.info(f"清理后长度: {len(cleaned_result)}")
+        # self.logger.info(f"翻译完成，结果长度: {len(result)}")
+        # self.logger.info(f"清理后长度: {len(cleaned_result)}")
         
         # 估算token使用量（streaming_handler已记录详细统计）
         token_meta = {
@@ -487,11 +487,11 @@ class Translator:
             cap
         )
     
-    def translate_lines_simple(self, target_lines: List[str], context_lines: List[str] = None) -> Tuple[List[str], str, bool, Dict[str, int]]:
+    def translate_lines_simple(self, target_lines: List[str], previous_io: Tuple[List[str], List[str]] = None) -> Tuple[List[str], str, bool, Dict[str, int], Tuple[List[str], List[str]]]:
         """
         简化的行级翻译方法
-        输入：目标行列表 + 可选的上下文行列表
-        输出：中文行列表 + prompt + 成功标志 + token统计
+        输入：目标行列表 + 前一次的输入输出
+        输出：中文行列表 + prompt + 成功标志 + token统计 + 本次的previous_io
         """
         try:
             # 预处理：记录空白行位置，移除空白行
@@ -500,18 +500,23 @@ class Translator:
             
             for i, line in enumerate(target_lines):
                 if line.strip():  # 非空白行
-                    non_empty_lines.append(line)
+                    # 保存原始行（包含缩进）和去除缩进的行
+                    non_empty_lines.append((line, line.strip()))
                 else:  # 空白行
                     empty_line_positions.append(i)
             
             if self.logger:
                 self.logger.debug(f"预处理结果：总行数{len(target_lines)}，非空白行{len(non_empty_lines)}，空白行位置{empty_line_positions}")
             
-            # 构建最小化的prompt（只使用非空白行）
-            messages = self._build_simple_messages(non_empty_lines, context_lines)
+            # 构建最小化的prompt（只使用非空白行，去除缩进）
+            stripped_lines = [line_stripped for _, line_stripped in non_empty_lines]
+            messages = self._build_simple_messages(stripped_lines, previous_io)
             
             # 使用ProfileManager获取bilingual_simple参数
-            max_tokens = self._estimate_simple_max_tokens(non_empty_lines)
+            max_tokens = self._estimate_simple_max_tokens(stripped_lines)
+            # 为小批/逐行提供生成下限，避免被思考阶段占满
+            if max_tokens is None or max_tokens < 1024:
+                max_tokens = 1024
             params = self.profile_manager.get_generation_params(
                 "bilingual_simple",
                 max_tokens=max_tokens
@@ -525,34 +530,45 @@ class Translator:
             )
             
             # 记录完整的原始翻译结果（debug级别）
-            if self.logger:
-                self.logger.debug(f"原始翻译结果（{len(result)}字符）:\n{result}")
+            # if self.logger:
+            #     self.logger.debug(f"原始翻译结果（{len(result)}字符）:\n{result}")
             
             # 清理思考内容
             from ..utils.text import clean_output_text
             cleaned_result = clean_output_text(result)
+            # 若末尾存在完成标记行，则移除
+            cleaned_result = re.sub(r"(?:\n|\r|\r\n)*\[翻译完成\]\s*$", "", cleaned_result.strip())
             
             # 记录清理后的结果（debug级别）
-            if self.logger:
-                self.logger.debug(f"清理后翻译结果（{len(cleaned_result)}字符）:\n{cleaned_result}")
+            # if self.logger:
+            #     self.logger.debug(f"清理后翻译结果（{len(cleaned_result)}字符）：\n{cleaned_result}")
             
-            # 解析结果：按行分割，过滤空行
+            # 解析结果：按行分割，过滤空行，复制原文缩进
             chinese_lines = []
-            for line in cleaned_result.split('\n'):
+            for i, line in enumerate(cleaned_result.split('\n')):
                 line = line.strip()
                 if line:
-                    chinese_lines.append(line)
+                    # 复制对应原文的缩进
+                    if i < len(non_empty_lines):
+                        original_line, _ = non_empty_lines[i]
+                        # 计算原文的行首缩进（包括全角空格等）
+                        leading_indent = original_line[:len(original_line) - len(original_line.lstrip())]
+                        # 为翻译结果添加相同的缩进
+                        indented_line = leading_indent + line
+                        chinese_lines.append(indented_line)
+                    else:
+                        chinese_lines.append(line)
             
             # 记录解析后的行数（debug级别）
-            if self.logger:
-                self.logger.debug(f"解析后中文行数: {len(chinese_lines)}")
-                for i, line in enumerate(chinese_lines, 1):
-                    self.logger.debug(f"  第{i}行: {line}")
+            # if self.logger:
+            #     self.logger.debug(f"解析后中文行数: {len(chinese_lines)}")
+            #     for i, line in enumerate(chinese_lines, 1):
+            #         self.logger.debug(f"  第{i}行: {line}")
             
             # 检查行数是否匹配（只检查非空白行）
             if len(chinese_lines) != len(non_empty_lines):
                 self.logger.warning(f"翻译行数不匹配：期望{len(non_empty_lines)}行（非空白），实际{len(chinese_lines)}行")
-                return [], str(messages), False, token_stats
+                return [], str(messages), False, token_stats, None
             
             # 后处理：在正确位置插入空白行
             final_chinese_lines = []
@@ -569,56 +585,196 @@ class Translator:
                         chinese_index += 1
                     else:
                         self.logger.error(f"翻译行数不足：期望{len(non_empty_lines)}行，实际{len(chinese_lines)}行")
-                        return [], str(messages), False, token_stats
+                        return [], str(messages), False, token_stats, None
             
+            
+            # 进行质量检测（规则 + LLM），不通过则让上层走降级/重试
+            try:
+                original_text_for_qc = "\n".join(stripped_lines)
+                translated_text_for_qc = cleaned_result
+                self.logger.info("对本批次进行QC LLM检测（整块+二分降级）…")
+                qc_ok, qc_reason = self.quality_checker.check_translation_quality_block_with_bisect(
+                    original_text_for_qc,
+                    translated_text_for_qc,
+                    bilingual=True,
+                )
+                if not qc_ok:
+                    self.logger.warning(f"QC判定不通过：{qc_reason}")
+                    return [], str(messages), False, token_stats, None
+                else:
+                    self.logger.info(f"QC通过：{qc_reason}")
+            except Exception as _e:
+                self.logger.warning(f"QC 调用异常，视为失败：{_e}")
+                return [], str(messages), False, token_stats, None
+
+            # 记录对照版的target_lines+final_chinese_lines
             if self.logger:
-                self.logger.debug(f"最终结果：总行数{len(final_chinese_lines)}，空白行位置{empty_line_positions}")
-                for i, line in enumerate(final_chinese_lines):
-                    if line:
-                        self.logger.debug(f"  第{i+1}行: {line}")
-            else:
-                        self.logger.debug(f"  第{i+1}行: [空白行]")
+                self.logger.debug(f"对照版翻译结果：")
+                for i, (orig, trans) in enumerate(zip(target_lines, final_chinese_lines)):
+                    if orig.strip():  # 只记录非空白行
+                        self.logger.debug(f"  第{i+1}行: {orig} -> {trans}")
+                    else:
+                        self.logger.debug(f"  第{i+1}行: [空白行] -> {trans}")
             
-            return final_chinese_lines, str(messages), True, token_stats
+            # 构建本次的 current_io（用于下一批次的上下文）
+            # 注意：input 使用 stripped_lines（字符串），output 使用 cleaned_result
+            current_io = (
+                stripped_lines,  # 输入行（字符串列表）
+                cleaned_result.split('\n')  # 输出行（清理后的结果按行分割）
+            )
+            
+            return final_chinese_lines, str(messages), True, token_stats, current_io
             
         except Exception as e:
             self.logger.error(f"简化翻译失败: {e}")
-            return [], "", False, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+            return [], "", False, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}, None
     
-    def _build_simple_messages(self, target_lines: List[str], context_lines: List[str] = None) -> List[Dict[str, str]]:
-        """构建简化的翻译消息"""
-        parts = []
+    def _build_simple_messages(self, target_lines: List[str], previous_io: Tuple[List[str], List[str]] = None) -> List[Dict[str, str]]:
+        """
+        构建简化的翻译消息（使用多轮对话格式）
         
-        # 前言（极简）
+        Args:
+            target_lines: 要翻译的行列表
+            previous_io: 前一次的输入输出 (input_lines, output_lines)
+        """
+        messages = []
+        
+        # 系统消息：前言（极简）
         preface_path = Path(__file__).parent.parent.parent / "data" / "preface_simple.txt"
         if preface_path.exists():
             with open(preface_path, 'r', encoding='utf-8') as f:
-                parts.append(f.read().strip())
+                system_content = f.read().strip()
+        else:
+            system_content = "将下列日语逐行翻译为中文，仅输出对应中文行；不要解释、不要添加标点以外的额外内容。严格按照行数输出，每行一个翻译结果。不要输出行号或序号。"
         
         # 术语表（可选）
         if self.config.terminology_file and self.config.terminology_file.exists():
             with open(self.config.terminology_file, 'r', encoding='utf-8') as f:
-                parts.append("术语对照表：\n" + f.read().strip())
+                terminology = f.read().strip()
+                system_content += f"\n\n术语对照表：\n{terminology}"
         
-        # 构建用户内容
+        messages.append({"role": "system", "content": system_content})
+        
+        # 添加few-shot示例（多轮对话格式，按角色分别累计行号）
+        sample_path = Path(__file__).parent.parent.parent / "data" / "samples" / "sample_simple.txt"
+        if sample_path.exists():
+            with open(sample_path, 'r', encoding='utf-8') as f:
+                sample_content = f.read().strip()
+            
+            # 解析sample_simple.txt中的多轮对话，维护 user_no 与 assistant_no 两个计数器
+            lines = sample_content.split('\n')
+            current_role = None
+            current_content: list[str] = []
+            user_no = 1
+            assistant_no = 1
+            last_user_block_start = 1
+
+            def flush_current():
+                nonlocal user_no, assistant_no, last_user_block_start, current_role, current_content
+                if current_role and current_content:
+                    numbered: list[str] = []
+                    if current_role.lower() == 'user':
+                        start_no = user_no
+                        last_user_block_start = start_no
+                        for ln in current_content:
+                            numbered.append(f"{start_no}. {ln}")
+                            start_no += 1
+                        user_no = start_no
+                    else:
+                        # assistant 与上一用户块对齐编号
+                        start_no = last_user_block_start
+                        for ln in current_content:
+                            numbered.append(f"{start_no}. {ln}")
+                            start_no += 1
+                        assistant_no = start_no
+                    content_block = '\n'.join(numbered).strip()
+                    if current_role.lower() == 'assistant':
+                        content_block = content_block + "\n[翻译完成]"
+                    messages.append({"role": current_role.lower(), "content": content_block})
+                current_content = []
+
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith('User:'):
+                    flush_current()
+                    current_role = "user"
+                    continue
+                if line.startswith('Assistant:'):
+                    flush_current()
+                    current_role = "assistant"
+                    continue
+                # 普通内容行
+                if current_role is None:
+                    current_role = "user"
+                current_content.append(line)
+
+            flush_current()
+        
+        # 添加上一次的输入输出作为上下文（如果有的话）
+        # 行号策略：分别维护 user_no / assistant_no，从few-shot延续
+        # 若无few-shot，则从1开始
+        # 下面追加 previous_io 与当前 target_lines
+        # 初始化计数器（若上面分支未定义，则定义为1）
+        try:
+            user_no  # type: ignore
+        except NameError:
+            user_no = 1  # type: ignore
+            last_user_block_start = 1  # type: ignore
+        try:
+            assistant_no  # type: ignore
+        except NameError:
+            assistant_no = 1  # type: ignore
+
+        prev_input_lines_norm: List[str] = []
+        if previous_io and previous_io[0] and previous_io[1]:
+            prev_input_lines, prev_output_lines = previous_io
+            # 将 previous_io 统一为字符串列表
+            if prev_input_lines and isinstance(prev_input_lines[0], tuple):
+                prev_input_lines_norm = [
+                    p[1] if isinstance(p, tuple) and len(p) > 1 else (p[0] if isinstance(p, tuple) else str(p))
+                    for p in prev_input_lines
+                ]
+            else:
+                prev_input_lines_norm = [str(x) for x in prev_input_lines]
+            prev_output_lines_norm = [str(x) for x in prev_output_lines]
+
+            # 依据累计编号，顺序追加 previous_io 用户与助手
+            user_buf: list[str] = []
+            start_no = user_no
+            last_user_block_start = start_no
+            for ln in prev_input_lines_norm:
+                user_buf.append(f"{start_no}. {ln}")
+                start_no += 1
+            messages.append({"role": "user", "content": "\n".join(user_buf)})
+            user_no = start_no
+
+            assist_buf: list[str] = []
+            start_no_assist = last_user_block_start
+            for ln in prev_output_lines_norm:
+                assist_buf.append(f"{start_no_assist}. {ln}")
+                start_no_assist += 1
+            messages.append({"role": "assistant", "content": "\n".join(assist_buf) + "\n[翻译完成]"})
+            assistant_no = start_no_assist
+        
+        # 构建当前翻译任务
         user_content = []
         
-        # 上下文（只读）
-        if context_lines:
-            user_content.append("上下文（仅供参考，不要翻译）：")
-            for line in context_lines:
-                user_content.append(line)
-            user_content.append("")
+        # 目标行（要翻译，带累计行号）——起点为（few-shot + previous_io）累计之后
+        # 当前要翻译的用户行：从 user_no 继续编号
+        curr_no = user_no
+        for line in target_lines:
+            user_content.append(f"{curr_no}. {line}")
+            curr_no += 1
+        user_no = curr_no
         
-        # 目标行（要翻译）
-        user_content.append("要翻译的行：")
-        for i, line in enumerate(target_lines, 1):
-            user_content.append(f"{i}. {line}")
+        messages.append({
+            "role": "user", 
+            "content": "\n".join(user_content)
+        })
         
-        parts.append("\n".join(user_content))
-        content = "\n\n".join(parts)
-        
-        return [{"role": "user", "content": content}]
+        return messages
     
     def _estimate_simple_max_tokens(self, target_lines: List[str]) -> int:
         """估算简化翻译的max_tokens（使用准确tokenizer）"""

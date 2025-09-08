@@ -115,8 +115,8 @@ class TokenAnalyzer:
         
         input_tokens = self.count_tokens(full_prompt)
         
-        # 估算输出tokens（通常比输入稍多）
-        estimated_output_tokens = int(input_tokens * 1.1)
+        # 对于逐行翻译任务，输出tokens至少是输入的3倍
+        estimated_output_tokens = max(int(input_tokens * 3.0), int(input_tokens * 1.1))
         
         # 建议的max_tokens（包含缓冲）
         suggested_max_tokens = input_tokens + estimated_output_tokens + 200

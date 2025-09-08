@@ -106,7 +106,7 @@ class StreamingHandler:
             try:
                 messages_len = len(str(messages))
                 messages_cnt = len(messages) if isinstance(messages, list) else 1
-                stop_info = f"{len(stop)} items" if stop else "None"
+                stop_info = str(stop) if stop else "None"
                 extra_keys = ",".join(sorted(extra_body.keys())) if extra_body else "None"
                 log_msg = (
                     f"调用参数: model={model}, messages={messages_cnt} (chars={messages_len}), "
