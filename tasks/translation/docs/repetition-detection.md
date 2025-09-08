@@ -46,19 +46,19 @@
 ### 基本使用
 
 ```bash
-python translate_pixiv_v1.py input.txt --model "Qwen/Qwen3-32B-AWQ"
+python -m src.translate_v3 input.txt --model "Qwen/Qwen3-32B-AWQ"
 ```
 
 ### 启用严格重复检测
 
 ```bash
-python translate_pixiv_v1.py input.txt --strict-repetition-check
+python -m src.translate_v3 input.txt --strict-repetition-check
 ```
 
 ### 启用流式输出（推荐）
 
 ```bash
-python translate_pixiv_v1.py input.txt --stream --strict-repetition-check
+python -m src.translate_v3 input.txt --stream --strict-repetition-check
 ```
 
 ## 配置参数

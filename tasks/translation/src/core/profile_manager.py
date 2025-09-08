@@ -90,9 +90,9 @@ class ProfileManager:
                 "presence_penalty": 0.0,
                 "repetition_penalty": 1.0,
                 "no_repeat_ngram_size": 0,
-                "max_tokens": 6000,
+                "max_tokens": 6000,  # 上限
                 "stop": None,
-                "watchdog_timeout_s": 120,
+                "watchdog_timeout_s": 300,
                 "log_prefix": "简化翻译",
                 "enable_repeat_guard": True
             },
@@ -103,9 +103,9 @@ class ProfileManager:
                 "presence_penalty": 0.0,
                 "repetition_penalty": 1.0,
                 "no_repeat_ngram_size": 0,
-                "max_tokens": 500,
+                "max_tokens": 1500,  # 提高QC可用生成，避免思考被截断
                 "stop": None,
-                "watchdog_timeout_s": 30,
+                "watchdog_timeout_s": 300,
                 "log_prefix": "质量检测"
             }
         }

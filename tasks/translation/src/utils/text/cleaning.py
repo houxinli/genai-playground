@@ -8,7 +8,7 @@ import re
 
 def clean_output_text(text: str) -> str:
     """
-    清理输出文本，去除思考部分等
+    清理输出文本，去除思考部分、行号等
     
     Args:
         text: 原始文本
@@ -28,6 +28,33 @@ def clean_output_text(text: str) -> str:
     # 去除其他可能的思考标记
     text = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL)
     text = re.sub(r'<reasoning>.*?</reasoning>', '', text, flags=re.DOTALL)
+    
+    # 去除行号：匹配行首的数字+点号或数字+空格模式
+    original_lines = text.split('\n')
+    cleaned_lines = []
+    line_number_removed = False
+    
+    for line in original_lines:
+        # 匹配行首的数字+点号模式 (如 "1. 内容" 或 "123. 内容")
+        if re.match(r'^\d+\.\s*', line):
+            cleaned_line = re.sub(r'^\d+\.\s*', '', line)
+            cleaned_lines.append(cleaned_line)
+            line_number_removed = True
+        # 匹配行首的数字+空格模式 (如 "1 内容" 或 "123 内容")
+        elif re.match(r'^\d+\s+', line):
+            cleaned_line = re.sub(r'^\d+\s+', '', line)
+            cleaned_lines.append(cleaned_line)
+            line_number_removed = True
+        else:
+            cleaned_lines.append(line)
+    
+    text = '\n'.join(cleaned_lines)
+    
+    # 记录行号清理日志
+    if line_number_removed:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("文本清理: 检测到并移除了行号标记")
     
     # 去除多余的空白行
     text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
