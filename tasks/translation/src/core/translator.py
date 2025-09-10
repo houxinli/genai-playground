@@ -319,7 +319,7 @@ class Translator:
             with open(sample_path, 'r', encoding='utf-8') as f:
                 parts.append("示例（Few-shot）：\n" + f.read().strip())
         # wrap input
-        parts.append(f"User:\n{text}\n\nAssistant:")
+        parts.append(text)
         content = "\n\n".join(parts)
         messages = [{"role": "user", "content": content}]
         self.logger.debug(f"{log_label}:\n" + content)
@@ -391,7 +391,7 @@ class Translator:
                 lines.append("tags: " + render_tags([str(x) for x in kv['tags']]))
             except Exception:
                 pass
-        parts.append("User:\n" + "\n".join(lines) + "\n\nAssistant:")
+        parts.append("\n".join(lines))
         content = "\n\n".join(parts)
         messages = [{"role": "user", "content": content}]
         # 调用
@@ -565,9 +565,12 @@ class Translator:
             #     for i, line in enumerate(chinese_lines, 1):
             #         self.logger.debug(f"  第{i}行: {line}")
             
-            # 检查行数是否匹配（只检查非空白行）
-            if len(chinese_lines) != len(non_empty_lines):
-                self.logger.warning(f"翻译行数不匹配：期望{len(non_empty_lines)}行（非空白），实际{len(chinese_lines)}行")
+            # 使用QC模块检查行数对齐
+            # non_empty_lines是元组列表，需要提取strip后的行
+            stripped_lines = [line_stripped for _, line_stripped in non_empty_lines]
+            alignment_ok, alignment_reason = self.quality_checker.check_line_alignment(stripped_lines, chinese_lines)
+            if not alignment_ok:
+                self.logger.warning(f"行数对齐检查失败: {alignment_reason}")
                 return [], str(messages), False, token_stats, None
             
             # 后处理：在正确位置插入空白行
@@ -588,21 +591,24 @@ class Translator:
                         return [], str(messages), False, token_stats, None
             
             
-            # 进行质量检测（规则 + LLM），不通过则让上层走降级/重试
+            # 进行质量检测（规则 + LLM），支持逐行重试策略
             try:
                 original_text_for_qc = "\n".join(stripped_lines)
                 translated_text_for_qc = cleaned_result
                 self.logger.info("对本批次进行QC LLM检测（整块+二分降级）…")
-                qc_ok, qc_reason = self.quality_checker.check_translation_quality_block_with_bisect(
+                
+                # 使用改进的QC方法（整块QC + 规则QC组合）
+                qc_result, qc_reason = self.quality_checker.check_translation_quality_with_llm(
                     original_text_for_qc,
-                    translated_text_for_qc,
-                    bilingual=True,
+                    translated_text_for_qc
                 )
-                if not qc_ok:
-                    self.logger.warning(f"QC判定不通过：{qc_reason}")
+                
+                if not qc_result:
+                    self.logger.warning(f"QC失败：{qc_reason}，返回失败让上层降级处理")
                     return [], str(messages), False, token_stats, None
                 else:
                     self.logger.info(f"QC通过：{qc_reason}")
+                    
             except Exception as _e:
                 self.logger.warning(f"QC 调用异常，视为失败：{_e}")
                 return [], str(messages), False, token_stats, None
@@ -624,10 +630,11 @@ class Translator:
             )
             
             return final_chinese_lines, str(messages), True, token_stats, current_io
-            
+        
         except Exception as e:
             self.logger.error(f"简化翻译失败: {e}")
             return [], "", False, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}, None
+
     
     def _build_simple_messages(self, target_lines: List[str], previous_io: Tuple[List[str], List[str]] = None) -> List[Dict[str, str]]:
         """

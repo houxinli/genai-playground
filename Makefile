@@ -63,10 +63,78 @@ vllm-logs-requests:
 	@echo "📝 查看 vLLM 请求日志..."
 	./scripts/manage_vllm.sh logs-requests
 
-# 翻译任务
+# 翻译任务管理
+.PHONY: translate translate-start translate-start-fg translate-start-bg translate-batch translate-batch-fg translate-batch-bg translate-stop translate-status translate-logs translate-logs-follow translate-attach
+
+# 翻译任务（前台模式）
 translate:
-	@echo "📝 执行翻译任务..."
-	$(PY) tasks/translation/scripts/test_translation.py --input tasks/translation/data/input/input_1.txt --output tasks/translation/data/output/translated.txt --model Qwen/Qwen3-32B-AWQ
+	@echo "📝 执行翻译任务（前台模式）..."
+	./scripts/manage_translation.sh start-fg $(ARGS)
+
+# 翻译任务（后台模式）
+translate-bg:
+	@echo "📝 执行翻译任务（后台模式）..."
+	./scripts/manage_translation.sh start-bg $(ARGS)
+
+# 批量翻译（前台模式）
+translate-batch:
+	@echo "📝 批量翻译（前台模式，自动跳过已翻译文件）..."
+	./scripts/manage_translation.sh batch-fg $(ARGS)
+
+# 批量翻译（后台模式）
+translate-batch-bg:
+	@echo "📝 批量翻译（后台模式，自动跳过已翻译文件）..."
+	./scripts/manage_translation.sh batch-bg $(ARGS)
+
+# 翻译任务（根据MODE参数）
+translate-start:
+	@echo "📝 启动翻译任务（MODE=$(MODE)）..."
+	./scripts/manage_translation.sh start $(ARGS)
+
+# 翻译任务（前台模式）
+translate-start-fg:
+	@echo "📝 启动翻译任务（前台模式）..."
+	./scripts/manage_translation.sh start-fg $(ARGS)
+
+# 翻译任务（后台模式）
+translate-start-bg:
+	@echo "📝 启动翻译任务（后台模式）..."
+	./scripts/manage_translation.sh start-bg $(ARGS)
+
+# 停止翻译任务
+translate-stop:
+	@echo "🛑 停止翻译任务..."
+	./scripts/manage_translation.sh stop
+
+# 查看翻译任务状态
+translate-status:
+	@echo "📊 查看翻译任务状态..."
+	./scripts/manage_translation.sh status
+
+# 查看翻译任务日志
+translate-logs:
+	@echo "📝 查看翻译任务日志..."
+	./scripts/manage_translation.sh logs
+
+# 实时查看翻译任务日志
+translate-logs-follow:
+	@echo "📝 实时查看翻译任务日志..."
+	./scripts/manage_translation.sh logs-follow
+
+# 连接到翻译任务会话
+translate-attach:
+	@echo "🔗 连接到翻译任务会话..."
+	./scripts/manage_translation.sh attach
+
+# 批量翻译（智能跳过）
+translate-batch:
+	@echo "📝 批量翻译（智能跳过）..."
+	$(PY) tasks/translation/scripts/batch_translate.py --input-dir $(INPUT_DIR) --bilingual-simple --stream --smart-skip
+
+# 批量翻译（强制重译）
+translate-batch-force:
+	@echo "📝 批量翻译（强制重译）..."
+	$(PY) tasks/translation/scripts/batch_translate.py --input-dir $(INPUT_DIR) --bilingual-simple --stream
 
 # 监听翻译进度
 monitor-translation:

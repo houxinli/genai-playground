@@ -4,6 +4,7 @@
 """
 
 import glob
+import re
 import yaml
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
@@ -29,6 +30,22 @@ class FileHandler:
         self.config = config
         self.logger = logger
         self.quality_checker = quality_checker
+    
+    def _natural_sort_key(self, filename: str) -> List:
+        """自然排序键函数，正确处理数字"""
+        # 将文件名分割为数字和非数字部分
+        parts = re.split(r'(\d+)', filename)
+        # 将数字部分转换为整数，非数字部分保持字符串
+        return [int(part) if part.isdigit() else part for part in parts]
+    
+    def _get_file_length(self, file_path: Path) -> int:
+        """获取文件长度（字符数）"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return len(content)
+        except Exception:
+            return 0
     
     def process_file(self, file_path: Path) -> bool:
         """
@@ -105,14 +122,26 @@ class FileHandler:
         
         # 4) 若是无后缀原文，检查是否已有对应的bilingual文件（除非强制覆盖）
         if not any(name.endswith(suffix) for suffix in ["_zh.txt", "_bilingual.txt", "_awq_zh.txt", "_awq_bilingual.txt"]):
-            bilingual_path = file_path.parent / f"{stem}_bilingual.txt"
+            # 检查bilingual_simple模式的输出路径
+            if self.config.bilingual_simple:
+                # bilingual_simple模式：检查 _bilingual 子目录
+                bilingual_dir = file_path.parent.parent / f"{file_path.parent.name}_bilingual"
+                bilingual_path = bilingual_dir / f"{stem}.txt"
+            else:
+                # 普通模式：检查同目录下的bilingual文件
+                bilingual_path = file_path.parent / f"{stem}_bilingual.txt"
+            
             if bilingual_path.exists() and not self.config.overwrite:
-                if self._check_existing_bilingual_quality(bilingual_path):
-                    self.logger.info(f"已有高质量bilingual文件，跳过: {file_path}")
-                    return False
+                # Debug模式下，每次都是新文件（带时间戳），不需要跳过
+                if self.config.debug:
+                    self.logger.info(f"Debug模式：跳过质量检查: {file_path}")
                 else:
-                    self.logger.info(f"删除低质量bilingual文件: {bilingual_path}")
-                    bilingual_path.unlink()
+                    if self._check_existing_bilingual_quality(bilingual_path):
+                        self.logger.info(f"已有高质量bilingual文件，跳过: {file_path}")
+                        return False
+                    else:
+                        self.logger.info(f"删除低质量bilingual文件: {bilingual_path}")
+                        bilingual_path.unlink()
         
         return True
     
@@ -186,8 +215,8 @@ class FileHandler:
             if path.is_file():
                 files.append(path)
             elif path.is_dir():
-                # 查找目录中的txt文件
-                txt_files = list(path.glob("*.txt"))
+                # 查找目录中的txt文件并按自然顺序排序
+                txt_files = sorted(path.glob("*.txt"), key=lambda x: self._natural_sort_key(x.name))
                 files.extend(txt_files)
             else:
                 # 尝试glob模式
@@ -199,5 +228,10 @@ class FileHandler:
         for file_path in files:
             if self._should_process_file(file_path):
                 filtered_files.append(file_path)
+        
+        # 按长度排序（如果启用）
+        if self.config.sort_by_length:
+            filtered_files.sort(key=lambda x: self._get_file_length(x), reverse=True)
+            self.logger.info(f"按文件长度排序（从长到短）")
         
         return filtered_files

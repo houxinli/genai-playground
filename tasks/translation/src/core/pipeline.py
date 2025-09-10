@@ -60,6 +60,10 @@ class TranslationPipeline:
         self.logger.info(f"开始处理 {len(files_to_process)} 个文件")
         
         # 应用限制
+        if self.config.offset > 0:
+            files_to_process = files_to_process[self.config.offset:]
+            self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(files_to_process)} 个文件")
+        
         if self.config.limit > 0:
             files_to_process = files_to_process[:self.config.limit]
             self.logger.info(f"限制处理文件数量为: {len(files_to_process)}")
@@ -133,10 +137,32 @@ class TranslationPipeline:
         # 确定输出文件路径
         output_path = self._get_output_path(path)
         
+        # 设置当前文件路径（用于批次更新）
+        self.current_file_path = path
+        
         # 检查是否需要处理
         if not self.config.overwrite and output_path.exists():
-            self.logger.info(f"输出文件已存在，跳过: {output_path}")
-            return True
+            # Debug模式下，每次都是新文件（带时间戳），不需要跳过
+            if self.config.debug:
+                self.logger.info(f"Debug模式：文件已存在但会重新处理: {output_path}")
+            else:
+                # 对于bilingual_simple模式，需要检查文件质量
+                if self.config.bilingual_simple:
+                    # 使用质量检查器检查现有文件质量
+                    if self.file_handler._check_existing_bilingual_quality(output_path):
+                        self.logger.info(f"高质量双语文件已存在，跳过: {output_path}")
+                        return True
+                    else:
+                        self.logger.info(f"低质量双语文件存在，将重新翻译: {output_path}")
+                        # 删除低质量文件
+                        try:
+                            output_path.unlink()
+                            self.logger.info(f"已删除低质量文件: {output_path}")
+                        except Exception as e:
+                            self.logger.warning(f"删除低质量文件失败: {e}")
+                else:
+                    self.logger.info(f"输出文件已存在，跳过: {output_path}")
+                    return True
         
         # 先分别处理 YAML 与 正文
         if yaml_data:
@@ -261,6 +287,13 @@ class TranslationPipeline:
             ok, reason = self.quality_checker.check_yaml_quality_rules(yaml_block_full, yaml_translated)
             if not ok:
                 self.logger.warning(f"YAML 规则检测未通过：{reason}")
+            
+            # 如果是bilingual_simple模式，先预创建文件
+            if self.config.bilingual_simple:
+                self._create_prefilled_bilingual_file(content, output_path)
+                # YAML翻译完成后立即更新文件
+                self._update_bilingual_file_yaml(output_path, yaml_translated)
+            
             # 若仅翻译元数据，则不处理正文
             if getattr(self.config, 'metadata_only', False):
                 translated_content = yaml_translated
@@ -276,6 +309,11 @@ class TranslationPipeline:
             if getattr(self.config, 'metadata_only', False):
                 self.logger.warning("启用了 --metadata-only 但输入不含 YAML，跳过文件")
                 return False
+            
+            # 如果是bilingual_simple模式，先预创建文件
+            if self.config.bilingual_simple:
+                self._create_prefilled_bilingual_file(content, output_path)
+            
             translated_content = self._translate_text(content)
         
         if not translated_content:
@@ -547,6 +585,125 @@ class TranslationPipeline:
             i += 2
         return '\n'.join(out)
     
+    def _create_prefilled_bilingual_file(self, text_content: str, output_path: Path) -> None:
+        """
+        创建预填充的双语文件，未翻译行标注为[翻译未完成]
+        """
+        lines = text_content.splitlines(keepends=True)
+        if not lines:
+            return
+        
+        # 过滤掉YAML部分（如果存在）
+        start_idx = 0
+        if lines and lines[0].strip() == '---':
+            # 找到YAML结束位置
+            for i, line in enumerate(lines[1:], 1):
+                if line.strip() == '---':
+                    start_idx = i + 1
+                    break
+        
+        # 创建预填充内容
+        prefilled_lines = []
+        for i, line in enumerate(lines):
+            if i < start_idx:
+                # YAML部分保持原样
+                prefilled_lines.append(line)
+            else:
+                # 正文部分
+                if line.strip():
+                    # 有内容的行标注为[翻译未完成]
+                    prefilled_lines.append(f"{line.rstrip()}\n[翻译未完成]\n")
+                else:
+                    # 空白行保持原样
+                    prefilled_lines.append(line)
+        
+        # 确保输出目录存在
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 写入预填充文件
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.writelines(prefilled_lines)
+        
+        self.logger.info(f"📝 预创建双语文件: {output_path}")
+
+    def _update_bilingual_file_yaml(self, output_path: Path, yaml_translated: str) -> None:
+        """
+        更新双语文件中的YAML部分
+        """
+        if not output_path.exists():
+            self.logger.warning(f"输出文件不存在: {output_path}")
+            return
+        
+        # 读取现有文件内容
+        with open(output_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        # 找到YAML结束位置
+        yaml_end_idx = 0
+        if lines and lines[0].strip() == '---':
+            for i, line in enumerate(lines[1:], 1):
+                if line.strip() == '---':
+                    yaml_end_idx = i + 1
+                    break
+        
+        # 替换YAML部分
+        yaml_lines = yaml_translated.split('\n')
+        new_lines = []
+        for i, line in enumerate(yaml_lines):
+            new_lines.append(line + '\n')
+        
+        # 保留YAML后的内容
+        if yaml_end_idx < len(lines):
+            new_lines.extend(lines[yaml_end_idx:])
+        
+        # 写回文件
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+        
+        self.logger.info(f"✅ 更新双语文件YAML部分: {output_path}")
+
+    def _update_bilingual_file_batch(self, output_path: Path, batch_start_idx: int, batch_end_idx: int, 
+                                    bilingual_lines: list) -> None:
+        """
+        更新双语文件中的特定批次行
+        """
+        if not output_path.exists():
+            self.logger.warning(f"输出文件不存在: {output_path}")
+            return
+        
+        # 读取现有文件内容
+        with open(output_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        # 找到YAML结束位置
+        yaml_end_idx = 0
+        if lines and lines[0].strip() == '---':
+            for i, line in enumerate(lines[1:], 1):
+                if line.strip() == '---':
+                    yaml_end_idx = i + 1
+                    break
+        
+        # 计算在文件中的实际行索引
+        file_start_idx = yaml_end_idx + batch_start_idx * 2  # 每行原文+译文占2行
+        file_end_idx = yaml_end_idx + batch_end_idx * 2
+        
+        # 更新文件内容
+        bilingual_lines_split = []
+        for line in bilingual_lines:
+            bilingual_lines_split.extend(line.split('\n'))
+        
+        for i, bilingual_line in enumerate(bilingual_lines_split):
+            file_idx = file_start_idx + i
+            if file_idx < len(lines):
+                # 替换对应的行
+                lines[file_idx] = bilingual_line + '\n'
+        
+        # 写回文件
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+        
+        self.logger.info(f"✅ 更新双语文件批次 {batch_start_idx+1}-{batch_end_idx}: {output_path}")
+
     def _translate_text_simple_bilingual(self, text_content: str) -> str:
         """
         简化的bilingual翻译方法
@@ -596,15 +753,19 @@ class TranslationPipeline:
         content_i = 0
         previous_io = None  # 跟踪前一次的输入输出
         start_time = time.time()  # 记录开始时间
-        # 单篇文章超时（秒），默认3600；可通过config.article_timeout_s配置
-        max_duration = getattr(self.config, 'article_timeout_s', 3600)
+        # 单篇文章超时（秒），使用config中的配置
+        max_duration = self.config.article_timeout_s
         
         while content_i < len(content_lines):
             # 检查时间限制
             elapsed_time = time.time() - start_time
             if elapsed_time > max_duration:
-                self.logger.warning(f"翻译超时（{elapsed_time:.1f}秒），停止处理，已翻译 {content_i} 行有内容行")
+                self.logger.warning(f"翻译超时（{elapsed_time:.1f}秒 > {max_duration}秒），停止处理，已翻译 {content_i} 行有内容行")
                 break
+            
+            # 每10分钟记录一次进度
+            if content_i > 0 and int(elapsed_time) % 600 == 0:
+                self.logger.info(f"翻译进度: {content_i}/{len(content_lines)} 行，耗时 {elapsed_time:.1f}秒")
                 
             # 确定当前批次的有内容行
             content_end_idx = min(content_i + content_batch_size, len(content_lines))
@@ -653,11 +814,23 @@ class TranslationPipeline:
                 # 将对照结果按行添加到翻译结果中
                 translated_lines.extend(bilingual_result.split('\n'))
                 
+                # 更新预创建的双语文件
+                current_output_path = self._get_output_path(self.current_file_path)
+                self._update_bilingual_file_batch(current_output_path, content_i, content_end_idx, 
+                                                bilingual_result.split('\n'))
+                
                 # 更新前一次的输入输出（用于下一批次的上下文）
                 # 使用翻译器返回的 current_io
                 previous_io = current_io
                 
-                self.logger.info(f"批次翻译成功，Token使用: {token_stats}")
+                # 记录批次完成信息
+                batch_num = content_i//content_batch_size + 1
+                self.logger.info(f"✅ 批次 {batch_num} 翻译完成:")
+                self.logger.info(f"   📝 日志文件: {self.logger.log_file_path}")
+                self.logger.info(f"   📄 输出文件: {current_output_path}")
+                self.logger.info(f"   🔢 Token使用: {token_stats}")
+                self.logger.info(f"   📊 进度: {content_end_idx}/{len(content_lines)} 行")
+                
                 content_i = content_end_idx
                 # 累计成功批次数，按阶梯逐步回升批量（例如 25→50→100）
                 consecutive_success_batches += 1

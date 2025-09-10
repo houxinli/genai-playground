@@ -1,0 +1,42 @@
+feat(translation): 增强质量检查与规则集成，完善脚本工具链
+
+主要变更：
+- 质量检查器增强：规则集成、双语处理、更细粒度的校验
+- Pipeline 优化：streaming 处理逻辑改进、错误处理增强
+- CLI 与配置：参数扩展、配置管理完善
+- 脚本工具链：新增 QC 脚本、辅助工具、监控改进
+
+详细变更：
+- tasks/translation/src/core/pipeline.py：streaming 逻辑优化（+185/-）
+- tasks/translation/src/core/quality_checker.py：规则集成与双语处理（+411/-）
+- tasks/translation/src/core/streaming_handler.py：处理逻辑重构（+223/-）
+- tasks/translation/src/core/config.py：配置项扩展（+14/-）
+- tasks/translation/src/core/file_handler.py：文件处理增强（+50/-）
+- tasks/translation/src/cli/__init__.py：CLI 参数扩展（+8/-）
+
+新增脚本与工具：
+- scripts/qc_bilingual.py：双语质量检查脚本
+- scripts/qc_bilingual_handler.py：QC 处理器
+- scripts/check_bilingual_simple.py：简单双语检查
+- scripts/list_files_by_length.py：按长度列出文件
+- scripts/manage_translation.sh：翻译管理脚本
+- scripts/monitor_translation.sh：监控脚本更新
+
+测试与文档：
+- 更新所有 validation 测试：更全面的测试覆盖
+- tasks/translation/README.md：文档完善（+171/-）
+- Makefile：构建规则完善（+74/-）
+
+技术改进：
+- 规则驱动的质量检查：可配置的校验规则
+- 双语处理优化：更准确的质量评估
+- 流式处理改进：更好的错误恢复与状态管理
+- 工具链完善：从检查到管理的完整工具集
+
+统计：
+- 20 files changed, 1260 insertions(+), 347 deletions(-)
+
+后续计划：
+- 集成 CI 测试流程
+- 完善 QC 规则配置化
+- 优化监控与告警机制

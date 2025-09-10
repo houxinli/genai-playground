@@ -12,35 +12,39 @@ from typing import Tuple
 _KANA_PATTERN = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\uFF66-\uFF9D]")
 
 
-def has_chinese_copying_japanese(original_text: str, translated_text: str, bilingual: bool = True) -> bool:
-    """若发现任意同位置行：原文==译文 且 两侧均含假名，则认为发生了复制。
-
+def has_chinese_copying_japanese_lines(original_lines: list[str], translated_lines: list[str], bilingual: bool = True) -> list[str]:
+    """逐行检测中文译文是否直接复制了日语原文，返回每行的判定结果。
+    
     Args:
-        original_text: 原文（可能多行）
-        translated_text: 译文（可能多行）
+        original_lines: 原文行列表
+        translated_lines: 译文行列表
         bilingual: 是否为对照模式（未使用，仅保留兼容参数）
-
+    
     Returns:
-        True 表示存在复制现象；False 表示未命中该启发式。
+        list[str]: 每行的判定结果，'GOOD'或'BAD'
     """
-    if not original_text or not translated_text:
-        return False
-
-    original_lines = [ln.strip() for ln in original_text.split("\n") if ln is not None]
-    translated_lines = [ln.strip() for ln in translated_text.split("\n") if ln is not None]
-
-    if len(original_lines) != len(translated_lines):
-        # 行数不等时，不做该规则判定（交由其他规则/LLM处理）
-        return False
-
-    for orig, tran in zip(original_lines, translated_lines):
+    verdicts = []
+    n = min(len(original_lines), len(translated_lines))
+    
+    for i in range(n):
+        orig = original_lines[i]
+        tran = translated_lines[i]
+        
         if not orig or not tran:
+            verdicts.append('GOOD')
             continue
-        # 两侧都含假名，且文本完全一致 → 明确复制
-        if _KANA_PATTERN.search(orig) and _KANA_PATTERN.search(tran) and (orig == tran):
-            return True
-
-    return False
+            
+        # 检查是否完全相同且都包含假名
+        if orig == tran and _KANA_PATTERN.search(orig) and _KANA_PATTERN.search(tran):
+            verdicts.append('BAD')
+        else:
+            verdicts.append('GOOD')
+    
+    # 补齐长度
+    while len(verdicts) < len(original_lines):
+        verdicts.append('BAD')
+    
+    return verdicts
 
 
 
