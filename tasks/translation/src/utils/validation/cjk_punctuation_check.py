@@ -11,14 +11,36 @@ _CJK_RUN = re.compile(r"[\u4e00-\u9fa5A-Za-z0-9]{80,}")
 _CJK_SEPS = re.compile(r"[，、；。！？……]")
 
 
-def validate_cjk_separators(text: str, sample_tail: int = 1200) -> Tuple[bool, str]:
-    tail = text[-sample_tail:] if text and len(text) > sample_tail else (text or "")
-    runs = _CJK_RUN.findall(tail)
-    if not runs:
-        return True, "标点检查通过"
-    if not _CJK_SEPS.search(''.join(runs)):
-        return False, "中文句中疑似缺少分隔标点"
-    return True, "标点检查通过"
+def validate_cjk_separators_lines(translated_lines: list[str], sample_tail: int = 1200) -> list[str]:
+    """逐行检查中文标点分隔符，返回每行的判定结果。
+    
+    Args:
+        translated_lines: 译文行列表
+        sample_tail: 检查尾部字符数
+    
+    Returns:
+        list[str]: 每行的判定结果，'GOOD'或'BAD'
+    """
+    verdicts = []
+    
+    for line in translated_lines:
+        if not line:
+            verdicts.append('GOOD')
+            continue
+            
+        # 检查是否有长串中文字符
+        runs = _CJK_RUN.findall(line)
+        if not runs:
+            verdicts.append('GOOD')
+            continue
+            
+        # 检查是否包含分隔标点
+        if not _CJK_SEPS.search(''.join(runs)):
+            verdicts.append('BAD')
+        else:
+            verdicts.append('GOOD')
+    
+    return verdicts
 
 
 

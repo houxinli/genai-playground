@@ -4,17 +4,22 @@
 
 ```
 tasks/translation/
-├── data/           # 数据文件
-│   ├── input/      # 输入文件（日语原文）
-│   ├── output/     # 输出文件（中文译文）
-│   └── samples/    # 示例文件（用于few-shot learning）
-├── scripts/        # 脚本文件
-│   ├── test_prompt.py        # 测试翻译prompt
-│   ├── translate_stable.py    # 稳定版本翻译脚本
-│   ├── translate_exp.py       # 实验版本翻译脚本
-│   └── manage_versions.py     # 版本管理工具
-├── logs/           # 日志文件
-└── README.md       # 本文件
+├── translate                   # 可执行包装器（调用 src/translate.py）
+├── src/                        # 翻译系统源码
+│   ├── translate.py           # 主入口（模块化）
+│   ├── core/                  # 核心翻译模块
+│   └── cli/                   # 命令行接口
+├── scripts/                    # 辅助脚本
+│   ├── cleanup_bad_outputs.py # 清理异常双语输出
+│   └── README.md              # 脚本说明
+├── docs/                       # 翻译任务文档
+│   └── README.md              # 详细使用指南
+├── data/                       # 数据目录
+│   ├── debug/                 # 调试文件
+│   ├── samples/               # 示例文件
+│   ├── test/                  # 测试数据
+│   └── terminology.txt        # 术语对照表
+└── logs/                       # 日志目录
 ```
 
 ## 使用方法
@@ -22,33 +27,105 @@ tasks/translation/
 ### 1. 启动翻译服务
 
 ```bash
-# 使用 Qwen3-14B 模型（推荐，四张显卡）
+# 使用主项目的管理脚本
+make vllm-start
+
+# 后台启动
 make vllm-start-bg
 
-# 或者指定其他模型
-MODEL=Qwen/Qwen3-30B-A3B-Instruct-2507 TP_SIZE=4 make vllm-start-bg
+# 启动 32B 完整模型
+make vllm-start-32b
+
+# 调试模式启动
+make vllm-start-debug
 ```
 
 ### 2. 测试翻译功能
 
 ```bash
-# 运行测试
-python tasks/translation/scripts/test_prompt.py
+# 基本翻译测试
+make vllm-test
 
-# 翻译文件
-python tasks/translation/scripts/translate_stable.py --input data/input/input_1.txt --output data/output/translated.txt
+# 批量翻译（需要指定输入目录）
+make translate-batch INPUT_DIR=tasks/translation/data/pixiv/50235390
 
-# 使用实验版本
-python tasks/translation/scripts/translate_exp.py --input data/input/input_1.txt --output data/output/translated.txt
+# 智能批量翻译（跳过质量良好的文件）
+make translate-batch-smart INPUT_DIR=tasks/translation/data/pixiv/50235390
 ```
 
-### 3. 数据准备
+### 3. 翻译模式
 
-将您的日语原文放在input目录：
+#### 前台模式（实时查看进度）
+```bash
+# 前台运行，实时显示翻译进度
+./translate input1.txt --bilingual-simple --stream
+
+# 或使用管理脚本
+make translate-start-fg ARGS="input1.txt --bilingual-simple --stream"
+```
+
+#### 后台模式（SSH断开不影响）
+```bash
+# 后台运行，SSH断开后任务继续
+make translate-start-bg ARGS="input1.txt --bilingual-simple --stream"
+
+# 或直接使用管理脚本
+./scripts/manage_translation.sh start-bg input1.txt --bilingual-simple --stream
+```
+
+#### 后台模式使用技巧
+```bash
+# 1. 启动后台翻译任务
+make translate-start-bg ARGS="tasks/translation/data/pixiv/50235390/25341719.txt --bilingual-simple --stream"
+
+# 2. 查看任务状态
+make translate-status
+
+# 3. 实时查看翻译进度
+make translate-attach
+# 或
+tmux attach -t translation
+
+# 4. 退出tmux会话（任务继续运行）
+# 按 Ctrl-b d
+
+# 5. 实时查看日志
+make translate-logs-follow
+
+# 6. 停止翻译任务
+make translate-stop
+```
+
+#### 进度监控
+```bash
+# 查看翻译状态和进度
+./scripts/monitor_translation.sh status
+
+# 实时监控翻译进度
+./scripts/monitor_translation.sh monitor
+
+# 查看翻译统计信息
+./scripts/monitor_translation.sh stats
+```
+
+#### 简化双语模式 (bilingual_simple)
+简化双语模式是专门为长文本翻译优化的模式，具有以下特点：
+
+- **确定性参数**: 使用 temperature=0.0, top_p=1.0 确保输出稳定
+- **小批量处理**: 默认每批处理 50 行，避免上下文溢出
+- **代码拼接**: 使用代码逻辑拼接翻译结果，提高效率
+- **上下文保持**: 每批翻译包含前后 3 行上下文，保持连贯性
+- **重复检测**: 内置重复检测机制，避免重复翻译
 
 ```bash
-# 日语原文
-cp your_japanese_novel.txt tasks/translation/data/input/
+# 使用简化双语模式
+./translate input.txt --bilingual-simple --stream
+
+# 自定义批处理大小
+./translate input.txt --bilingual-simple --line-batch-size-lines 30 --stream
+
+# 自定义上下文行数
+./translate input.txt --bilingual-simple --context-lines 5 --stream
 ```
 
 ## 模型选择
@@ -64,30 +141,43 @@ cp your_japanese_novel.txt tasks/translation/data/input/
 - 准确翻译专业术语
 - 保留表情符号和语气词
 
-## 版本管理
+## 高级功能
 
-项目采用双版本管理策略：
-- **stable版本**: 经过测试的稳定版本，推荐用于生产环境
-- **exp版本**: 实验版本，用于测试新功能
-
-### 版本管理命令
+### 质量检测
+系统内置质量检测功能，可以自动检测翻译质量：
 
 ```bash
-# 列出版本
-python tasks/translation/scripts/manage_versions.py list
+# 启用质量检测
+./translate input.txt --bilingual-simple --stream
 
-# 将实验版本提升为稳定版本
-python tasks/translation/scripts/manage_versions.py promote
+# 禁用LLM质量检测（仅使用规则检测）
+./translate input.txt --bilingual-simple --no-llm-check --stream
 
-# 创建新的实验版本（基于当前稳定版本）
-python tasks/translation/scripts/manage_versions.py new
+# 启用严格重复检测
+./translate input.txt --bilingual-simple --strict-repetition-check --stream
 ```
 
-### 工作流程
+### 分块翻译
+对于超长文本，支持分块翻译：
 
-1. 在exp版本中开发和测试新功能
-2. 测试通过后，使用`promote`命令将exp版本提升为stable版本
-3. 使用`new`命令创建新的exp版本，继续开发
+```bash
+# 字符级分块
+./translate input.txt --mode chunked --chunk-size-chars 15000 --stream
+
+# 行级分块
+./translate input.txt --mode chunked --line-chunk-size-lines 100 --stream
+```
+
+### 重试机制
+内置重试机制，提高翻译成功率：
+
+```bash
+# 自定义重试次数和等待时间
+./translate input.txt --retries 5 --retry-wait 3.0 --stream
+
+# 上下文溢出时自动降级为分块
+./translate input.txt --fallback-on-context --stream
+```
 
 ## 注意事项
 
@@ -96,3 +186,4 @@ python tasks/translation/scripts/manage_versions.py new
 3. 翻译结果会保存在 `data/output/` 目录
 4. 日志文件保存在 `logs/` 目录
 5. 输入输出文件会被git忽略，避免提交版权内容
+6. 简化双语模式特别适合长文本翻译，能有效避免上下文溢出问题

@@ -46,7 +46,9 @@ class StreamingHandler:
                           log_prefix: str = "模型输出",
                           watchdog_timeout_s: Optional[int] = None,
                           sentinel_prefix: Optional[str] = None,
-                          enable_repeat_guard: bool = True) -> Tuple[str, Dict[str, int]]:
+                          enable_repeat_guard: bool = True,
+                          max_retries: int = 3,
+                          retry_delay_s: float = 2.0) -> Tuple[str, Dict[str, int]]:
         """
         执行流式完成
         
@@ -71,7 +73,7 @@ class StreamingHandler:
             try:
                 if self.logger:
                     pretty = self._format_messages(messages)
-                    self.logger.info(f"{log_prefix} Prompt (messages):\n{pretty}", mode=UnifiedLogger.LogMode.FILE)
+                    self.logger.info(f"{log_prefix} Prompt (messages):\n{pretty}", mode=UnifiedLogger.LogMode.BOTH)
             except Exception:
                 pass
             req_kwargs = dict(
@@ -121,116 +123,139 @@ class StreamingHandler:
             except Exception:
                 pass
 
-            resp = self.client.chat.completions.create(**req_kwargs)
-            
-            result = ""
-            current_line = ""
-            flush_threshold = getattr(self.config, 'stream_line_flush_chars', 60) if self.config else 60
-            # 重复 token 截断控制
-            last_piece: Optional[str] = None
-            repeat_count: int = 0
-            start_time = time.time()
-            finish_reason = "unknown"  # 记录结束原因
-
-            def flush_current_line(reason: str) -> None:
-                nonlocal current_line
-                if current_line.strip():
-                    if self.logger:
-                        # 仅写文件
-                        self.logger.debug(f"{log_prefix}: {current_line}", mode=UnifiedLogger.LogMode.FILE)
-                current_line = ""
-            
-            for chunk in resp:
-                # 检查是否有finish_reason
-                if hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason:
-                    finish_reason = chunk.choices[0].finish_reason
-                
-                if chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    # 检测重复 token（以增量 piece 作为粒度）
-                    piece = content
-                    if piece == last_piece:
-                        repeat_count += 1
-                    else:
-                        last_piece = piece
-                        repeat_count = 0
-                    # 仅当重复的是极短片段（如单字符/空白），并且重复次数很高时才截断
-                    if enable_repeat_guard and len(piece.strip()) <= 1 and repeat_count > 40:
+            # 重试逻辑
+            last_exception = None
+            for attempt in range(max_retries + 1):
+                try:
+                    if attempt > 0:
                         if self.logger:
-                            self.logger.warning(f"{log_prefix}: 检测到极短增量内容连续重复超过 20 次，提前截断流。")
-                        finish_reason = "repetition_guard"
-                        break
-                    result += content
-                    current_line += content
+                            self.logger.warning(f"{log_prefix}: 第{attempt}次重试，延迟{retry_delay_s}秒...")
+                        time.sleep(retry_delay_s)
                     
-                    # 仅将增量内容流式输出到控制台（不通过logger，避免[DEBUG]标签）
-                    print(content, end="", flush=True)
+                    resp = self.client.chat.completions.create(**req_kwargs)
                     
-                    # 检查是否完成了一行
-                    if '\n' in current_line:
-                        lines = current_line.split('\n')
-                        for line in lines[:-1]:
-                            current_line = line
-                            flush_current_line('newline')
-                        current_line = lines[-1]
-                    elif len(current_line) >= flush_threshold:
-                        flush_current_line('threshold')
+                    result = ""
+                    current_line = ""
+                    flush_threshold = getattr(self.config, 'stream_line_flush_chars', 60) if self.config else 60
+                    # 重复 token 截断控制
+                    last_piece: Optional[str] = None
+                    repeat_count: int = 0
+                    start_time = time.time()
+                    finish_reason = "unknown"  # 记录结束原因
 
-                    # 看门狗：时间超时
-                    if watchdog_timeout_s is not None and watchdog_timeout_s > 0:
-                        if time.time() - start_time > watchdog_timeout_s:
+                    def flush_current_line(reason: str) -> None:
+                        nonlocal current_line
+                        if current_line.strip():
                             if self.logger:
-                                self.logger.warning(f"{log_prefix}: 超过流式超时 {watchdog_timeout_s}s，提前停止读取。")
-                            finish_reason = "timeout"
-                            break
-
-                    # 看门狗：长片段重复（检测尾部n-gram三连）
-                    if enable_repeat_guard:
-                        tail = result[-480:]
-                        if len(tail) >= 120:
-                            n = 120
-                            a = tail[-n:]
-                            b = tail[-2*n:-n]
-                            c = tail[-3*n:-2*n]
-                            if a and a == b == c:
+                                # 仅写文件
+                                self.logger.debug(f"{log_prefix}: {current_line}", mode=UnifiedLogger.LogMode.FILE)
+                        current_line = ""
+                    
+                    for chunk in resp:
+                        # 检查是否有finish_reason
+                        if hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason:
+                            finish_reason = chunk.choices[0].finish_reason
+                        
+                        if chunk.choices[0].delta.content:
+                            content = chunk.choices[0].delta.content
+                            # 检测重复 token（以增量 piece 作为粒度）
+                            piece = content
+                            if piece == last_piece:
+                                repeat_count += 1
+                            else:
+                                last_piece = piece
+                                repeat_count = 0
+                            # 仅当重复的是极短片段（如单字符/空白），并且重复次数很高时才截断
+                            if enable_repeat_guard and len(piece.strip()) <= 1 and repeat_count > 40:
                                 if self.logger:
-                                    self.logger.warning(f"{log_prefix}: 检测到尾部片段重复三次，提前停止读取。")
+                                    self.logger.warning(f"{log_prefix}: 检测到极短增量内容连续重复超过 20 次，提前截断流。")
                                 finish_reason = "repetition_guard"
                                 break
+                            result += content
+                            current_line += content
+                            
+                            # 仅将增量内容流式输出到控制台（不通过logger，避免[DEBUG]标签）
+                            print(content, end="", flush=True)
+                            
+                            # 检查是否完成了一行
+                            if '\n' in current_line:
+                                lines = current_line.split('\n')
+                                for line in lines[:-1]:
+                                    current_line = line
+                                    flush_current_line('newline')
+                                current_line = lines[-1]
+                            elif len(current_line) >= flush_threshold:
+                                flush_current_line('threshold')
 
-                    # 哨兵：检测结论行
-                    if sentinel_prefix and sentinel_prefix in result:
-                        # 找到结论行后提前结束
-                        finish_reason = "sentinel"
-                        break
+                            # 看门狗：时间超时
+                            if watchdog_timeout_s is not None and watchdog_timeout_s > 0:
+                                if time.time() - start_time > watchdog_timeout_s:
+                                    if self.logger:
+                                        self.logger.warning(f"{log_prefix}: 超过流式超时 {watchdog_timeout_s}s，提前停止读取。")
+                                    finish_reason = "timeout"
+                                    break
+
+                            # 看门狗：长片段重复（检测尾部n-gram三连）
+                            if enable_repeat_guard:
+                                tail = result[-480:]
+                                if len(tail) >= 120:
+                                    n = 120
+                                    a = tail[-n:]
+                                    b = tail[-2*n:-n]
+                                    c = tail[-3*n:-2*n]
+                                    if a and a == b == c:
+                                        if self.logger:
+                                            self.logger.warning(f"{log_prefix}: 检测到尾部片段重复三次，提前停止读取。")
+                                        finish_reason = "repetition_guard"
+                                        break
+
+                            # 哨兵：检测结论行
+                            if sentinel_prefix and sentinel_prefix in result:
+                                # 找到结论行后提前结束
+                                finish_reason = "sentinel"
+                                break
+                    
+                    # 收尾：统一用 flush 逻辑
+                    if current_line:
+                        flush_current_line('end')
+                    
+                    print()  # 换行
+                    
+                    # 计算token统计（这里简化处理，实际可能需要更精确的计算）
+                    token_stats = {
+                        'input_tokens': len(str(messages)) // 4,  # 粗略估算
+                        'output_tokens': len(result) // 4,  # 粗略估算
+                        'total_tokens': 0,
+                        'max_tokens': max_tokens,
+                        'finish_reason': finish_reason
+                    }
+                    token_stats['total_tokens'] = token_stats['input_tokens'] + token_stats['output_tokens']
+                    
+                    # 记录模型调用完成和token统计
+                    if self.logger:
+                        self.logger.info(f"模型调用完成，Token使用情况: {token_stats}")
+                    
+                    return result, token_stats
+                    
+                except Exception as e:
+                    last_exception = e
+                    if self.logger:
+                        self.logger.error(f"{log_prefix}: 第{attempt + 1}次尝试失败: {e}")
+                    
+                    # 如果是最后一次尝试，抛出异常
+                    if attempt == max_retries:
+                        if self.logger:
+                            self.logger.error(f"{log_prefix}: 重试{max_retries}次后仍然失败，放弃重试")
+                        raise e
             
-            # 收尾：统一用 flush 逻辑
-            if current_line:
-                flush_current_line('end')
-            
-            print()  # 换行
-            
-            # 计算token统计（这里简化处理，实际可能需要更精确的计算）
-            token_stats = {
-                'input_tokens': len(str(messages)) // 4,  # 粗略估算
-                'output_tokens': len(result) // 4,  # 粗略估算
-                'total_tokens': 0,
-                'max_tokens': max_tokens,
-                'finish_reason': finish_reason
-            }
-            token_stats['total_tokens'] = token_stats['input_tokens'] + token_stats['output_tokens']
-            
-            # 记录模型调用完成和token统计
-            if self.logger:
-                self.logger.info(f"模型调用完成，Token使用情况: {token_stats}")
-            
-            return result, token_stats
-            
+            # 这里不应该到达，但为了安全起见
+            if last_exception:
+                raise last_exception
+                
         except Exception as e:
             if self.logger:
                 self.logger.error(f"{log_prefix}流式调用失败: {e}")
             raise e
-
 
     def stream_with_params(self, model: str, messages: list, params: GenerationParams) -> Tuple[str, Dict[str, int]]:
         """使用统一参数schema发起流式调用。"""
@@ -249,6 +274,8 @@ class StreamingHandler:
             watchdog_timeout_s=params.watchdog_timeout_s,
             sentinel_prefix=params.sentinel_prefix,
             enable_repeat_guard=params.enable_repeat_guard,
+            max_retries=getattr(self.config, 'max_retries', 3),
+            retry_delay_s=getattr(self.config, 'retry_delay_s', 2.0),
         )
 
     # ===== Utilities =====

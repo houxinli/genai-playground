@@ -36,7 +36,6 @@ class TestQualityCheckerLLM(unittest.TestCase):
         ok, reason = qc.check_translation_quality_with_llm(
             original_text="彼は走った。\n立ち上がった。",
             translated_text="他跑了起来。\n他站起来了。",
-            bilingual=True,
         )
         self.assertTrue(ok, msg=reason)
 
@@ -47,7 +46,6 @@ class TestQualityCheckerLLM(unittest.TestCase):
         ok, reason = qc.check_translation_quality_with_llm(
             original_text="彼は走った。\n立ち上がった。",
             translated_text="彼は走った。\n他站起来了。",
-            bilingual=True,
         )
         self.assertFalse(ok)
         self.assertIn("BAD", reason)

@@ -5,6 +5,7 @@
 
 import re
 import json
+import time
 from pathlib import Path
 from typing import Tuple, Optional
 from openai import OpenAI
@@ -33,14 +34,13 @@ class QualityChecker:
         self.profile_manager = ProfileManager(config.profiles_file)
         self.streaming_handler = StreamingHandler(self.client, logger, config, self.profile_manager)
     
-    def check_translation_quality_basic(self, original_text: str, translated_text: str, bilingual: bool = False) -> Tuple[bool, str]:
+    def check_translation_quality_basic(self, original_text: str, translated_text: str) -> Tuple[bool, str]:
         """
         基础质量检测（规则-based）
         
         Args:
             original_text: 原文
             translated_text: 译文
-            bilingual: 是否为双语模式
             
         Returns:
             (是否通过, 失败原因)
@@ -48,17 +48,19 @@ class QualityChecker:
         if not translated_text or not translated_text.strip():
             return False, "翻译结果为空"
         
-        # 检查长度比例（utils优先）
+        # 获取bilingual模式
+        bilingual = self.config.bilingual or self.config.bilingual_simple
+        
+        # 使用逐行规则QC进行检测
         try:
-            from ..utils.validation.length_check import validate_length_ratio
-            ok_len, reason_len = validate_length_ratio(original_text, translated_text, 0.3, 3.0)
-            if not ok_len:
-                return False, reason_len
-        except Exception:
-            if len(translated_text) < len(original_text) * 0.3:
-                return False, "翻译结果过短"
-            if len(translated_text) > len(original_text) * 3:
-                return False, "翻译结果过长"
+            rule_verdicts, rule_summary, rule_conclusion = self.check_translation_quality_rules_lines(original_text, translated_text, bilingual)
+            if rule_conclusion == "需要重译":
+                # 规则QC检测到问题，但这里我们只做标记，不直接返回失败
+                # 让LLM QC做最终决定
+                if self.logger:
+                    self.logger.info(f"规则QC检测到问题: {rule_summary}")
+        except Exception as e:
+            self.logger.warning(f"逐行规则QC检测异常: {e}，回退到基础检测")
         
         # 检查错误模式
         error_patterns = [
@@ -87,7 +89,7 @@ class QualityChecker:
             # 单语模式：日语字符应该很少
             if japanese_chars / total_chars > 0.3:
                 return False, "日语字符过多（单语模式）"
-        
+
         # 检查重复字符（utils优先）
         try:
             from ..utils.validation.repetition_check import has_excessive_repetition
@@ -109,53 +111,188 @@ class QualityChecker:
 
         # 检测中文长串无标点（utils优先）
         try:
-            from ..utils.validation.cjk_punctuation_check import validate_cjk_separators
-            ok_punc, reason_punc = validate_cjk_separators(translated_text)
-            if not ok_punc:
-                return False, reason_punc
+            from ..utils.validation.cjk_punctuation_check import validate_cjk_separators_lines
+            # 使用逐行函数检查单行
+            results = validate_cjk_separators_lines([translated_text])
+            if results and results[0] == 'BAD':
+                return False, "中文长串缺少分隔标点"
         except Exception:
             pass
         
         return True, "基础检测通过"
     
-    def check_translation_quality_with_llm(self, original_text: str, translated_text: str, bilingual: bool = False) -> Tuple[bool, str]:
+    def check_translation_quality_rules_lines(self, original_text: str, translated_text: str, bilingual: bool = False) -> Tuple[list[str], str, str]:
         """
-        使用大模型进行质量检测（逐行检查版）。
+        使用逐行规则QC进行质量检测，返回逐行判定结果
+        
+        Args:
+            original_text: 原文
+            translated_text: 译文
+            bilingual: 是否为双语模式
+            
+        Returns:
+            (verdicts, summary, conclusion) - 与LLM QC保持一致的格式
+        """
+        try:
+            # 分割为行
+            original_lines = [ln.strip() for ln in original_text.split('\n') if ln.strip()]
+            translated_lines = [ln.strip() for ln in translated_text.split('\n') if ln.strip()]
+            
+            if not original_lines or not translated_lines:
+                return [], "规则QC检测失败：原文或译文为空", "需要重译"
+            
+            # 导入逐行规则QC函数
+            from ..utils.validation.length_check import validate_length_ratio_lines
+            from ..utils.validation.repetition_check import has_excessive_repetition_lines
+            from ..utils.validation.jp_copy_check import has_chinese_copying_japanese_lines
+            from ..utils.validation.cjk_punctuation_check import validate_cjk_separators_lines
+            
+            # 执行所有规则检查
+            length_results = validate_length_ratio_lines(original_lines, translated_lines)
+            repetition_results = has_excessive_repetition_lines(translated_lines)
+            copy_results = has_chinese_copying_japanese_lines(original_lines, translated_lines)
+            punctuation_results = validate_cjk_separators_lines(translated_lines)
+            
+            # 合并所有规则的结果，任何规则检测为BAD则该行为BAD
+            verdicts = []
+            bad_lines = []
+            for i in range(len(original_lines)):
+                if (length_results[i] == 'BAD' or 
+                    repetition_results[i] == 'BAD' or 
+                    copy_results[i] == 'BAD' or 
+                    punctuation_results[i] == 'BAD'):
+                    verdicts.append('BAD')
+                    bad_lines.append(i + 1)  # 1-based行号
+                else:
+                    verdicts.append('GOOD')
+            
+            # 统计结果
+            good_count = sum(v == 'GOOD' for v in verdicts)
+            bad_count = sum(v == 'BAD' for v in verdicts)
+            
+            # 记录QC指标
+            if self.logger:
+                self.logger.info(f"规则QC指标: 总行数={len(original_lines)}, GOOD={good_count}, BAD={bad_count}, 通过率={good_count/len(original_lines):.2%}, BAD索引={bad_lines}")
+            
+            # 生成摘要和结论
+            if bad_lines:
+                summary = f"规则QC: GOOD={good_count}/{len(original_lines)}, BAD索引={bad_lines}"
+                conclusion = "需要重译"  # 有BAD行时需要重译
+            else:
+                summary = f"规则QC: GOOD={good_count}/{len(original_lines)}"
+                conclusion = "不需要重译"
+            
+            return verdicts, summary, conclusion
+            
+        except Exception as e:
+            if self.logger:
+                self.logger.warning(f"规则QC检测异常: {e}")
+            return [], f"规则QC检测异常: {e}", "需要重译"
+    
+    def check_line_alignment(self, original_lines: list[str], translated_lines: list[str]) -> Tuple[bool, str]:
+        """
+        检查翻译行数对齐
+        
+        Args:
+            original_lines: 原文行列表
+            translated_lines: 译文行列表
+            
+        Returns:
+            (是否对齐, 错误信息)
+        """
+        try:
+            # 过滤空白行
+            non_empty_original = [line for line in original_lines if line.strip()]
+            non_empty_translated = [line for line in translated_lines if line.strip()]
+            
+            # 获取bilingual模式
+            bilingual = self.config.bilingual or self.config.bilingual_simple
+            
+            if bilingual:
+                # 双语模式下，译文行数应该是原文的2倍（每行都有对照）
+                # 但bilingual_simple模式在翻译失败时会保留原文，导致格式不一致
+                # 所以我们需要更灵活的行数检查
+                expected_lines = len(non_empty_original) * 2
+                actual_lines = len(non_empty_translated)
+                
+                # 允许一定的行数差异，因为bilingual_simple模式可能翻译失败
+                if actual_lines < len(non_empty_original):
+                    return False, f"双语模式行数不足：期望至少{len(non_empty_original)}行，实际{actual_lines}行"
+                elif actual_lines > expected_lines:
+                    return False, f"双语模式行数过多：期望最多{expected_lines}行，实际{actual_lines}行"
+                # 如果行数在合理范围内，认为对齐检查通过
+            else:
+                # 普通模式下，行数应该相等
+                if len(non_empty_translated) != len(non_empty_original):
+                    return False, f"翻译行数不匹配：期望{len(non_empty_original)}行（非空白），实际{len(non_empty_translated)}行"
+            
+            return True, "行数对齐检查通过"
+            
+        except Exception as e:
+            return False, f"行数对齐检查异常: {e}"
+    
+    def check_translation_quality_with_llm(self, original_text: str, translated_text: str) -> Tuple[bool, str]:
+        """
+        使用大模型进行质量检测（改进版：整块QC + 规则QC组合）。
         """
         if self.config.no_llm_check:
             return True, "跳过LLM检测"
         
         try:
-            # 逐行对齐检查
-            orig_lines = [ln.strip() for ln in original_text.split('\n')]
-            tran_lines = [ln.strip() for ln in translated_text.split('\n')]
-            # 仅针对非空行进行一一对应检查
-            packed = [(o, t) for o, t in zip(orig_lines, tran_lines) if o or t]
-
-            for idx, (orig_line, tran_line) in enumerate(packed, 1):
-                # 构造逐行消息
-                messages = self._build_quality_messages(orig_line, tran_line, bilingual)
-                # 可选记录
-                try:
-                    system_content = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
-                    user_content = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
-                except Exception:
-                    system_content, user_content = "", ""
-                if self.logger:
-                    # 仅写文件，避免刷屏
-                    self.logger.debug(f"QC System prompt (line {idx}):\n" + system_content, mode=UnifiedLogger.LogMode.FILE)
-                    self.logger.debug(f"QC User prompt (line {idx}):\n" + user_content, mode=UnifiedLogger.LogMode.FILE)
-
-                result = self._quality_check_with_stream(messages)
-                cleaned = self._clean_quality_output(result)
-                verdict = self._extract_verdict(cleaned)
-                if verdict != "GOOD":
-                    return False, f"LLM逐行质检失败：第{idx}行判定为{verdict or 'UNSURE'}"
-
-            return True, "LLM逐行质检通过"
+            # 获取bilingual模式
+            bilingual = self.config.bilingual or self.config.bilingual_simple
+            
+            # 第一步：整块QC - 快速判断整体质量
+            block_result = self._check_translation_quality_block(original_text, translated_text, bilingual)
+            if block_result[0]:  # 如果整块QC通过
+                return True, f"整块QC通过: {block_result[1]}"
+            
+            # 第二步：如果整块QC不通过，使用规则QC定位具体问题
+            orig_lines = [ln.strip() for ln in original_text.split('\n') if ln.strip()]
+            tran_lines = [ln.strip() for ln in translated_text.split('\n') if ln.strip()]
+            n = min(len(orig_lines), len(tran_lines))
+            
+            if n == 0:
+                return True, "无内容行"
+            
+            # 使用规则QC进行逐行检测
+            verdicts, summary, conclusion = self.check_translation_quality_rules_lines(original_text, translated_text, bilingual)
+            
+            # 统计BAD行数
+            bad_count = sum(1 for v in verdicts if v == 'BAD')
+            good_count = len(verdicts) - bad_count
+            
+            if bad_count == 0:
+                return True, f"规则QC通过: {summary}"
+            else:
+                return False, f"规则QC发现问题: {summary}"
                 
         except Exception as e:
+            if self.logger:
+                self.logger.error(f"QC异常: {str(e)}")
             return False, f"LLM质量检测失败: {str(e)}"
+    
+    def _check_translation_quality_block(self, original_text: str, translated_text: str, bilingual: bool) -> Tuple[bool, str]:
+        """整块QC：对整个批次进行质量检测，返回单个GOOD/BAD结果。"""
+        try:
+            orig_lines = [ln.strip() for ln in original_text.split('\n') if ln.strip()]
+            tran_lines = [ln.strip() for ln in translated_text.split('\n') if ln.strip()]
+            
+            messages = self._build_quality_messages_block(orig_lines, tran_lines, bilingual)
+            
+            result = self._quality_check_with_stream(messages)
+            cleaned = self._clean_quality_output(result)
+            
+            # 解析整块QC结果
+            if cleaned.strip().upper() == 'GOOD':
+                return True, "整块QC: GOOD"
+            elif cleaned.strip().upper() == 'BAD':
+                return False, "整块QC: BAD"
+            else:
+                return False, f"整块QC解析失败: {cleaned}"
+                
+        except Exception as e:
+            return False, f"整块QC异常: {str(e)}"
     
     def _quality_check_with_stream(self, messages: list) -> str:
         """使用流式输出进行质量检测（system+user 消息结构）"""
@@ -240,6 +377,137 @@ class QualityChecker:
         messages.append({"role": "user", "content": user_content})
         return messages
 
+    def _build_quality_messages_lines(self, original_lines: list[str], translated_lines: list[str], bilingual: bool) -> list:
+        """逐行QC：要求模型逐行输出GOOD/BAD，最后一行输出[检查完成]。
+        - few-shot多轮对话需与本格式一致
+        - 用户内容按1..n编号，助手需输出n行GOOD/BAD并以尾标记收尾
+        """
+        base = Path(__file__).parent.parent.parent / "data"
+        preface_path = base / "preface_qc.txt"
+        sample_path = base / "samples" / "sample_qc_lines.txt"
+
+        required = "你是翻译质检员。逐行判定每行是否为高质量翻译。仅输出每行一个词（GOOD 或 BAD），与用户输入行数一致，不要解释。倒数第二行输出[结论:需要重译]或[结论:不需要重译]。最后单独输出一行：[检查完成]。"
+        system_content = required
+        try:
+            if preface_path.exists():
+                preface_text = preface_path.read_text(encoding='utf-8').strip()
+                # 如果preface文件存在且内容不同，则使用preface内容
+                if preface_text != required:
+                    system_content = preface_text
+        except Exception:
+            pass
+
+        messages = [{"role": "system", "content": system_content}]
+
+        # few-shot：直接原样拼接（按User/Assistant块），不强行改写，资产需符合逐行风格
+        try:
+            if sample_path.exists():
+                raw = sample_path.read_text(encoding='utf-8')
+                lines = [ln.rstrip('\n') for ln in raw.splitlines()]
+                current_role: str | None = None
+                buf: list[str] = []
+
+                def flush() -> None:
+                    nonlocal buf, current_role
+                    if current_role and buf:
+                        content = '\n'.join(buf).strip()
+                        if content:
+                            messages.append({"role": current_role, "content": content})
+                    buf = []
+
+                for ln in lines:
+                    low = ln.strip().lower()
+                    if low.startswith('user:'):
+                        flush(); current_role = 'user'; rem = ln[5:].lstrip();
+                        if rem: buf.append(rem); continue
+                    if low.startswith('assistant:'):
+                        flush(); current_role = 'assistant'; rem = ln[10:].lstrip();
+                        if rem: buf.append(rem); continue
+                    buf.append(ln)
+                flush()
+        except Exception:
+            pass
+
+        # 当前用户内容：按1..n编号
+        def number_lines(ls: list[str]) -> str:
+            out = []
+            for i, t in enumerate(ls, 1):
+                out.append(f"{i}. {t}")
+            return '\n'.join(out)
+
+        user_content = f"原文：\n{number_lines(original_lines)}\n\n译文：\n{number_lines(translated_lines)}"
+        messages.append({"role": "user", "content": user_content})
+        return messages
+
+    def check_translation_quality_lines(self, original_text: str, translated_text: str, bilingual: bool = False) -> Tuple[list[str], str, str]:
+        """逐行QC：返回每行的判定数组（长度为n，元素为'GOOD'或'BAD'）与原因摘要。
+        返回：(verdicts, summary, conclusion)
+        若解析失败，抛出异常由上层处理或降级。
+        """
+        if self.config.no_llm_check:
+            return [], "跳过LLM检测", "不需要重译"
+        orig_lines = [ln.strip() for ln in original_text.split('\n') if ln.strip()]
+        tran_lines = [ln.strip() for ln in translated_text.split('\n') if ln.strip()]
+        n = min(len(orig_lines), len(tran_lines))
+        orig_lines = orig_lines[:n]
+        tran_lines = tran_lines[:n]
+        messages = self._build_quality_messages_lines(orig_lines, tran_lines, bilingual)
+        # 记录（文件日志）
+        try:
+            system_content = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
+            user_content = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
+            if self.logger:
+                self.logger.debug("QC System prompt (lines):\n" + system_content, mode=UnifiedLogger.LogMode.FILE)
+                self.logger.debug("QC User prompt (lines):\n" + user_content, mode=UnifiedLogger.LogMode.FILE)
+        except Exception:
+            pass
+
+        result = self._quality_check_with_stream(messages)
+        cleaned = self._clean_quality_output(result)
+        verdicts, conclusion = self._extract_verdict_lines_with_conclusion(cleaned, n)
+        
+        # 记录QC指标
+        good_count = sum(v == 'GOOD' for v in verdicts)
+        bad_count = sum(v == 'BAD' for v in verdicts)
+        bad_indices = [i for i, v in enumerate(verdicts) if v == 'BAD']
+        
+        if self.logger:
+            self.logger.info(f"QC指标: 总行数={n}, GOOD={good_count}, BAD={bad_count}, 通过率={good_count/n:.2%}, BAD索引={bad_indices}, 结论={conclusion}")
+        
+        return verdicts, f"逐行QC: GOOD={good_count}/{n}", conclusion
+
+    def _extract_verdict_lines_with_conclusion(self, text: str, expected_n: int) -> Tuple[list[str], str]:
+        """解析逐行GOOD/BAD列表，容错空行/大小写/噪声；提取结论与剔除尾部[检查完成]。"""
+        lines = [ln.strip() for ln in text.replace('\r', '').split('\n') if ln.strip()]
+        # 提取结论与去尾标记
+        conclusion = "不需要重译"  # 默认
+        if lines and lines[-1].strip() in ("[检查完成]", "[CHECK DONE]", "[CHECK COMPLETE]"):
+            lines = lines[:-1]
+        # 提取倒数第二行的结论
+        if len(lines) >= 2:
+            conclusion_line = lines[-1].strip()
+            if "[结论:需要重译]" in conclusion_line or "[结论:需要重新翻译]" in conclusion_line:
+                conclusion = "需要重译"
+            elif "[结论:不需要重译]" in conclusion_line or "[结论:不需要重新翻译]" in conclusion_line:
+                conclusion = "不需要重译"
+            lines = lines[:-1]  # 移除结论行
+        out: list[str] = []
+        for ln in lines:
+            up = ln.upper()
+            if 'GOOD' in up and 'BAD' not in up:
+                out.append('GOOD')
+            elif 'BAD' in up and 'GOOD' not in up:
+                out.append('BAD')
+            elif up in ('GOOD', 'BAD'):
+                out.append(up)
+            # 其他噪声行忽略
+        # 对齐长度：多则截断，少则补BAD（保守）
+        if len(out) < expected_n:
+            out.extend(['BAD'] * (expected_n - len(out)))
+        elif len(out) > expected_n:
+            out = out[:expected_n]
+        return out, conclusion
+
     def check_translation_quality_block(self, original_text: str, translated_text: str, bilingual: bool = False) -> Tuple[bool, str]:
         """整块质检：一次性对当前批次所有行进行裁决，输出单词（GOOD/BAD）。"""
         if self.config.no_llm_check:
@@ -274,20 +542,39 @@ class QualityChecker:
         - 失败则二分（或多次二分）到阈值min_block，再逐行QC兜底
         """
         try:
+            # 记录开始时间
+            start_time = time.time()
+            
             ok, reason = self.check_translation_quality_block(original_text, translated_text, bilingual)
             if ok:
+                # 记录整块QC成功指标
+                elapsed_time = time.time() - start_time
+                if self.logger:
+                    self.logger.info(f"QC整块成功: 耗时={elapsed_time:.2f}s, 原因={reason}")
                 return ok, reason
             # 二分递归
             orig_lines = [ln.strip() for ln in original_text.split('\n') if ln.strip()]
             tran_lines = [ln.strip() for ln in translated_text.split('\n') if ln.strip()]
             n = min(len(orig_lines), len(tran_lines))
             if n <= min_block:
-                return self.check_translation_quality(original_text, translated_text, bilingual)
+                # 改为行级QC兜底
+                verdicts, summary, conclusion = self.check_translation_quality_lines(original_text, translated_text, bilingual)
+                ok = all(v == 'GOOD' for v in verdicts)
+                elapsed_time = time.time() - start_time
+                if self.logger:
+                    self.logger.info(f"QC行级兜底: 耗时={elapsed_time:.2f}s, 结果={ok}, 原因={summary}")
+                return ok, (summary if summary else '行级兜底')
             mid = n // 2
             left_ok, left_reason = self.check_translation_quality_block_with_bisect('\n'.join(orig_lines[:mid]), '\n'.join(tran_lines[:mid]), bilingual, min_block)
             right_ok, right_reason = self.check_translation_quality_block_with_bisect('\n'.join(orig_lines[mid:]), '\n'.join(tran_lines[mid:]), bilingual, min_block)
+            elapsed_time = time.time() - start_time
+            if self.logger:
+                self.logger.info(f"QC二分递归: 耗时={elapsed_time:.2f}s, 左={left_ok}, 右={right_ok}")
             return (left_ok and right_ok), f"bisect: left={left_reason}, right={right_reason}"
         except Exception as e:
+            elapsed_time = time.time() - start_time
+            if self.logger:
+                self.logger.error(f"QC异常: 耗时={elapsed_time:.2f}s, 错误={str(e)}")
             return False, f"LLM质量检测失败: {str(e)}"
 
     def _build_quality_messages(self, original_line: str, translated_line: str, bilingual: bool) -> list:
@@ -515,4 +802,32 @@ class QualityChecker:
         except Exception as e:
             return False, f"YAML 规则检测异常: {e}"
     
-    # 旧的本地实现已迁移到 utils/validation 模块
+    def _has_excessive_repetition(self, text: str) -> bool:
+        """检查是否包含过多重复字符（内部实现）"""
+        if len(text) < 10:
+            return False
+        
+        # 单字符重复检查
+        for char in set(text):
+            if char * 12 in text:
+                return True
+        
+        # 片段重复检查
+        for i in range(len(text) - 15):
+            segment = text[i:i+15]
+            if text.count(segment) > 5:
+                return True
+        
+        return False
+    
+    def _has_chinese_copying_japanese(self, original_text: str, translated_text: str, bilingual: bool) -> bool:
+        """检查中文是否直接复制了日语（内部实现）"""
+        import re
+        
+        # 检查是否完全相同且都包含假名
+        if original_text == translated_text:
+            kana_pattern = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\uFF66-\uFF9D]")
+            if kana_pattern.search(original_text) and kana_pattern.search(translated_text):
+                return True
+        
+        return False

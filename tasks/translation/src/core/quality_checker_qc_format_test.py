@@ -39,6 +39,23 @@ class TestQCLLMBuildMessages(unittest.TestCase):
             self.assertEqual(m.get("role"), e.get("role"), msg=f"role mismatch at index {i}\nactual={m}\nexpected={e}")
             self.assertEqual((m.get("content") or "").strip(), (e.get("content") or "").strip(), msg=f"content mismatch at index {i}\nactual={m}\nexpected={e}")
 
+    def test_build_quality_messages_lines(self):
+        # 验证逐行QC消息构建（system包含必需指令；user结构严格对齐）
+        expected_path = Path(__file__).parents[2] / "data" / "test" / "qc_expected_messages_lines.json"
+        with expected_path.open("r", encoding="utf-8") as f:
+            expected = json.load(f)
+        orig_lines = ["「ほらっ、とっとと歩け！", "彼は走った。"]
+        tran_lines = ["「喂，快点走！", "他跑了起来。"]
+        messages = self.qc._build_quality_messages_lines(orig_lines, tran_lines, bilingual=True)
+        # system段：应包含逐行与尾标记要求
+        sys_content = (messages[0].get("content") or "")
+        required = "逐行判定每行是否为高质量翻译。仅输出每行一个词（GOOD 或 BAD），与用户输入行数一致，不要解释。倒数第二行输出[结论:需要重译]或[结论:不需要重译]。最后单独输出一行：[检查完成]。"
+        self.assertIn(required, sys_content)
+        # user段严格匹配（当前用户输入，即最后一个user消息）
+        last_user_msg = next((msg for msg in reversed(messages) if msg.get("role") == "user"), None)
+        expected_last_user = expected[-1]  # 最后一个user消息
+        self.assertEqual(last_user_msg, expected_last_user)
+
 
 if __name__ == "__main__":
     unittest.main()

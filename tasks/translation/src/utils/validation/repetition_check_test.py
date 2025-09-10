@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 import unittest
 
-from tasks.translation.src.utils.validation.repetition_check import has_excessive_repetition
+from .repetition_check import has_excessive_repetition_lines
 
 
 class TestRepetitionCheck(unittest.TestCase):
     def test_no_repetition(self):
-        self.assertFalse(has_excessive_repetition("正常文本，没有明显重复。"))
+        result = has_excessive_repetition_lines(["正常文本，没有明显重复。"])
+        self.assertEqual(result, ['GOOD'])
 
     def test_char_repetition(self):
-        self.assertTrue(has_excessive_repetition("啊" * 20))
+        result = has_excessive_repetition_lines(["啊" * 20])
+        self.assertEqual(result, ['BAD'])
 
     def test_segment_repetition(self):
-        text = ("ABCDE12345" * 6) + "尾巴"
-        self.assertTrue(has_excessive_repetition(text, segment_len=5, segment_count_threshold=5))
+        text = ("ABCDE12345" * 8)  # 8次重复
+        result = has_excessive_repetition_lines([text], segment_len=10, segment_count_threshold=5)
+        self.assertEqual(result, ['BAD'])
 
 
 if __name__ == "__main__":

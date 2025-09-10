@@ -72,6 +72,14 @@ def create_argument_parser() -> argparse.ArgumentParser:
     
     # 处理限制
     parser.add_argument("--limit", type=int, default=0, help="限制处理的文件数量")
+    parser.add_argument("--offset", type=int, default=0, help="跳过前n个文件")
+    parser.add_argument("--sort-by-length", action="store_true", help="按文件长度排序（从长到短）")
+    
+    # 超时和重试配置
+    parser.add_argument("--article-timeout", type=int, default=3600, help="单篇文章超时（秒），默认3600")
+    parser.add_argument("--request-timeout", type=int, default=300, help="单次请求超时（秒），默认300")
+    parser.add_argument("--max-retries", type=int, default=3, help="最大重试次数，默认3")
+    parser.add_argument("--retry-delay", type=float, default=2.0, help="重试延迟（秒），默认2.0")
 
     # 仅处理元数据（YAML front matter）
     parser.add_argument("--metadata-only", action="store_true", help="仅翻译 YAML front matter，跳过正文")

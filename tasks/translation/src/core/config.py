@@ -75,8 +75,16 @@ class TranslationConfig:
     realtime_log: bool = False
     debug: bool = False
     
+    # 超时和重试配置
+    article_timeout_s: int = 3600  # 单篇文章超时（秒）
+    request_timeout_s: int = 300   # 单次请求超时（秒）
+    max_retries: int = 3           # 最大重试次数
+    retry_delay_s: float = 2.0     # 重试延迟（秒）
+    
     # 处理限制
     limit: int = 0
+    offset: int = 0
+    sort_by_length: bool = False
     # 流式行级 flush 阈值（字符数），防止短文本漏记
     stream_line_flush_chars: int = 60
     
@@ -123,6 +131,12 @@ class TranslationConfig:
             realtime_log=args.realtime_log,
             debug=getattr(args, 'debug', False),
             limit=args.limit,
+            offset=args.offset,
+            sort_by_length=getattr(args, 'sort_by_length', False),
+            article_timeout_s=getattr(args, 'article_timeout_s', 3600),
+            request_timeout_s=getattr(args, 'request_timeout_s', 300),
+            max_retries=getattr(args, 'max_retries', 3),
+            retry_delay_s=getattr(args, 'retry_delay_s', 2.0),
             metadata_only=getattr(args, 'metadata_only', False),
         )
     
