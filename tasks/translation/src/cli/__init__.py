@@ -25,6 +25,8 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=["full", "chunked"], default="full", help="翻译模式")
     parser.add_argument("--bilingual", action="store_true", help="启用双语对照模式")
     parser.add_argument("--bilingual-simple", dest="bilingual_simple", action="store_true", help="启用简化双语模式（小批量翻译+代码拼接）")
+    parser.add_argument("--enhanced-mode", dest="enhanced_mode", action="store_true", help="启用增强模式（QC检测+重新翻译）")
+    parser.add_argument("--enhanced-output", dest="enhanced_output", choices=["copy", "inplace"], default="copy", help="增强模式输出策略：copy=生成新文件（默认），inplace=原地改写")
     parser.add_argument("--stream", action="store_true", help="启用流式输出")
     
     # 分块配置
@@ -38,6 +40,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--context-lines", dest="context_lines", type=int, default=3, help="简化双语模式上下文行数（前后各N行）")
     parser.add_argument("--bilingual-simple-temperature", dest="bilingual_simple_temperature", type=float, default=0.0, help="简化双语模式温度（建议0.0）")
     parser.add_argument("--bilingual-simple-top-p", dest="bilingual_simple_top_p", type=float, default=1.0, help="简化双语模式top_p（建议1.0）")
+    
+    # 增强模式配置
+    parser.add_argument("--enhanced-qc-threshold", dest="enhanced_qc_threshold", type=float, default=0.7, help="增强模式QC质量阈值（0-1）")
+    parser.add_argument("--enhanced-retry-limit", dest="enhanced_retry_limit", type=int, default=2, help="增强模式最大重试次数")
+    parser.add_argument("--enhanced-context-lines", dest="enhanced_context_lines", type=int, default=5, help="增强模式上下文行数")
+    parser.add_argument("--enhanced-batch-size", dest="enhanced_batch_size", type=int, default=10, help="增强模式批大小（一次送入的原/译对数量）")
     
     # 重试配置
     parser.add_argument("--retries", type=int, default=3, help="重试次数")
