@@ -106,9 +106,12 @@ class FileHandler:
             file_path.unlink()
             return False
         
-        # 2) 若是单 _bilingual 后缀，检查质量
+        # 2) 若是单 _bilingual 后缀，检查质量（增强模式跳过此检查）
         if name.endswith("_bilingual.txt"):
-            if self._check_existing_bilingual_quality(file_path):
+            if self.config.enhanced_mode:
+                self.logger.info(f"增强模式：处理双语文件: {file_path}")
+                return True
+            elif self._check_existing_bilingual_quality(file_path):
                 self.logger.info(f"现有bilingual文件质量良好，跳过: {file_path}")
                 return False
             else:

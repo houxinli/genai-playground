@@ -33,7 +33,7 @@ class UnifiedLogger:
         return cls(logger=None)
     
     @classmethod
-    def create_for_file(cls, file_path: Path, log_dir: Path, stream_output: bool = True) -> 'UnifiedLogger':
+    def create_for_file(cls, file_path: Path, log_dir: Path, stream_output: bool = True, custom_basename: Optional[str] = None) -> 'UnifiedLogger':
         """
         创建文件和控制台双重输出的日志器
         
@@ -49,12 +49,14 @@ class UnifiedLogger:
         log_dir.mkdir(parents=True, exist_ok=True)
         
         # 生成日志文件名
-        base_name = Path(file_path).stem
-        safe_name = base_name.replace(' ', '_')[:60]  # 控制长度，避免过长
+        base_name = custom_basename if custom_basename else Path(file_path).stem
+        safe_name = base_name.replace(' ', '_')[:80]  # 控制长度，避免过长
         ts = datetime.now().strftime('%Y%m%d-%H%M%S')
         
-        # 在debug模式下，使用与输出文件相同的命名规则
-        if hasattr(cls, '_debug_mode') and cls._debug_mode:
+        # 在debug模式下：若提供了自定义基名，则使用该基名并追加时间戳
+        if hasattr(cls, '_debug_mode') and cls._debug_mode and custom_basename:
+            log_file = log_dir / f"{safe_name}_{ts}.log"
+        elif hasattr(cls, '_debug_mode') and cls._debug_mode:
             log_file = log_dir / f"{safe_name}_{ts}_bilingual.log"
         else:
             log_file = log_dir / f"translation_{safe_name}_{ts}.log"

@@ -12,6 +12,7 @@ from .logger import UnifiedLogger
 from .quality_checker import QualityChecker
 from .translator import Translator
 from .file_handler import FileHandler
+from .enhanced_mode import EnhancedModeHandler
 from ..utils.file import parse_yaml_front_matter
 
 
@@ -32,6 +33,12 @@ class TranslationPipeline:
         self.quality_checker = QualityChecker(config, self.logger)
         self.translator = Translator(config, self.logger, self.quality_checker)
         self.file_handler = FileHandler(config, self.logger, self.quality_checker)
+        
+        # 初始化增强模式处理器
+        if config.enhanced_mode:
+            self.enhanced_handler = EnhancedModeHandler(config, self.logger)
+        else:
+            self.enhanced_handler = None
     
     def run(self, inputs: List[str]) -> int:
         """
@@ -70,6 +77,59 @@ class TranslationPipeline:
         
         # 处理文件
         success_count = 0
+        
+        if self.config.enhanced_mode:
+            # 增强模式：处理双语文件
+            success_count = self._run_enhanced_mode(files_to_process)
+        else:
+            # 普通模式：处理原始文件
+            success_count = self._run_normal_mode(files_to_process)
+        
+        self.logger.info(f"处理完成: {success_count}/{len(files_to_process)} 个文件成功")
+        return success_count
+    
+    def _run_enhanced_mode(self, files_to_process: List[Path]) -> int:
+        """运行增强模式"""
+        self.logger.info("启用增强模式：QC检测 + 重新翻译")
+        success_count = 0
+        
+        for i, file_path in enumerate(files_to_process, 1):
+            self.logger.info(f"处理文件 {i}/{len(files_to_process)}: {file_path}")
+            # 与普通模式保持一致：为每个输入文件创建文件日志器（debug 下同目录，非 debug 下 logs/）
+            UnifiedLogger._debug_mode = self.config.debug
+            log_dir = file_path.parent if self.config.debug else self.config.log_dir
+            # debug下使日志与输出文件同名（仅后缀不同）。增强模式copy下的输出名规则：<stem>_enhanced<suffix>
+            custom_basename = None
+            if self.config.debug and self.config.enhanced_mode and getattr(self.config, 'enhanced_output', 'copy') == 'copy':
+                custom_basename = f"{file_path.stem}_enhanced"
+            self.logger = UnifiedLogger.create_for_file(file_path, log_dir, stream_output=False, custom_basename=custom_basename)
+            # 将新日志器分发到组件
+            if hasattr(self, 'enhanced_handler') and self.enhanced_handler:
+                self.enhanced_handler.logger = self.logger
+                # 同步增强处理器的 streaming_handler 的 logger
+                if hasattr(self.enhanced_handler, 'streaming_handler') and self.enhanced_handler.streaming_handler:
+                    self.enhanced_handler.streaming_handler.logger = self.logger
+            if hasattr(self.file_handler, 'logger'):
+                self.file_handler.logger = self.logger
+            if hasattr(self.quality_checker, 'logger'):
+                self.quality_checker.logger = self.logger
+
+            # 打印日志文件路径，便于定位
+            if hasattr(self.logger, 'get_log_file_path'):
+                log_file_path = self.logger.get_log_file_path()
+                if log_file_path:
+                    self.logger.info(f"📝 日志文件路径: {log_file_path}")
+
+            if self.enhanced_handler.process_bilingual_file(file_path):
+                success_count += 1
+            else:
+                self.logger.error(f"增强模式处理失败: {file_path}")
+        
+        return success_count
+    
+    def _run_normal_mode(self, files_to_process: List[Path]) -> int:
+        """运行普通模式"""
+        success_count = 0
         for i, file_path in enumerate(files_to_process, 1):
             self.logger.info(f"处理文件 {i}/{len(files_to_process)}: {file_path}")
             
@@ -84,7 +144,6 @@ class TranslationPipeline:
             else:
                 self.logger.error(f"文件处理失败: {file_path}")
         
-        self.logger.info(f"处理完成: {success_count}/{len(files_to_process)} 个文件成功")
         return success_count
     
     def process_file(self, path: Path) -> bool:

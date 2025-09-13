@@ -234,6 +234,7 @@ class StreamingHandler:
                     # 记录模型调用完成和token统计
                     if self.logger:
                         self.logger.info(f"模型调用完成，Token使用情况: {token_stats}")
+                        self.logger.info(f"流式调用结束原因: {finish_reason}")
                     
                     return result, token_stats
                     
