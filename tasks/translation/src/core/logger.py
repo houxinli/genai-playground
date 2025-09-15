@@ -14,6 +14,10 @@ from enum import Enum, auto
 class UnifiedLogger:
     """统一日志系统类"""
     
+    # 类级别的控制变量
+    _debug_files_mode: bool = False  # 是否使用debug文件命名模式
+    _log_level: str = "INFO"  # 日志级别
+    
     def __init__(self, logger: Optional[logging.Logger] = None, log_file_path: Optional[Path] = None, debug_to_console: bool = True):
         """
         初始化统一日志系统
@@ -53,23 +57,31 @@ class UnifiedLogger:
         safe_name = base_name.replace(' ', '_')[:80]  # 控制长度，避免过长
         ts = datetime.now().strftime('%Y%m%d-%H%M%S')
         
-        # 在debug模式下：若提供了自定义基名，则使用该基名并追加时间戳
-        if hasattr(cls, '_debug_mode') and cls._debug_mode and custom_basename:
+        # 在debug文件模式下：使用debug文件命名
+        if cls._debug_files_mode and custom_basename:
             log_file = log_dir / f"{safe_name}_{ts}.log"
-        elif hasattr(cls, '_debug_mode') and cls._debug_mode:
+        elif cls._debug_files_mode:
             log_file = log_dir / f"{safe_name}_{ts}_bilingual.log"
         else:
-            log_file = log_dir / f"translation_{safe_name}_{ts}.log"
+            # 非debug模式下，检查是否是增强模式
+            if custom_basename and "enhanced" in custom_basename:
+                # 需求：不要在中间加 enhanced，直接以 enhance 开头
+                log_file = log_dir / f"enhance_{safe_name}_{ts}.log"
+            else:
+                log_file = log_dir / f"translation_{safe_name}_{ts}.log"
         
         # 设置日志器
         logger = logging.getLogger(f'translation_{file_path.stem}')
-        logger.setLevel(logging.DEBUG)
+        
+        # 解析日志级别
+        log_level = getattr(logging, cls._log_level.upper(), logging.INFO)
+        logger.setLevel(log_level)
         logger.handlers.clear()
         logger.propagate = False
         
         # 文件处理器
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)
+        file_handler.setLevel(log_level)  # 文件处理器使用相同的日志级别
         file_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
         file_handler.setFormatter(file_formatter)
         logger.addHandler(file_handler)
@@ -77,7 +89,9 @@ class UnifiedLogger:
         # 控制台处理器（如果启用）
         if stream_output:
             console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setLevel(logging.INFO)
+            # 控制台使用INFO级别或更高，避免过于冗长
+            console_level = max(logging.INFO, log_level)
+            console_handler.setLevel(console_level)
             console_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
             console_handler.setFormatter(console_formatter)
             logger.addHandler(console_handler)

@@ -81,7 +81,9 @@ class TranslationConfig:
     
     # 日志配置
     realtime_log: bool = False
-    debug: bool = False
+    debug: bool = False  # 已弃用，保持向后兼容
+    debug_files: bool = False  # 调试文件模式：是否创建debug文件
+    log_level: str = "INFO"  # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
     
     # 超时和重试配置
     article_timeout_s: int = 3600  # 单篇文章超时（秒）
@@ -144,6 +146,8 @@ class TranslationConfig:
             presence_penalty=args.presence_penalty,
             realtime_log=args.realtime_log,
             debug=getattr(args, 'debug', False),
+            debug_files=getattr(args, 'debug_files', False) or getattr(args, 'debug', False),  # 新标志或旧标志
+            log_level=getattr(args, 'log_level', 'DEBUG' if getattr(args, 'debug', False) else 'INFO'),  # 如果使用旧debug标志则设为DEBUG，否则使用新参数
             limit=args.limit,
             offset=args.offset,
             sort_by_length=getattr(args, 'sort_by_length', False),
