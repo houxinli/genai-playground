@@ -497,7 +497,7 @@ class Translator:
             cap
         )
     
-    def translate_lines_simple(self, target_lines: List[str], previous_io: Tuple[List[str], List[str]] = None) -> Tuple[List[str], str, bool, Dict[str, int], Tuple[List[str], List[str]]]:
+    def translate_lines_simple(self, target_lines: List[str], previous_io: Tuple[List[str], List[str]] = None, start_line_number: int = 1) -> Tuple[List[str], str, bool, Dict[str, int], Tuple[List[str], List[str]]]:
         """
         简化的行级翻译方法
         输入：目标行列表 + 前一次的输入输出
@@ -522,7 +522,8 @@ class Translator:
             stripped_lines = [line_stripped for _, line_stripped in non_empty_lines]
             messages = self.prompt_builder.build_messages(
                 target_lines=stripped_lines,
-                previous_io=previous_io
+                previous_io=previous_io,
+                start_line_number=start_line_number
             )
             
             # 使用ProfileManager获取bilingual_simple参数

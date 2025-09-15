@@ -13,6 +13,7 @@ from .config import TranslationConfig
 from .streaming_handler import StreamingHandler
 from .logger import UnifiedLogger
 from .prompt import PromptBuilder, create_config
+from .parser import TranslationOutputParser
 
 
 @dataclass
@@ -39,6 +40,9 @@ class EnhancedModeHandler:
         
         self.streaming_handler = StreamingHandler(self.client, logger, config)
         self.previous_improvements = {}  # 跟踪之前的改进
+        
+        # 初始化翻译输出解析器
+        self.output_parser = TranslationOutputParser(logger)
         
         # 初始化PromptBuilder
         prompt_data_dir = Path(__file__).parent.parent.parent / "data" / "prompt"
@@ -534,27 +538,22 @@ class EnhancedModeHandler:
         batch_size = max(1, int(getattr(self.config, 'enhanced_batch_size', 10)))
         
         # 组批处理所有行
+        previous_io = None  # 跟踪前一次的输入输出
         for start in range(0, len(content_lines), batch_size):
             end = min(start + batch_size, len(content_lines))
             batch_lines = content_lines[start:end]
             
-            # 构建previous_io（除了第一批）
-            previous_io = None
-            if start > 0:
-                # 获取前一批的输出作为previous_io
-                prev_start = max(0, start - batch_size)
-                prev_end = start
-                prev_batch_lines = content_lines[prev_start:prev_end]
-                prev_output_lines = [enhanced.get(prev_start + i, "") for i in range(len(prev_batch_lines))]
-                # 只有当所有前一批的输出都存在时才构建previous_io
-                if prev_output_lines and all(prev_output_lines):
-                    previous_io = (
-                        [original for original, _ in prev_batch_lines],  # input_lines
-                        prev_output_lines  # output_lines
-                    )
+            # 调试日志
+            self.logger.debug(f"批次 {start//batch_size + 1}: 处理行 {start+1}-{end}")
+            self.logger.debug(f"  previous_io状态: {previous_io is not None}")
+            if previous_io:
+                self.logger.debug(f"  previous_io包含 {len(previous_io[0])} 行")
             
-            # 构建增强消息
-            messages = self._build_enhance_all_messages(batch_lines, previous_io)
+            # 计算起始行号：跨批次累计
+            start_line_number = start + 1
+            
+            # 构建增强消息（传递正确的起始行号）
+            messages, builder_start_ln = self._build_enhance_all_messages(batch_lines, previous_io, start_line_number, start, batch_size)
             
             try:
                 result, token_stats = self.streaming_handler.stream_completion(
@@ -583,16 +582,68 @@ class EnhancedModeHandler:
                             enhanced[start + i] = translated  # 保持原译文
                     continue
                 
-                # 解析多行输出
-                cleaned = self._extract_clean_translation(result)
+                # 使用新的解析器组件解析多行输出
+                # 解析阶段保留行号，优先使用行号解析并过滤few-shot/previous_io之外的内容
+                cleaned = self.output_parser.extract_clean_translation(result, preserve_line_numbers=True)
                 out_lines = [l.strip() for l in cleaned.split('\n') if l.strip()]
                 
+                # 调试日志
+                self.logger.debug(f"  原始结果长度: {len(result)}")
+                self.logger.debug(f"  清理后结果长度: {len(cleaned)}")
+                self.logger.debug(f"  输出行数: {len(out_lines)}")
+                self.logger.debug(f"  期望行数: {len(batch_lines)}")
+                self.logger.debug(f"  起始行号: {builder_start_ln}")
+                if len(out_lines) != len(batch_lines):
+                    self.logger.debug(f"  清理后结果内容: {repr(cleaned)}")
+                    self.logger.debug(f"  输出行内容: {out_lines}")
+                
+                # 使用解析器解析翻译输出
+                # 使用 PromptBuilder 返回的起始行号，确保与对话内编号一致
+                line_number_to_translation = self.output_parser.parse_translation_output(
+                    out_lines, len(batch_lines), builder_start_ln
+                )
+                
                 # 将输出映射回原始索引
-                for idx, line in enumerate(out_lines):
-                    if idx < len(batch_lines):
-                        enhanced[start + idx] = line
+                enhanced_translations = self.output_parser.map_to_batch_indices(
+                    line_number_to_translation, batch_lines, builder_start_ln
+                )
+                
+                for idx, enhanced_translation in enumerate(enhanced_translations):
+                    enhanced[start + idx] = enhanced_translation
                 
                 self.logger.info(f"✅ 批次完成: 行 {start+1}-{end}，已处理{len(out_lines)}行")
+                
+                # 在DEBUG级别日志中输出批次对照结果
+                self.logger.debug(f"增强模式批次对照结果（行 {start+1}-{end}）:")
+                for idx, (original, translated) in enumerate(batch_lines):
+                    enhanced_translation = enhanced_translations[idx]
+                    line_num = start + idx + 1
+                    self.logger.debug(f"  {line_num}. 原文: {original}")
+                    self.logger.debug(f"  {line_num}. 现译: {translated}")
+                    self.logger.debug(f"  {line_num}. 增强: {enhanced_translation}")
+                    if idx < len(batch_lines) - 1:  # 不在最后一行添加空行
+                        self.logger.debug("")
+                
+                # 更新previous_io（用于下一批次的上下文）
+                if len(line_number_to_translation) > 0:
+                    # 构建本次的 current_io（参考bilingual-simple模式）
+                    # 按照相对行号顺序提取翻译结果
+                    current_outputs = []
+                    for idx in range(len(batch_lines)):
+                        relative_line_number = builder_start_ln + idx  # 当前行的相对行号
+                        if relative_line_number in line_number_to_translation:
+                            current_outputs.append(line_number_to_translation[relative_line_number])
+                        else:
+                            current_outputs.append(batch_lines[idx][1])  # 保持原译文
+                    
+                    current_io = (
+                        [original for original, _ in batch_lines],  # input_lines
+                        current_outputs  # output_lines
+                    )
+                    previous_io = current_io
+                    self.logger.debug(f"  更新previous_io，包含{len(current_io[0])}行")
+                else:
+                    self.logger.warning(f"  输出行数不匹配，不更新previous_io")
                 
                 # 每批次写盘
                 try:
@@ -625,8 +676,8 @@ class EnhancedModeHandler:
         
         return enhanced
     
-    def _build_enhance_all_messages(self, batch_lines: List[Tuple[str, str]], previous_io: Optional[Tuple[List[str], List[str]]] = None) -> List[Dict[str, str]]:
-        """构建增强所有行的消息"""
+    def _build_enhance_all_messages(self, batch_lines: List[Tuple[str, str]], previous_io: Optional[Tuple[List[str], List[str]]] = None, start_line_number: int = 1, batch_start: int = 0, batch_size: int = 10) -> Tuple[List[Dict[str, str]], int]:
+        """构建增强所有行的消息，返回 (messages, current_start_line_number)"""
         # 导入规则检测模块
         from .rule_detector import detect_translation_issues, format_issues_for_enhancement
         
@@ -637,13 +688,14 @@ class EnhancedModeHandler:
             formatted_issues = format_issues_for_enhancement(issues)
             rule_issues.append(formatted_issues)
         
-        messages = self.enhancement_prompt_builder.build_messages(
+        messages, current_start_line_number = self.enhancement_prompt_builder.build_messages_with_start(
             target_lines=[original for original, _ in batch_lines],
             translated_lines=[translated for _, translated in batch_lines],
             previous_io=previous_io,
-            rule_issues=rule_issues
+            rule_issues=rule_issues,
+            start_line_number=start_line_number
         )
-        return messages
+        return messages, current_start_line_number
     
     def _enhance_single_line(self, original: str, translated: str) -> str:
         """单行增强（降级处理）"""
@@ -667,7 +719,7 @@ class EnhancedModeHandler:
             max_tokens=512
         )
         
-        cleaned = self._extract_clean_translation(result)
+        cleaned = self.output_parser.extract_clean_translation(result)
         lines = [l.strip() for l in cleaned.split('\n') if l.strip()]
         return lines[0] if lines else translated
 
@@ -698,7 +750,7 @@ class EnhancedModeHandler:
                     stop=["（未完待续）", "[END]", "<|im_end|>", "</s>"]
                 )
                 # 解析多行输出
-                cleaned = self._extract_clean_translation(result)
+                cleaned = self.output_parser.extract_clean_translation(result)
                 # 允许多行，按行拆分
                 out_lines = [l.strip() for l in cleaned.split('\n') if l.strip()]
                 # 若行数不匹配，则尽量对齐较短部分
@@ -808,96 +860,6 @@ class EnhancedModeHandler:
             self.logger.error(f"重新翻译失败: {e}")
             return None
     
-    def _extract_clean_translation(self, result: str) -> str:
-        """
-        从模型输出中提取纯净的翻译结果
-        
-        Args:
-            result: 模型原始输出
-            
-        Returns:
-            str: 纯净的翻译结果
-        """
-        # 去除首尾空白
-        result = result.strip()
-        
-        # 如果结果为空，返回原结果
-        if not result:
-            return result
-        
-        import re
-        
-        # 去除<think>标签及其内容（处理没有闭合标签的情况）
-        result = re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL)
-        result = re.sub(r'<think>.*', '', result, flags=re.DOTALL)
-        
-        # 去除其他常见的思考标记
-        result = re.sub(r'<thinking>.*?</thinking>', '', result, flags=re.DOTALL)
-        result = re.sub(r'<reasoning>.*?</reasoning>', '', result, flags=re.DOTALL)
-        
-        # 去除首尾空白
-        result = result.strip()
-        
-        # 如果清理后结果为空，返回空字符串
-        if not result:
-            return ""
-        
-        # 按行分割，处理带编号的多行输出
-        lines = result.split('\n')
-        clean_lines = []
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            # 移除行号（如 "1. 译文内容" -> "译文内容"）
-            if re.match(r'^\d+\.\s*', line):
-                line = re.sub(r'^\d+\.\s*', '', line)
-            
-            # 处理增强模式的箭头格式（如 "→ 译文内容" -> "译文内容"）
-            if line.startswith('→'):
-                line = line[1:].strip()
-            
-            # 跳过[翻译完成]标记
-            if line == "[翻译完成]":
-                continue
-            
-            # 跳过其他标记
-            if line.startswith('[') and line.endswith(']'):
-                continue
-            
-            # 跳过明显的思考内容（但保留翻译内容）
-            # 只有当整行都是思考内容时才跳过，不要跳过包含关键词的翻译
-            if (line.startswith('好的') or line.startswith('用户') or 
-                line.startswith('让我') or line.startswith('翻译') or
-                line.startswith('首先') or line.startswith('需要') or
-                line.startswith('确认') or line.startswith('接下来') or
-                line.startswith('然后') or line.startswith('另外') or
-                line.startswith('最后') or line.startswith('检查') or
-                line.startswith('确保') or line.startswith('可能') or
-                line.startswith('应该') or line.startswith('不过') or
-                line.startswith('但是') or line.startswith('因为') or
-                line.startswith('如果') or line.startswith('虽然') or
-                line.startswith('根据') or line.startswith('考虑') or
-                line.startswith('注意')):
-                continue
-            
-            # 如果这行看起来像翻译结果，添加到结果中
-            if len(line) > 0:
-                clean_lines.append(line)
-        
-        # 返回所有有效行，用换行符连接
-        if clean_lines:
-            return '\n'.join(clean_lines)
-        
-        # 如果没有找到干净的行，尝试提取引号内的内容
-        quoted_matches = re.findall(r'「([^」]+)」', result)
-        if quoted_matches:
-            return quoted_matches[-1]
-        
-        # 如果都没有，返回空字符串
-        return ""
     
     def _update_bilingual_file(self, file_path: Path, original_lines: List[str],
                               content_lines: List[Tuple[str, str]], 

@@ -23,6 +23,8 @@ class RuleDetector:
     def __init__(self):
         # 假名字符范围
         self.kana_pattern = r'[\u3040-\u309F\u30A0-\u30FF\uFF66-\uFF9D]'
+        # 假名检测排除字符（如中点「・」不视为假名残留）
+        self.kana_exclusions = {"・"}
         
         # 断词模式：日文假名被符号分隔
         self.broken_word_pattern = r'[\u3040-\u309F\u30A0-\u30FF]+[・\-\~]+[\u3040-\u309F\u30A0-\u30FF]+'
@@ -39,6 +41,8 @@ class RuleDetector:
         
         # 检测假名字符
         kana_matches = re.findall(self.kana_pattern, text)
+        # 过滤排除字符（例如「・」）
+        kana_matches = [c for c in kana_matches if c not in self.kana_exclusions]
         if kana_matches:
             # 检查是否包含单独的假名
             single_kana = re.findall(self.single_kana_pattern, text.strip())

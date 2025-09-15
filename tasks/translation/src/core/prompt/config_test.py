@@ -58,7 +58,7 @@ class TestPromptConfig:
         assert config.sample_file == "assets/sample_qc.txt"
         assert config.terminology_file is None
         assert config.use_line_numbers is True
-        assert config.use_end_marker is False
+        assert config.use_end_marker is True
     
     def test_create_config_enhancement_mode(self, prompt_dir):
         """测试创建增强模式配置"""
@@ -94,7 +94,7 @@ class TestPromptConfig:
         assert config.sample_file == "assets/sample_qc.txt"
         assert config.terminology_file is None
         assert config.use_line_numbers is True
-        assert config.use_end_marker is False
+        assert config.use_end_marker is True
     
     def test_create_test_config_enhancement(self, prompt_dir):
         """测试创建增强测试配置"""

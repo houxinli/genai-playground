@@ -336,8 +336,10 @@ def extract_chinese_from_yaml(yaml_content: str) -> str:
         raise ValueError(f"YAML解析失败: {e}")
 
 
-def extract_chinese_from_content(content_lines: List[str]) -> List[str]:
-    """从正文内容中提取中文译文行"""
+def extract_chinese_from_content(content_lines: List[str], include_original: bool = False) -> List[str]:
+    """从正文内容中提取中文译文行
+    include_original=True 时，保留原文行（形成中日对照顺序）。
+    """
     result = []
     i = 0
     
@@ -356,8 +358,18 @@ def extract_chinese_from_content(content_lines: List[str]) -> List[str]:
             if i + 1 < len(content_lines):
                 next_line = content_lines[i + 1]
                 if is_chinese_text(next_line):
-                    # 找到翻译，保留中文行
-                    result.append(next_line)
+                    # 找到翻译
+                    if include_original:
+                        # 双语模式：先保留原文，再保留中文
+                        result.append(line)
+                        # 中文行如包含假名，仍按规则标记[中]
+                        if is_japanese_text(next_line):
+                            result.append(next_line.rstrip() + " [中]")
+                        else:
+                            result.append(next_line)
+                    else:
+                        # 仅中文模式：只保留中文行
+                        result.append(next_line)
                     i += 2  # 跳过日文行和中文行
                     continue
                 elif next_line.strip() == line.strip():
@@ -367,7 +379,13 @@ def extract_chinese_from_content(content_lines: List[str]) -> List[str]:
                     continue
                 elif not is_japanese_text(next_line) and not is_chinese_text(next_line) and next_line.strip():
                     # 下一行既不是日文也不是中文，但非空，可能是符号翻译
-                    result.append(next_line)
+                    if include_original:
+                        # 双语模式：保留原文与该行
+                        result.append(line)
+                        result.append(next_line)
+                    else:
+                        # 仅中文模式：保留该行
+                        result.append(next_line)
                     i += 2  # 跳过日文行和符号行
                     continue
                 else:
@@ -423,7 +441,7 @@ def extract_chinese_from_content(content_lines: List[str]) -> List[str]:
     return compressed_lines
 
 
-def process_bilingual_file(input_path: Path, output_path: Path) -> bool:
+def process_bilingual_file(input_path: Path, output_path: Path, include_original: bool = False) -> bool:
     """处理单个双语文件"""
     try:
         # 读取文件内容
@@ -455,7 +473,7 @@ def process_bilingual_file(input_path: Path, output_path: Path) -> bool:
         chinese_yaml = extract_chinese_from_yaml(yaml_content)
         
         # 处理正文
-        chinese_content = extract_chinese_from_content(content_lines)
+        chinese_content = extract_chinese_from_content(content_lines, include_original=include_original)
         
         # 合并结果
         result_lines = []
@@ -500,7 +518,7 @@ def extract_novel_id_from_yaml(yaml_content: str) -> Optional[int]:
         return None
 
 
-def merge_chinese_files(input_dir: Path) -> bool:
+def merge_chinese_files(input_dir: Path, include_original: bool = False) -> bool:
     """合并文件夹中所有双语文件的中文部分到一个文件，按 novel_id 升序排序。"""
     try:
         candidate_files = list(input_dir.rglob("*.txt"))
@@ -553,7 +571,7 @@ def merge_chinese_files(input_dir: Path) -> bool:
                 # 标题与YAML中文提取
                 title = extract_title_from_yaml(yaml_content)
                 chinese_yaml = extract_chinese_from_yaml(yaml_content)
-                chinese_content = extract_chinese_from_content(content_lines)
+                chinese_content = extract_chinese_from_content(content_lines, include_original=include_original)
 
                 # 章节标题：第X章 标题（数字无空格；标题最多15字，遇首标点截断，规范空白）
                 chapter_count += 1
@@ -585,7 +603,9 @@ def merge_chinese_files(input_dir: Path) -> bool:
                 failed_count += 1
 
         # 输出文件
-        output_file = input_dir.parent / f"{input_dir.name}_zh.txt"
+        output_file = input_dir.parent / (
+            f"{input_dir.name}_bilingual.txt" if include_original else f"{input_dir.name}_zh.txt"
+        )
         output_file.write_text('\n'.join(merged_content), encoding='utf-8')
 
         print(f"\n合并完成: 成功={processed_count}, 失败={failed_count}")
@@ -602,6 +622,7 @@ def main():
     parser.add_argument("--debug", action="store_true", help="debug模式：输出文件与原文件在同一文件夹，文件名加_zh后缀")
     parser.add_argument("--output", type=str, help="输出目录路径（非debug模式时使用）")
     parser.add_argument("--merge", action="store_true", help="合并模式：将文件夹中所有文件的中文部分合并到一个文件")
+    parser.add_argument("--bilingual", action="store_true", help="双语模式：正文保留原文行与中文译文行")
     
     args = parser.parse_args()
     
@@ -616,8 +637,9 @@ def main():
     if input_path.is_file():
         # 处理单个文件
         if args.debug:
-            # debug模式：在同一文件夹，文件名加_zh后缀
-            output_path = input_path.parent / f"{input_path.stem}_zh{input_path.suffix}"
+            # debug模式：在同一文件夹，依据模式选择后缀
+            suffix = "_bilingual" if args.bilingual else "_zh"
+            output_path = input_path.parent / f"{input_path.stem}{suffix}{input_path.suffix}"
         else:
             # 非debug模式：在平行文件夹
             if args.output:
@@ -631,7 +653,7 @@ def main():
             
             output_path = output_dir / input_path.name
         
-        if process_bilingual_file(input_path, output_path):
+        if process_bilingual_file(input_path, output_path, include_original=args.bilingual):
             print(f"成功处理: {input_path} -> {output_path}")
             processed_count += 1
         else:
@@ -641,15 +663,16 @@ def main():
         # 处理目录
         if args.merge:
             # 合并模式
-            merge_chinese_files(input_path)
+            merge_chinese_files(input_path, include_original=args.bilingual)
         else:
             # 普通模式：处理目录中的每个文件
             bilingual_files = list(input_path.rglob("*_bilingual.txt"))
             
             for file_path in bilingual_files:
                 if args.debug:
-                    # debug模式：在同一文件夹，文件名加_zh后缀
-                    output_path = file_path.parent / f"{file_path.stem}_zh{file_path.suffix}"
+                    # debug模式：在同一文件夹，根据模式选择后缀
+                    suffix = "_bilingual" if args.bilingual else "_zh"
+                    output_path = file_path.parent / f"{file_path.stem}{suffix}{file_path.suffix}"
                 else:
                     # 非debug模式：在平行文件夹
                     if args.output:
@@ -663,7 +686,7 @@ def main():
                     
                     output_path = output_dir / file_path.name
                 
-                if process_bilingual_file(file_path, output_path):
+                if process_bilingual_file(file_path, output_path, include_original=args.bilingual):
                     print(f"成功处理: {file_path} -> {output_path}")
                     processed_count += 1
                 else:

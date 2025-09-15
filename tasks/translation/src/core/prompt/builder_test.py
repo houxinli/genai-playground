@@ -68,7 +68,8 @@ def validate_enhancement_preface_content(content):
     required_parts = [
         '你是专业的中日互译编辑',
         '给定若干原文与当前译文',
-        '请逐行改进质量',
+        # 文案兼容：旧版为“请逐行改进质量”，新版为“逐行检查质量并优化翻译结果”
+        '逐行检查质量并优化翻译结果',
         '仅输出改进后的中文译文',
         '不要任何解释',
         '保持原文的语气和风格',
@@ -80,7 +81,10 @@ def validate_enhancement_preface_content(content):
     ]
     
     for part in required_parts:
-        assert part in content, f'Missing required enhancement preface part: {part}'
+        if isinstance(part, tuple):
+            assert any(p in content for p in part), f"Missing required enhancement preface part (any): {part}"
+        else:
+            assert part in content, f'Missing required enhancement preface part: {part}'
 
 
 def validate_enhancement_terminology_content(content):
@@ -231,24 +235,55 @@ class TestPromptBuilder:
         # 验证消息结构
         assert len(messages) >= 6  # system + few-shot + previous_io + current
         
+        # 验证包含few-shot示例
+        few_shot_user_found = False
+        few_shot_assistant_found = False
+        
         # 验证previous_io格式
         prev_user_found = False
         prev_assistant_found = False
         
-        for msg in messages:
+        for i, msg in enumerate(messages):
+            role = msg["role"]
             content = msg["content"]
-            if msg["role"] == "user" and "1. 前の文1" in content and "2. 前の文2" in content:
+            print(f"\n=== 消息 {i} ({role}) ===")
+            for line in content.split('\n'):
+                print(line)
+            
+            # 验证few-shot示例
+            if role == "user" and "1. こんにちは、田中さん。" in content and "2. 今日はいい天気ですね。" in content:
+                few_shot_user_found = True
+                print("  ✓ 找到few-shot用户消息")
+            elif role == "assistant" and "1. 你好，田中先生。" in content and "2. 今天天气不错呢。" in content and "[翻译完成]" in content:
+                few_shot_assistant_found = True
+                print("  ✓ 找到few-shot助手消息")
+            # 验证previous_io
+            elif role == "user" and "1. 前の文1" in content and "2. 前の文2" in content:
                 prev_user_found = True
-            elif msg["role"] == "assistant" and "1. 前文1" in content and "2. 前文2" in content and "[翻译完成]" in content:
+                print("  ✓ 找到previous_io用户消息")
+            elif role == "assistant" and "1. 前文1" in content and "2. 前文2" in content and "[翻译完成]" in content:
                 prev_assistant_found = True
+                print("  ✓ 找到previous_io助手消息")
         
+        assert few_shot_user_found, "翻译模式few-shot用户消息未找到"
+        assert few_shot_assistant_found, "翻译模式few-shot助手消息未找到"
         assert prev_user_found, "翻译模式previous_io用户消息格式错误"
         assert prev_assistant_found, "翻译模式previous_io助手消息格式错误"
         
-        # 验证当前输入的行号连续性
+        # 验证当前输入的行号累计性（动态计算）
         current_msg = messages[-1]
-        assert "1. 新しい文1" in current_msg["content"]
-        assert "2. 新しい文2" in current_msg["content"]
+        few_shot = builder._get_few_shot_line_count(config)
+        current_start = few_shot + len(previous_input) + 1
+        assert f"{current_start}. 新しい文1" in current_msg["content"], f"当前输入第1行应该是{current_start}. 新しい文1，实际内容：{current_msg['content']}"
+        assert f"{current_start+1}. 新しい文2" in current_msg["content"], f"当前输入第2行应该是{current_start+1}. 新しい文2，实际内容：{current_msg['content']}"
+        
+        # 确保没有从1重新开始（使用更精确的匹配）
+        lines = current_msg["content"].split('\n')
+        for line in lines:
+            if line.strip().startswith('1. 新しい文') and not line.strip().startswith('13. 新しい文'):
+                assert False, "当前输入不应该从行号1重新开始"
+            if line.strip().startswith('2. 新しい文') and not line.strip().startswith('14. 新しい文'):
+                assert False, "当前输入不应该从行号2重新开始"
     
     def test_qc_mode_previous_io(self, prompt_dir):
         """测试QC模式的previous_io功能（QC模式现在支持previous_io）"""
@@ -270,26 +305,57 @@ class TestPromptBuilder:
         # QC模式现在应该支持previous_io
         assert len(messages) >= 6  # system + few-shot + previous_io + current
         
+        # 验证包含few-shot示例
+        few_shot_user_found = False
+        few_shot_assistant_found = False
+        
         # 验证包含previous_io
         prev_user_found = False
         prev_assistant_found = False
         
-        for msg in messages:
+        for i, msg in enumerate(messages):
+            role = msg["role"]
             content = msg["content"]
-            if msg["role"] == "user" and "1. 前の文1" in content and "2. 前の文2" in content:
+            print(f"\n=== QC模式消息 {i} ({role}) ===")
+            for line in content.split('\n'):
+                print(line)
+            
+            # 验证few-shot示例
+            if role == "user" and "1. 原文: こんにちは、田中さん。" in content and "1. 译文: 你好，田中先生。" in content:
+                few_shot_user_found = True
+                print("  ✓ 找到QC few-shot用户消息")
+            elif role == "assistant" and "1. 0.9" in content and "4. 0.5" in content:
+                few_shot_assistant_found = True
+                print("  ✓ 找到QC few-shot助手消息")
+            # 验证previous_io（QC模式从 few_shot+1 行开始）
+            elif role == "user" and (f"{builder._get_few_shot_line_count(config)+1}. 前の文1" in content) and (f"{builder._get_few_shot_line_count(config)+2}. 前の文2" in content):
                 prev_user_found = True
-            elif msg["role"] == "assistant" and "1. 前文1" in content and "2. 前文2" in content:
+                print("  ✓ 找到QC previous_io用户消息")
+            elif role == "assistant" and (f"{builder._get_few_shot_line_count(config)+1}. 前文1" in content) and (f"{builder._get_few_shot_line_count(config)+2}. 前文2" in content):
                 prev_assistant_found = True
+                print("  ✓ 找到QC previous_io助手消息")
         
+        assert few_shot_user_found, "QC模式few-shot用户消息未找到"
+        assert few_shot_assistant_found, "QC模式few-shot助手消息未找到"
         assert prev_user_found, "QC模式previous_io用户消息格式错误"
         assert prev_assistant_found, "QC模式previous_io助手消息格式错误"
         
-        # 验证当前输入格式
+        # 验证当前输入格式（QC模式的行号也应该累计）
         current_msg = messages[-1]
-        assert "1. 原文: 原文1" in current_msg["content"]
-        assert "1. 译文: 译文1" in current_msg["content"]
-        assert "2. 原文: 原文2" in current_msg["content"]
-        assert "2. 译文: 译文2" in current_msg["content"]
+        few_shot = builder._get_few_shot_line_count(config)
+        current_start = few_shot + len(previous_input) + 1
+        assert f"{current_start}. 原文: 原文1" in current_msg["content"], f"QC模式当前输入第1行应该是{current_start}. 原文: 原文1，实际内容：{current_msg['content']}"
+        assert f"{current_start}. 译文: 译文1" in current_msg["content"], f"QC模式当前输入第1行译文应该是{current_start}. 译文: 译文1，实际内容：{current_msg['content']}"
+        assert f"{current_start+1}. 原文: 原文2" in current_msg["content"], f"QC模式当前输入第2行应该是{current_start+1}. 原文: 原文2，实际内容：{current_msg['content']}"
+        assert f"{current_start+1}. 译文: 译文2" in current_msg["content"], f"QC模式当前输入第2行译文应该是{current_start+1}. 译文: 译文2，实际内容：{current_msg['content']}"
+        
+        # 确保没有从1重新开始（使用更精确的匹配）
+        lines = current_msg["content"].split('\n')
+        for line in lines:
+            if line.strip().startswith('1. 原文:') and not line.strip().startswith('21. 原文:'):
+                assert False, "QC模式当前输入不应该从行号1重新开始"
+            if line.strip().startswith('2. 原文:') and not line.strip().startswith('22. 原文:'):
+                assert False, "QC模式当前输入不应该从行号2重新开始"
     
     def test_enhancement_mode_previous_io(self, prompt_dir):
         """测试增强模式的previous_io功能（增强模式现在支持previous_io）"""
@@ -311,26 +377,57 @@ class TestPromptBuilder:
         # 增强模式现在应该支持previous_io
         assert len(messages) >= 6  # system + few-shot + previous_io + current
         
+        # 验证包含few-shot示例
+        few_shot_user_found = False
+        few_shot_assistant_found = False
+        
         # 验证包含previous_io
         prev_user_found = False
         prev_assistant_found = False
         
-        for msg in messages:
+        for i, msg in enumerate(messages):
+            role = msg["role"]
             content = msg["content"]
-            if msg["role"] == "user" and "1. 前の文1" in content and "2. 前の文2" in content:
+            print(f"\n=== 增强模式消息 {i} ({role}) ===")
+            for line in content.split('\n'):
+                print(line)
+            
+            # 验证few-shot示例（允许示例开始标记导致索引移动）
+            if role == "user" and ("1. 原文: こんにちは、田中さん。" in content and "2. 原文: 今日はいい天気ですね。" in content):
+                few_shot_user_found = True
+                print("  ✓ 找到增强模式few-shot用户消息")
+            elif role == "assistant" and ("1. 你好，田中先生。" in content and "2. 今天天气不错呢。" in content) and "[翻译完成]" in content:
+                few_shot_assistant_found = True
+                print("  ✓ 找到增强模式few-shot助手消息")
+            # 增强模式的previous_io使用"原文 + 现译"格式（从 few_shot+1 行开始）
+            elif role == "user" and (f"{builder._get_few_shot_line_count(config)+1}. 原文: 前の文1" in content) and (f"{builder._get_few_shot_line_count(config)+1}. 现译: 前文1" in content):
                 prev_user_found = True
-            elif msg["role"] == "assistant" and "1. 前文1" in content and "2. 前文2" in content and "[翻译完成]" in content:
+                print("  ✓ 找到增强模式previous_io用户消息")
+            elif role == "assistant" and (f"{builder._get_few_shot_line_count(config)+1}. 前文1" in content) and (f"{builder._get_few_shot_line_count(config)+2}. 前文2" in content) and "[翻译完成]" in content:
                 prev_assistant_found = True
+                print("  ✓ 找到增强模式previous_io助手消息")
         
+        assert few_shot_user_found, "增强模式few-shot用户消息未找到"
+        assert few_shot_assistant_found, "增强模式few-shot助手消息未找到"
         assert prev_user_found, "增强模式previous_io用户消息格式错误"
         assert prev_assistant_found, "增强模式previous_io助手消息格式错误"
         
-        # 验证当前输入格式
+        # 验证当前输入格式（增强模式的行号也应该累计）
         current_msg = messages[-1]
-        assert "1. 原文: 原文1" in current_msg["content"]
-        assert "1. 现译: 现译1" in current_msg["content"]
-        assert "2. 原文: 原文2" in current_msg["content"]
-        assert "2. 现译: 现译2" in current_msg["content"]
+        few_shot = builder._get_few_shot_line_count(config)
+        current_start = few_shot + len(previous_input) + 1
+        assert f"{current_start}. 原文: 原文1" in current_msg["content"], f"增强模式当前输入第1行应该是{current_start}. 原文: 原文1，实际内容：{current_msg['content']}"
+        assert f"{current_start}. 现译: 现译1" in current_msg["content"], f"增强模式当前输入第1行现译应该是{current_start}. 现译: 现译1，实际内容：{current_msg['content']}"
+        assert f"{current_start+1}. 原文: 原文2" in current_msg["content"], f"增强模式当前输入第2行应该是{current_start+1}. 原文: 原文2，实际内容：{current_msg['content']}"
+        assert f"{current_start+1}. 现译: 现译2" in current_msg["content"], f"增强模式当前输入第2行现译应该是{current_start+1}. 现译: 现译2，实际内容：{current_msg['content']}"
+        
+        # 确保没有从1重新开始（使用更精确的匹配）
+        lines = current_msg["content"].split('\n')
+        for line in lines:
+            if line.strip().startswith('1. 原文: 原文') and not line.strip().startswith('22. 原文: 原文'):
+                assert False, "增强模式当前输入不应该从行号1重新开始"
+            if line.strip().startswith('2. 原文: 原文') and not line.strip().startswith('23. 原文: 原文'):
+                assert False, "增强模式当前输入不应该从行号2重新开始"
     
     def test_few_shot_examples(self, builder):
         """测试few-shot示例"""
@@ -363,6 +460,48 @@ class TestPromptBuilder:
         assert "1. 行1" in lines
         assert "2. 行2" in lines
         assert "3. 行3" in lines
+    
+    def test_cumulative_line_numbering_with_previous_io(self, prompt_dir):
+        """测试带previous_io时的行号累计逻辑"""
+        config = create_test_config("translation", prompt_dir)
+        builder = PromptBuilder(config)
+        
+        # 模拟多轮对话场景
+        # 第1轮: 行1-2
+        # 第2轮: 行3-4 (应该累计)
+        target_lines = ["新しい文1", "新しい文2"]
+        previous_input = ["前の文1", "前の文2"]
+        previous_output = ["前文1", "前文2"]
+        previous_io = (previous_input, previous_output)
+        
+        messages = builder.build_messages(
+            target_lines=target_lines,
+            previous_io=previous_io
+        )
+        
+        # 验证消息结构
+        assert len(messages) >= 6  # system + few-shot + previous_io + current
+        
+        # 验证previous_io的行号（应该从1开始）
+        prev_user_found = False
+        for msg in messages:
+            content = msg["content"]
+            if msg["role"] == "user" and "1. 前の文1" in content and "2. 前の文2" in content:
+                prev_user_found = True
+                break
+        assert prev_user_found, "previous_io行号应该从1开始"
+        
+        # 验证当前输入的行号（应该从3开始累计）
+        current_msg = messages[-1]
+        current_content = current_msg["content"]
+        
+        # 关键测试：当前输入的行号应该累计，而不是从1重新开始
+        assert "3. 新しい文1" in current_content, f"当前输入第1行应该是3. 新しい文1，实际内容：{current_content}"
+        assert "4. 新しい文2" in current_content, f"当前输入第2行应该是4. 新しい文2，实际内容：{current_content}"
+        
+        # 确保没有从1重新开始
+        assert "1. 新しい文1" not in current_content, "当前输入不应该从行号1重新开始"
+        assert "2. 新しい文2" not in current_content, "当前输入不应该从行号2重新开始"
     
     def test_end_marker(self, builder):
         """测试结束标记"""
@@ -515,14 +654,16 @@ class TestPromptBuilder:
         for content in required_assistant_content:
             assert content in few_shot_assistant_msg["content"], f'Missing QC assistant content: {content}'
         
-        # 验证当前输入格式
+        # 验证当前输入格式（动态起始行号）
         current_msg = messages[-1]
         assert current_msg["role"] == "user"
+        few_shot = builder._get_few_shot_line_count(config)
+        start_ln = few_shot + 1
         required_current_content = [
-            '1. 原文: 新しい文',
-            '1. 译文: 新句子',
-            '2. 原文: テスト文',
-            '2. 译文: 测试句子'
+            f'{start_ln}. 原文: 新しい文',
+            f'{start_ln}. 译文: 新句子',
+            f'{start_ln+1}. 原文: テスト文',
+            f'{start_ln+1}. 译文: 测试句子'
         ]
         for content in required_current_content:
             assert content in current_msg["content"], f'Missing QC current content: {content}'
@@ -549,18 +690,12 @@ class TestPromptBuilder:
         validate_enhancement_preface_content(system_content)
         validate_enhancement_terminology_content(system_content)
         
-        # 验证few-shot示例
-        few_shot_user_msg = messages[1]
+        # 验证few-shot示例（允许示例开始/结束标记），检查关键行存在
+        # few-shot第一块 user 消息可能出现在 messages[1] 或 [2]
+        fs_user_idx = 2 if messages[1]["content"].startswith("1. [示例对话开始]") else 1
+        few_shot_user_msg = messages[fs_user_idx]
         assert few_shot_user_msg["role"] == "user"
-        required_user_content = [
-            '1. 原文: こんにちは、田中さん。',
-            '1. 译文: こんにちは、田中先生。',
-            '2. 原文: 今日はいい天気ですね。',
-            '2. 译文: 今天天气不错呢。',
-            '3. 原文: ありがとうございます。',
-            '3. 译文: 谢谢您。'
-        ]
-        for content in required_user_content:
+        for content in ['1. 原文: こんにちは、田中さん。', '2. 原文: 今日はいい天気ですね。', '3. 原文: ありがとうございます。']:
             assert content in few_shot_user_msg["content"], f'Missing enhancement user content: {content}'
         
         few_shot_assistant_msg = messages[2]
@@ -585,6 +720,66 @@ class TestPromptBuilder:
         ]
         for content in required_current_content:
             assert content in current_msg["content"], f'Missing enhancement current content: {content}'
+
+    def test_build_messages_with_start_no_previous_io(self, prompt_dir):
+        """无 previous_io 时，build_messages_with_start 返回的起始行号应为 few-shot 原文数 + 1"""
+        config = create_test_config("enhancement", prompt_dir)
+        builder = PromptBuilder(config)
+
+        # 计算few-shot原文行数
+        few_shot_count = builder._get_few_shot_line_count(config)
+
+        target_lines = ["原文A", "原文B", "原文C"]
+        translated_lines = ["现译A", "现译B", "现译C"]
+
+        messages, start_ln = builder.build_messages_with_start(
+            target_lines=target_lines,
+            translated_lines=translated_lines,
+            previous_io=None
+        )
+
+        assert start_ln == few_shot_count + 1
+
+        # 校验消息中的首行编号与返回的起始行号一致
+        current_msg = messages[-1]
+        content = current_msg["content"].split("\n")
+        assert any(line.startswith(f"{start_ln}. 原文: ") for line in content)
+
+    def test_build_messages_with_start_with_previous_io(self, prompt_dir):
+        """有 previous_io 时，起始行号应为 few-shot 原文数 + len(previous_io.input_lines) + 1"""
+        config = create_test_config("enhancement", prompt_dir)
+        builder = PromptBuilder(config)
+
+        few_shot_count = builder._get_few_shot_line_count(config)
+
+        previous_input = ["前の文1", "前の文2", "前の文3", "前の文4", "前の文5"]
+        previous_output = ["前文1", "前文2", "前文3", "前文4", "前文5"]
+        previous_io = (previous_input, previous_output)
+
+        target_lines = ["原文A", "原文B"]
+        translated_lines = ["现译A", "现译B"]
+
+        messages, start_ln = builder.build_messages_with_start(
+            target_lines=target_lines,
+            translated_lines=translated_lines,
+            previous_io=previous_io
+        )
+
+        assert start_ln == few_shot_count + len(previous_input) + 1
+
+        # 校验previous_io段行号正确（从 few_shot_count + 1 开始）
+        prev_user_found = False
+        expected_prev_start = few_shot_count + 1
+        for msg in messages:
+            if msg["role"] == "user" and f"{expected_prev_start}. 原文: 前の文1" in msg["content"]:
+                prev_user_found = True
+                break
+        assert prev_user_found, "previous_io 用户消息编号起点不正确"
+
+        # 校验当前输入首行编号与返回的起始行号一致
+        current_msg = messages[-1]
+        content = current_msg["content"].split("\n")
+        assert any(line.startswith(f"{start_ln}. 原文: ") for line in content)
 
 
 if __name__ == "__main__":

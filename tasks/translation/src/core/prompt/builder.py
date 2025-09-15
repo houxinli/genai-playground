@@ -60,14 +60,95 @@ class PromptBuilder:
         
         # 4. 添加前一次的输入输出（如果支持）
         if config.support_previous_io and previous_io:
-            prev_messages = self._build_previous_io_messages(previous_io, config)
+            # 计算previous_io的起始行号（基于few-shot示例的行数）
+            # few-shot示例的行数需要从sample文件中计算
+            few_shot_line_count = self._get_few_shot_line_count(config)
+            prev_start_line_number = few_shot_line_count + 1
+            prev_messages = self._build_previous_io_messages(previous_io, config, prev_start_line_number)
             messages.extend(prev_messages)
+            
+            # 计算当前消息的起始行号（基于few-shot + previous_io的总行数）
+            input_lines, output_lines = previous_io
+            current_start_line_number = few_shot_line_count + len(input_lines) + 1
+        else:
+            # 如果没有previous_io，当前消息从few-shot示例结束后开始
+            few_shot_line_count = self._get_few_shot_line_count(config)
+            current_start_line_number = few_shot_line_count + 1
         
         # 5. 添加当前目标行
-        current_messages = self._build_current_messages(target_lines, translated_lines, config, **kwargs)
+        # 确保start_line_number参数不被重复传递
+        current_kwargs = kwargs.copy()
+        current_kwargs['start_line_number'] = current_start_line_number
+        current_messages = self._build_current_messages(target_lines, translated_lines, config, **current_kwargs)
         messages.extend(current_messages)
         
         return messages
+
+    def build_messages_with_start(
+        self,
+        target_lines: List[str],
+        translated_lines: Optional[List[str]] = None,
+        previous_io: Optional[Tuple[List[str], List[str]]] = None,
+        context_lines: Optional[List[str]] = None,
+        **kwargs
+    ) -> Tuple[List[Dict[str, str]], int]:
+        """构建多轮对话消息，并返回当前批次在对话中的起始行号。
+
+        返回值：(messages, current_start_line_number)
+        """
+        # 预计算当前起始行号（few-shot + previous_io）
+        few_shot_line_count = self._get_few_shot_line_count(self.config)
+        if self.config.support_previous_io and previous_io:
+            input_lines, _ = previous_io
+            current_start_line_number = few_shot_line_count + len(input_lines) + 1
+        else:
+            current_start_line_number = few_shot_line_count + 1
+
+        local_kwargs = kwargs.copy()
+        local_kwargs['start_line_number'] = current_start_line_number
+
+        messages = self.build_messages(
+            target_lines=target_lines,
+            translated_lines=translated_lines,
+            previous_io=previous_io,
+            context_lines=context_lines,
+            **local_kwargs
+        )
+
+        return messages, current_start_line_number
+    
+    def _get_few_shot_line_count(self, config: PromptConfig) -> int:
+        """计算few-shot示例中原文的行数"""
+        # 读取sample文件
+        sample_path = config.data_dir / config.sample_file
+        if not sample_path.exists():
+            return 0
+
+        with open(sample_path, 'r', encoding='utf-8') as f:
+            sample_content = f.read().strip()
+
+        # 解析sample内容，只计算原文的行数
+        lines = sample_content.split('\n')
+        original_line_count = 0
+
+        current_role = None
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.startswith('User:'):
+                current_role = 'user'
+                continue
+            elif line.startswith('Assistant:'):
+                current_role = 'assistant'
+                continue
+            elif current_role == 'user' and line:
+                # 只在user角色下，且是原文行时计数（支持多轮对话中的行号）
+                if line.startswith(('1. 原文:', '2. 原文:', '3. 原文:', '4. 原文:', '5. 原文:', '6. 原文:', '7. 原文:', '8. 原文:', '9. 原文:')):
+                    original_line_count += 1
+
+        return original_line_count
     
     def _build_system_content(self, config: PromptConfig) -> str:
         """构建系统消息内容"""
@@ -200,7 +281,7 @@ class PromptBuilder:
         
         return [{"role": "user", "content": "\n".join(numbered_context)}]
     
-    def _build_previous_io_messages(self, previous_io: Tuple[List[str], List[str]], config: PromptConfig) -> List[Dict[str, str]]:
+    def _build_previous_io_messages(self, previous_io: Tuple[List[str], List[str]], config: PromptConfig, start_line_number: int = 1) -> List[Dict[str, str]]:
         """构建前一次输入输出的消息"""
         input_lines, output_lines = previous_io
         if not input_lines or not output_lines:
@@ -214,8 +295,9 @@ class PromptBuilder:
             if config.use_line_numbers:
                 numbered_input = []
                 for i, (original, translated) in enumerate(zip(input_lines, output_lines)):
-                    numbered_input.append(f"{i+1}. 原文: {original}")
-                    numbered_input.append(f"{i+1}. 现译: {translated}")
+                    line_number = start_line_number + i
+                    numbered_input.append(f"{line_number}. 原文: {original}")
+                    numbered_input.append(f"{line_number}. 现译: {translated}")
             else:
                 numbered_input = []
                 for original, translated in zip(input_lines, output_lines):
@@ -224,7 +306,7 @@ class PromptBuilder:
         else:
             # 其他模式：使用原始格式
             if config.use_line_numbers:
-                numbered_input = [f"{i+1}. {line}" for i, line in enumerate(input_lines)]
+                numbered_input = [f"{start_line_number + i}. {line}" for i, line in enumerate(input_lines)]
             else:
                 numbered_input = input_lines
         
@@ -232,7 +314,7 @@ class PromptBuilder:
         
         # 输出消息
         if config.use_line_numbers:
-            numbered_output = [f"{i+1}. {line}" for i, line in enumerate(output_lines)]
+            numbered_output = [f"{start_line_number + i}. {line}" for i, line in enumerate(output_lines)]
         else:
             numbered_output = output_lines
         
@@ -260,7 +342,9 @@ class PromptBuilder:
     def _build_translation_messages(self, target_lines: List[str], config: PromptConfig, **kwargs) -> List[Dict[str, str]]:
         """构建翻译模式的消息"""
         if config.use_line_numbers:
-            numbered_lines = [f"{i+1}. {line}" for i, line in enumerate(target_lines)]
+            # 获取起始行号（用于多轮对话累计）
+            start_line_number = kwargs.get('start_line_number', 1)
+            numbered_lines = [f"{start_line_number + i}. {line}" for i, line in enumerate(target_lines)]
         else:
             numbered_lines = target_lines
         
@@ -271,10 +355,13 @@ class PromptBuilder:
         # QC模式需要原文和译文对
         if translated_lines and len(translated_lines) == len(target_lines):
             content_lines = []
+            # 获取起始行号（用于多轮对话累计）
+            start_line_number = kwargs.get('start_line_number', 1)
             for i, (orig, trans) in enumerate(zip(target_lines, translated_lines)):
                 if config.use_line_numbers:
-                    content_lines.append(f"{i+1}. 原文: {orig}")
-                    content_lines.append(f"{i+1}. 译文: {trans}")
+                    line_number = start_line_number + i
+                    content_lines.append(f"{line_number}. 原文: {orig}")
+                    content_lines.append(f"{line_number}. 译文: {trans}")
                 else:
                     content_lines.append(f"原文: {orig}")
                     content_lines.append(f"译文: {trans}")
@@ -295,10 +382,14 @@ class PromptBuilder:
             # 获取规则检测结果（如果提供）
             rule_issues = kwargs.get('rule_issues', [])
             
+            # 获取起始行号（用于多轮对话累计）
+            start_line_number = kwargs.get('start_line_number', 1)
+            
             for i, (orig, curr) in enumerate(zip(target_lines, translated_lines)):
+                line_number = start_line_number + i
                 if config.use_line_numbers:
-                    content_lines.append(f"{i+1}. 原文: {orig}")
-                    content_lines.append(f"{i+1}. 现译: {curr}")
+                    content_lines.append(f"{line_number}. 原文: {orig}")
+                    content_lines.append(f"{line_number}. 现译: {curr}")
                 else:
                     content_lines.append(f"原文: {orig}")
                     content_lines.append(f"现译: {curr}")

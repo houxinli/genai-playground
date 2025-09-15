@@ -95,32 +95,39 @@ class TranslationPipeline:
         
         for i, file_path in enumerate(files_to_process, 1):
             self.logger.info(f"处理文件 {i}/{len(files_to_process)}: {file_path}")
-            # 与普通模式保持一致：为每个输入文件创建文件日志器（debug 下同目录，非 debug 下 logs/）
-            UnifiedLogger._debug_mode = self.config.debug
-            log_dir = file_path.parent if self.config.debug else self.config.log_dir
-            # debug下使日志与输出文件同名（仅后缀不同）。增强模式copy下的输出名规则：<stem>_enhanced<suffix>
+            # 预判是否跳过：若非覆盖且目标输出已存在，则跳过且不创建日志
+            try:
+                target_path = self.enhanced_handler._resolve_output_path(file_path)  # 使用增强处理器的路径规则
+            except Exception:
+                target_path = None
+            if (not self.config.overwrite) and target_path and target_path.exists():
+                self.logger.info(f"输出文件已存在，跳过: {target_path}")
+                continue
+
+            # 确认需要处理：先创建文件日志器并分发到组件，再开始处理，确保全过程有文件日志
+            UnifiedLogger._debug_files_mode = self.config.debug_files
+            UnifiedLogger._log_level = self.config.log_level
+            log_dir = file_path.parent if self.config.debug_files else self.config.log_dir
             custom_basename = None
-            if self.config.debug and self.config.enhanced_mode and getattr(self.config, 'enhanced_output', 'copy') == 'copy':
+            if self.config.enhanced_mode and getattr(self.config, 'enhanced_output', 'copy') == 'copy':
                 custom_basename = f"{file_path.stem}_enhanced"
             self.logger = UnifiedLogger.create_for_file(file_path, log_dir, stream_output=False, custom_basename=custom_basename)
             # 将新日志器分发到组件
-            if hasattr(self, 'enhanced_handler') and self.enhanced_handler:
-                self.enhanced_handler.logger = self.logger
-                # 同步增强处理器的 streaming_handler 的 logger
-                if hasattr(self.enhanced_handler, 'streaming_handler') and self.enhanced_handler.streaming_handler:
-                    self.enhanced_handler.streaming_handler.logger = self.logger
+            self.enhanced_handler.logger = self.logger
+            if hasattr(self.enhanced_handler, 'streaming_handler') and self.enhanced_handler.streaming_handler:
+                self.enhanced_handler.streaming_handler.logger = self.logger
             if hasattr(self.file_handler, 'logger'):
                 self.file_handler.logger = self.logger
             if hasattr(self.quality_checker, 'logger'):
                 self.quality_checker.logger = self.logger
-
-            # 打印日志文件路径，便于定位
+            # 打印日志文件路径
             if hasattr(self.logger, 'get_log_file_path'):
                 log_file_path = self.logger.get_log_file_path()
                 if log_file_path:
                     self.logger.info(f"📝 日志文件路径: {log_file_path}")
 
-            if self.enhanced_handler.process_bilingual_file(file_path):
+            processed = self.enhanced_handler.process_bilingual_file(file_path)
+            if processed:
                 success_count += 1
             else:
                 self.logger.error(f"增强模式处理失败: {file_path}")
@@ -159,8 +166,9 @@ class TranslationPipeline:
         # 设置日志
         log_file_path = None
         # 默认开启文件日志；仅当显式要求关闭时才不创建
-        UnifiedLogger._debug_mode = self.config.debug
-        log_dir = path.parent if self.config.debug else self.config.log_dir
+        UnifiedLogger._debug_files_mode = self.config.debug_files
+        UnifiedLogger._log_level = self.config.log_level
+        log_dir = path.parent if self.config.debug_files else self.config.log_dir
         self.logger = UnifiedLogger.create_for_file(path, log_dir, stream_output=False)
         self.translator.logger = self.logger
         self.file_handler.logger = self.logger
@@ -856,7 +864,7 @@ class TranslationPipeline:
             
             # 调用简化翻译
             chinese_lines, prompt, success, token_stats, current_io = self.translator.translate_lines_simple(
-                batch_content_lines, previous_io=previous_io
+                batch_content_lines, previous_io=previous_io, start_line_number=content_i + 1
             )
             
             if success and len(chinese_lines) == len(batch_content_lines):
