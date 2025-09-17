@@ -126,31 +126,22 @@ translate-attach:
 	@echo "🔗 连接到翻译任务会话..."
 	./scripts/manage_translation.sh attach
 
-# 批量翻译（智能跳过）
-translate-batch:
-	@echo "📝 批量翻译（智能跳过）..."
-	$(PY) tasks/translation/scripts/batch_translate.py --input-dir $(INPUT_DIR) --bilingual-simple --stream --smart-skip
-
-# 批量翻译（强制重译）
-translate-batch-force:
-	@echo "📝 批量翻译（强制重译）..."
-	$(PY) tasks/translation/scripts/batch_translate.py --input-dir $(INPUT_DIR) --bilingual-simple --stream
 
 # 监听翻译进度
 monitor-translation:
 	@echo "🔍 监听翻译进度..."
 	./scripts/monitor_translation.sh
 
-# 批量翻译（带实时日志和质量检测）
+# 批量翻译（bilingual-simple模式）
 translate-batch:
-	@echo "📝 开始批量翻译..."
+	@echo "📝 开始批量翻译（bilingual-simple模式）..."
 	@echo "请指定输入目录，例如：make translate-batch INPUT_DIR=tasks/translation/data/pixiv/50235390"
 	@if [ -z "$(INPUT_DIR)" ]; then echo "❌ 请设置 INPUT_DIR 参数"; exit 1; fi
-	PYTHONUNBUFFERED=1 stdbuf -oL -eL $(PY) tasks/translation/scripts/translate_pixiv_v1.py $(INPUT_DIR) --model Qwen/Qwen3-32B --max-context-length 32768 --mode full --temperature 0.0 --frequency-penalty 0.0 --presence-penalty 0.0 --retries 1 --retry-wait 1.0 --fallback-on-context --terminology-file tasks/translation/data/terminology.txt --sample-file tasks/translation/data/samples/sample_bilingual.txt --preface-file tasks/translation/data/preface_bilingual.txt --log-dir tasks/translation/logs --bilingual --stream --realtime-log --overwrite
+	PYTHONUNBUFFERED=1 stdbuf -oL -eL $(PY) tasks/translation/translate $(INPUT_DIR) --bilingual-simple --stream --realtime-log --overwrite
 
-# 批量翻译（带质量检测，跳过已翻译良好的文件）
+# 批量翻译（智能跳过）
 translate-batch-smart:
 	@echo "📝 开始智能批量翻译（跳过质量良好的文件）..."
 	@echo "请指定输入目录，例如：make translate-batch-smart INPUT_DIR=tasks/translation/data/pixiv/50235390"
 	@if [ -z "$(INPUT_DIR)" ]; then echo "❌ 请设置 INPUT_DIR 参数"; exit 1; fi
-	PYTHONUNBUFFERED=1 stdbuf -oL -eL $(PY) tasks/translation/scripts/translate_pixiv_v1.py $(INPUT_DIR) --model Qwen/Qwen3-32B --max-context-length 32768 --mode full --temperature 0.0 --frequency-penalty 0.0 --presence-penalty 0.0 --retries 1 --retry-wait 1.0 --fallback-on-context --terminology-file tasks/translation/data/terminology.txt --sample-file tasks/translation/data/samples/sample_bilingual.txt --preface-file tasks/translation/data/preface_bilingual.txt --log-dir tasks/translation/logs --bilingual --stream --realtime-log
+	PYTHONUNBUFFERED=1 stdbuf -oL -eL $(PY) tasks/translation/translate $(INPUT_DIR) --bilingual-simple --stream --realtime-log

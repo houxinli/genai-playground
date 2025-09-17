@@ -49,7 +49,7 @@ class QualityChecker:
             return False, "翻译结果为空"
         
         # 获取bilingual模式
-        bilingual = self.config.bilingual or self.config.bilingual_simple
+        bilingual = self.config.bilingual_simple
         
         # 使用逐行规则QC进行检测
         try:
@@ -206,7 +206,7 @@ class QualityChecker:
             non_empty_translated = [line for line in translated_lines if line.strip()]
             
             # 获取bilingual模式
-            bilingual = self.config.bilingual or self.config.bilingual_simple
+            bilingual = self.config.bilingual_simple
             
             if bilingual:
                 # 双语模式下，译文行数应该是原文的2倍（每行都有对照）
@@ -240,7 +240,7 @@ class QualityChecker:
         
         try:
             # 获取bilingual模式
-            bilingual = self.config.bilingual or self.config.bilingual_simple
+            bilingual = self.config.bilingual_simple
             
             # 第一步：整块QC - 快速判断整体质量
             block_result = self._check_translation_quality_block(original_text, translated_text, bilingual)

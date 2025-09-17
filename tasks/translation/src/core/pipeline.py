@@ -394,12 +394,10 @@ class TranslationPipeline:
         """记录配置信息"""
         self.logger.info("🔧 翻译配置:")
         self.logger.info(f"   模型: {self.config.model}")
-        self.logger.info(f"   模式: {self.config.mode}")
-        self.logger.info(f"   对照模式: {self.config.bilingual}")
+        self.logger.info(f"   简化双语模式: {self.config.bilingual_simple}")
+        self.logger.info(f"   增强模式: {self.config.enhanced_mode}")
         self.logger.info(f"   流式输出: {self.config.stream}")
         self.logger.info(f"   实时日志: {self.config.realtime_log}")
-        self.logger.info(f"   块大小: {self.config.chunk_size_chars} 字符")
-        self.logger.info(f"   重叠大小: {self.config.overlap_chars} 字符")
         self.logger.info(f"   重试次数: {self.config.retries}")
         self.logger.info(f"   重试等待: {self.config.retry_wait} 秒")
         self.logger.info(f"   上下文长度: {self.config.get_max_context_length()}")
@@ -441,7 +439,7 @@ class TranslationPipeline:
             return input_path.parent / f"{stem}_{ts}{suffix}.txt"
         else:
             # 非debug模式下，根据翻译模式创建不同的子目录
-            if self.config.bilingual or self.config.bilingual_simple:
+            if self.config.bilingual_simple:
                 # bilingual模式：创建 _bilingual 子目录
                 output_dir = input_path.parent.parent / f"{input_path.parent.name}_bilingual"
             else:
@@ -460,132 +458,6 @@ class TranslationPipeline:
         if self.config.bilingual_simple:
             return self._translate_text_simple_bilingual(text_content)
         
-        max_ctx = self.config.get_max_context_length()
-        estimated_input_tokens = len(text_content) // 2
-        margin = 2000
-        # 在双语模式下更积极地分块，避免输出被截断
-        bilingual_long = self.config.bilingual and len(text_content) > 8000
-        need_chunk = (
-            self.config.mode == "chunked"
-            or estimated_input_tokens > (max_ctx - margin)
-            or len(text_content) > self.config.chunk_size_chars
-            or bilingual_long
-        ) or (self.config.bilingual and len(text_content) > 6000)
-
-        # 优先使用行级固定分块（若配置指定）
-        if need_chunk or (self.config.line_chunk_size_lines and self.config.line_chunk_size_lines > 0):
-            self.logger.info("输入较长，启用分块翻译（按行+行重叠）…")
-            # 行级分块，避免拆断行导致双语错位
-            lines = text_content.splitlines(keepends=True)
-
-            # 估算平均行长用于从字符配置推导行数
-            total_len = sum(len(l) for l in lines) or 1
-            avg_line_len = max(30, min(120, total_len // max(1, len(lines))))
-            # 目标每块行数
-            if self.config.line_chunk_size_lines and self.config.line_chunk_size_lines > 0:
-                target_chunk_lines = max(1, self.config.line_chunk_size_lines)
-                # 重叠
-                overlap_lines = max(0, self.config.line_overlap_lines or 0)
-            else:
-                target_chunk_lines = max(200, min(self.config.chunk_size_chars // avg_line_len, 360))
-                base_overlap = 30
-                extra_overlap = 12 if self.config.bilingual else 0
-                overlap_lines = base_overlap + extra_overlap
-
-            # 避免在 YAML front matter 中间断开：若存在 YAML，仅让其出现在第一个分块
-            yaml_end_idx = -1
-            if lines and lines[0].strip() == '---':
-                for i, ln in enumerate(lines[1:], start=1):
-                    if ln.strip() == '---':
-                        yaml_end_idx = i
-                        break
-
-            chunks: list[str] = []
-            start_line = 0
-            total_lines = len(lines)
-            while start_line < total_lines:
-                end_line = min(total_lines, start_line + target_chunk_lines)
-                # 若起点在YAML内，则强制扩展到 YAML 结束行
-                if yaml_end_idx >= 0 and start_line <= yaml_end_idx and end_line <= yaml_end_idx:
-                    end_line = min(total_lines, yaml_end_idx + 1 + target_chunk_lines)
-                chunk_text = ''.join(lines[start_line:end_line])
-                chunks.append(chunk_text)
-                if end_line >= total_lines:
-                    break
-                # 下一块起点：行级重叠
-                start_line = max(0, end_line - overlap_lines)
-
-            results: list[str] = []
-            for idx, chunk in enumerate(chunks, 1):
-                line_count = chunk.count("\n") + 1
-                self.logger.info(f"翻译分块 {idx}/{len(chunks)}，行数: {line_count}")
-
-                # 降级重试策略：若整块质量不佳/失败，则按更小行块重试，最多降级3次
-                degrade_ratios = [1.0, 0.7, 0.5, 0.35]
-                translated_ok = False
-                final_piece = ""
-
-                for attempt_i, ratio in enumerate(degrade_ratios, 1):
-                    if ratio >= 0.99:
-                        # 直接整块尝试
-                        if use_body_prompt:
-                            result, prompt, success, token_meta = self.translator.translate_body_text(chunk, chunk_index=idx)
-                        else:
-                            result, prompt, success, token_meta = self.translator.translate_text(chunk, chunk_index=idx)
-                        if success and result:
-                            self.logger.info(f"分块 {idx} 直接翻译成功（尝试 {attempt_i}/{len(degrade_ratios)}）")
-                            translated_ok = True
-                            final_piece = result
-                            break
-                        else:
-                            self.logger.warning(f"分块 {idx} 直接翻译质量不佳/失败（尝试 {attempt_i}/{len(degrade_ratios)}），降级重试…")
-                    else:
-                        # 将当前分块再细分为更小的行块进行翻译
-                        sub_lines = chunk.splitlines(keepends=True)
-                        per_lines = max(60, int(target_chunk_lines * ratio))
-                        sub_overlap = max(10, overlap_lines // 2)
-                        sub_results: list[str] = []
-                        sub_ok_all = True
-                        pos = 0
-                        total = len(sub_lines)
-                        sub_idx = 0
-                        while pos < total:
-                            sub_idx += 1
-                            sub_end = min(total, pos + per_lines)
-                            sub_text = ''.join(sub_lines[pos:sub_end])
-                            sub_line_count = sub_text.count("\n") + 1
-                            self.logger.info(f"分块 {idx} 降级子块 {sub_idx} 行数: {sub_line_count}")
-                            if use_body_prompt:
-                                r, p, s, t = self.translator.translate_body_text(sub_text, chunk_index=f"{idx}.{sub_idx}")
-                            else:
-                                r, p, s, t = self.translator.translate_text(sub_text, chunk_index=f"{idx}.{sub_idx}")
-                            if not s or not r:
-                                sub_ok_all = False
-                                self.logger.warning(f"分块 {idx} 降级子块 {sub_idx} 翻译失败")
-                                # 该降级方案失败，跳出等待下一轮更小的降级
-                                break
-                            sub_results.append(r)
-                            if sub_end >= total:
-                                break
-                            pos = max(0, sub_end - sub_overlap)
-
-                        if sub_ok_all and sub_results:
-                            translated_ok = True
-                            final_piece = "\n".join(sub_results)
-                            self.logger.info(f"分块 {idx} 降级方案 ratio={ratio:.2f} 成功（尝试 {attempt_i}/{len(degrade_ratios)}）")
-                            break
-
-                if not translated_ok:
-                    if self.config.debug:
-                        self.logger.error(f"调试模式下分块 {idx} 降级三次仍失败，保留原文继续处理")
-                        final_piece = chunk_text  # 保留原文而不是返回空字符串
-                else:
-                        self.logger.warning(f"分块 {idx} 多次降级仍失败，返回空字符串以继续拼接")
-                        final_piece = ""
-
-                results.append(final_piece)
-            return "\n".join(results)
-
         # 不需要分块，直接单块翻译
         if use_body_prompt:
             result, prompt, success, token_meta = self.translator.translate_body_text(text_content)

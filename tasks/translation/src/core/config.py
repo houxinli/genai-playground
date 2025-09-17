@@ -18,19 +18,10 @@ class TranslationConfig:
     max_context_length: Optional[int] = None
     
     # 翻译模式配置
-    mode: str = "full"  # "full" 或 "chunked"
-    bilingual: bool = False
-    bilingual_simple: bool = False  # 新的简化bilingual模式
+    bilingual_simple: bool = False  # 简化bilingual模式
     enhanced_mode: bool = False  # 增强模式：QC检测 + 重新翻译
     enhanced_output: str = "copy"  # copy | inplace
     stream: bool = False
-    
-    # 分块配置
-    chunk_size_chars: int = 20000
-    overlap_chars: int = 1000
-    # 行级分块配置（>0 时优先生效）
-    line_chunk_size_lines: int = 0
-    line_overlap_lines: int = 0
     
     # bilingual-simple模式配置
     line_batch_size_lines: int = 50  # 每批翻译的行数（基于token分析优化）
@@ -110,16 +101,10 @@ class TranslationConfig:
             temperature=args.temperature,
             max_tokens=args.max_tokens,
             max_context_length=args.max_context_length,
-            mode=args.mode,
-            bilingual=args.bilingual,
             bilingual_simple=getattr(args, 'bilingual_simple', False),
             enhanced_mode=getattr(args, 'enhanced_mode', False),
             enhanced_output=getattr(args, 'enhanced_output', 'copy'),
             stream=args.stream,
-            chunk_size_chars=args.chunk_size_chars,
-            overlap_chars=args.overlap_chars,
-            line_chunk_size_lines=getattr(args, 'line_chunk_size_lines', 0),
-            line_overlap_lines=getattr(args, 'line_overlap_lines', 0),
             line_batch_size_lines=getattr(args, 'line_batch_size_lines', 20),
             context_lines=getattr(args, 'context_lines', 3),
             enhanced_qc_threshold=getattr(args, 'enhanced_qc_threshold', 0.7),
@@ -172,7 +157,7 @@ class TranslationConfig:
     def get_output_suffix(self) -> str:
         """获取输出文件后缀"""
         is_awq = "AWQ" in self.model
-        if self.bilingual or self.bilingual_simple:
+        if self.bilingual_simple:
             return "_awq_bilingual" if is_awq else "_bilingual"
         else:
             return "_awq_zh" if is_awq else "_zh"
@@ -183,12 +168,6 @@ class TranslationConfig:
         
         if self.temperature < 0 or self.temperature > 2:
             errors.append("temperature 必须在 0-2 之间")
-        
-        if self.chunk_size_chars <= 0:
-            errors.append("chunk_size_chars 必须大于 0")
-        
-        if self.overlap_chars < 0:
-            errors.append("overlap_chars 不能为负数")
         
         if self.retries < 0:
             errors.append("retries 不能为负数")
