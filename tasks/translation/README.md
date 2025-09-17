@@ -55,13 +55,22 @@ make translate-batch-smart INPUT_DIR=tasks/translation/data/pixiv/50235390
 
 ### 3. 翻译模式
 
-#### 前台模式（实时查看进度）
+#### bilingual-simple模式（推荐）
 ```bash
 # 前台运行，实时显示翻译进度
 ./translate input1.txt --bilingual-simple --stream
 
 # 或使用管理脚本
 make translate-start-fg ARGS="input1.txt --bilingual-simple --stream"
+```
+
+#### 增强模式（QC检测+重新翻译）
+```bash
+# 对已有双语文件进行质量提升
+./translate bilingual_file.txt --enhanced-mode --stream
+
+# 或使用管理脚本
+make translate-start-fg ARGS="bilingual_file.txt --enhanced-mode --stream"
 ```
 
 #### 后台模式（SSH断开不影响）

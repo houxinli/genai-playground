@@ -48,10 +48,10 @@ python -m src.scripts.test_translation --input input.txt --output output.txt
 ### 3. 批量/多文件翻译（示例）
 ```bash
 # 推荐：通过可执行包装器（等价于 python src/translate.py）
-./translate input1.txt input2.txt --bilingual --stream
+./translate input1.txt input2.txt --bilingual-simple --stream
 
 # 或直接调用模块入口
-python -m src.translate input_dir_or_files --bilingual --stream
+python -m src.translate input_dir_or_files --bilingual-simple --stream
 ```
 
 ## 🧭 入口与调用方式

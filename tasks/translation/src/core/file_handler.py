@@ -125,7 +125,7 @@ class FileHandler:
         
         # 4) 若是无后缀原文，检查是否已有对应的bilingual文件（除非强制覆盖）
         if not any(name.endswith(suffix) for suffix in ["_zh.txt", "_bilingual.txt", "_awq_zh.txt", "_awq_bilingual.txt"]):
-            # 检查bilingual_simple模式的输出路径
+            # 检查bilingual-simple模式的输出路径
             if self.config.bilingual_simple:
                 # bilingual_simple模式：检查 _bilingual 子目录
                 bilingual_dir = file_path.parent.parent / f"{file_path.parent.name}_bilingual"

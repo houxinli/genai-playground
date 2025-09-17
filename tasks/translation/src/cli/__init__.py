@@ -22,18 +22,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-context-length", type=int, default=None, help="模型的最大上下文长度")
     
     # 翻译模式配置
-    parser.add_argument("--mode", choices=["full", "chunked"], default="full", help="翻译模式")
-    parser.add_argument("--bilingual", action="store_true", help="启用双语对照模式")
     parser.add_argument("--bilingual-simple", dest="bilingual_simple", action="store_true", help="启用简化双语模式（小批量翻译+代码拼接）")
     parser.add_argument("--enhanced-mode", dest="enhanced_mode", action="store_true", help="启用增强模式（QC检测+重新翻译）")
     parser.add_argument("--enhanced-output", dest="enhanced_output", choices=["copy", "inplace"], default="copy", help="增强模式输出策略：copy=生成新文件（默认），inplace=原地改写")
     parser.add_argument("--stream", action="store_true", help="启用流式输出")
-    
-    # 分块配置
-    parser.add_argument("--chunk-size-chars", type=int, default=20000, help="分块大小（字符）")
-    parser.add_argument("--overlap-chars", type=int, default=1000, help="分块重叠大小（字符）")
-    parser.add_argument("--line-chunk-size-lines", dest="line_chunk_size_lines", type=int, default=0, help="行级分块大小（行），>0 时优先生效")
-    parser.add_argument("--line-overlap-lines", dest="line_overlap_lines", type=int, default=0, help="行级分块重叠（行）")
     
     # bilingual-simple模式配置
     parser.add_argument("--line-batch-size-lines", dest="line_batch_size_lines", type=int, default=50, help="简化双语模式每批翻译的行数（基于token分析优化）")
@@ -112,12 +104,6 @@ def validate_args(args: argparse.Namespace) -> List[str]:
     if args.temperature < 0 or args.temperature > 2:
         errors.append("temperature 必须在 0-2 之间")
     
-    # 检查分块大小
-    if args.chunk_size_chars <= 0:
-        errors.append("chunk_size_chars 必须大于 0")
-    
-    if args.overlap_chars < 0:
-        errors.append("overlap_chars 不能为负数")
     
     # 检查重试参数
     if args.retries < 0:
@@ -149,18 +135,10 @@ def setup_default_paths(args: argparse.Namespace) -> None:
         args.terminology_file = base_dir / "data" / "terminology.txt"
     
     if not args.sample_file:
-        # 根据模式选择示例文件
-        if args.bilingual:
-            args.sample_file = base_dir / "data" / "samples" / "sample_bilingual.txt"
-        else:
-            args.sample_file = base_dir / "data" / "samples" / "sample.txt"
+        args.sample_file = base_dir / "data" / "samples" / "sample.txt"
     
     if not args.preface_file:
-        # 根据模式选择preface文件
-        if args.bilingual:
-            args.preface_file = base_dir / "data" / "preface_bilingual.txt"
-        else:
-            args.preface_file = base_dir / "data" / "preface.txt"
+        args.preface_file = base_dir / "data" / "preface.txt"
 
     # 设置 YAML/正文专用前言与示例（可选默认）
     if not getattr(args, 'preface_yaml_file', None):

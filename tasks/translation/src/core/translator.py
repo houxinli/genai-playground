@@ -145,9 +145,9 @@ class Translator:
             max_tokens = allowed
             # 使用统一的流式输出处理器
             try:
-                # bilingual 时提高频率惩罚，降低连写与口癖
+                # bilingual_simple 时提高频率惩罚，降低连写与口癖
                 from .streaming_handler import StreamingHandler
-                freq_penalty = max(self.config.frequency_penalty, 0.5) if self.config.bilingual else self.config.frequency_penalty
+                freq_penalty = max(self.config.frequency_penalty, 0.5) if self.config.bilingual_simple else self.config.frequency_penalty
                 params = self.profile_manager.get_generation_params(
                     "body",
                     max_tokens=max_tokens,
@@ -497,7 +497,7 @@ class Translator:
             cap
         )
     
-    def translate_lines_simple(self, target_lines: List[str], previous_io: Tuple[List[str], List[str]] = None, start_line_number: int = 1) -> Tuple[List[str], str, bool, Dict[str, int], Tuple[List[str], List[str]]]:
+    def translate_lines_simple(self, target_lines: List[str], previous_io: Tuple[List[str], List[str]] = None) -> Tuple[List[str], str, bool, Dict[str, int], Tuple[List[str], List[str]]]:
         """
         简化的行级翻译方法
         输入：目标行列表 + 前一次的输入输出
@@ -522,8 +522,7 @@ class Translator:
             stripped_lines = [line_stripped for _, line_stripped in non_empty_lines]
             messages = self.prompt_builder.build_messages(
                 target_lines=stripped_lines,
-                previous_io=previous_io,
-                start_line_number=start_line_number
+                previous_io=previous_io
             )
             
             # 使用ProfileManager获取bilingual_simple参数
