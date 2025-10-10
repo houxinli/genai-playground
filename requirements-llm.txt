@@ -9,6 +9,7 @@ astor==0.8.1
 async-timeout==5.0.1
 attrs==25.3.0
 bitsandbytes==0.47.0
+beautifulsoup4==4.12.3
 blake3==1.0.5
 cachetools==6.2.0
 cbor2==5.7.0
@@ -17,6 +18,7 @@ cffi==1.17.1
 charset-normalizer==3.4.3
 click==8.2.1
 cloudpickle==3.1.1
+cloudscraper==1.2.71
 compressed-tensors==0.10.2
 cupy-cuda12x==13.6.0
 datasets==4.0.0

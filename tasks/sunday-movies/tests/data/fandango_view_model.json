@@ -1,0 +1,40 @@
+{
+  "viewModel": {
+    "date": "2025-10-12",
+    "movies": [
+      {
+        "title": "Sample Movie",
+        "variants": [
+          {
+            "format": "Dolby Cinema",
+            "amenityGroups": [
+              {
+                "amenities": [
+                  { "name": "Reserved seating" },
+                  { "name": "Laser at AMC" }
+                ],
+                "showtimes": [
+                  {
+                    "ticketingDate": "2025-10-12+13:30",
+                    "screenReaderTime": "1:30 PM",
+                    "filmFormat": [
+                      { "filterName": "Dolby" }
+                    ],
+                    "ticketingJumpPageURL": "https://tickets.fandango.com/example/jump?showtime=1"
+                  },
+                  {
+                    "screenReaderTime": "4:15 PM",
+                    "filmFormat": [
+                      { "filterName": "IMAX" }
+                    ],
+                    "ticketingJumpPageURL": "https://tickets.fandango.com/example/jump?showtime=2"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
