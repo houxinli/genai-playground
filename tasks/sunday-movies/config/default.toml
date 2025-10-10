@@ -1,0 +1,7 @@
+date_window = "next-sunday"
+time_start = "12:00"
+time_end = "18:00"
+
+[cinemas]
+mercado20 = { name = "AMC Mercado 20", url = "https://www.amctheatres.com/movie-theatres/san-jose/amc-mercado-20" }
+eastridge15 = { name = "AMC Eastridge 15", url = "https://www.amctheatres.com/movie-theatres/san-jose/amc-eastridge-15" }
