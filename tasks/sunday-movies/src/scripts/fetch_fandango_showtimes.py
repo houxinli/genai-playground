@@ -24,10 +24,14 @@ DEFAULT_COOKIE_PATH = SUNDAY_MOVIES_ROOT / "config" / "fandango_cookies.json"
 
 def load_cookies(path: Path) -> Dict[str, str]:
     if not path.exists():
-        raise FileNotFoundError(f"Cookie file not found: {path}")
+        print(f"Warning: Cookie file not found: {path}")
+        return {}
     with path.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
-    return {k: v for k, v in data.items() if v}
+    cookies = {k: v for k, v in data.items() if v}
+    if not cookies:
+        print("Warning: No valid cookies found in file")
+    return cookies
 
 
 def parse_args() -> argparse.Namespace:
@@ -74,22 +78,43 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print raw schedule data as JSON for debugging",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    
+    if args.debug:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+    
     cookies = load_cookies(args.cookie_file)
     collector = FandangoShowtimeCollector()
-    schedules = collector.fetch_showtimes(
-        args.theater_id,
-        args.theater_name,
-        args.date,
-        cookies=cookies,
-        chain_code=args.chain_code,
-        referer_slug=args.referer_slug,
-        use_legacy_endpoint=args.legacy,
-    )
+    
+    if args.debug:
+        print(f"Debug: Using theater_id={args.theater_id}, date={args.date}, legacy={args.legacy}")
+        print(f"Debug: Cookies loaded: {len(cookies)} entries")
+    
+    try:
+        schedules = collector.fetch_showtimes(
+            args.theater_id,
+            args.theater_name,
+            args.date,
+            cookies=cookies,
+            chain_code=args.chain_code,
+            referer_slug=args.referer_slug,
+            use_legacy_endpoint=args.legacy,
+        )
+    except Exception as e:
+        print(f"Error fetching showtimes: {e}")
+        if args.raw:
+            print("[]")
+        return
 
     if args.raw:
         payload = [

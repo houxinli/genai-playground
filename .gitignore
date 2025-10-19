@@ -73,6 +73,9 @@ tasks/translation/logs/*
 !tasks/translation/data/output/.gitkeep
 !tasks/translation/logs/.gitkeep
 
+# Sunday movies data (runtime artifacts)
+tasks/sunday-movies/data/
+
 # Model cache
 ~/.cache/huggingface/
 

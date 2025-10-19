@@ -17,6 +17,11 @@
 - 观察发现 `napi/theaterMovieShowtimes/<theater-id>` 接口返回更丰富的结构（`viewModel.movies[*].variants[*].amenityGroups[*]`），但同样依赖完整的 Akamai 反爬 Cookie（`_abck`、`bm_*`、`AKA_A2` 等），这些只能通过 Network 面板复制。
 - 若使用第三方，应注明来源并验证与 AMC 官方同步程度。
 
+## 评分渠道调研
+- Douban：可通过 `https://movie.douban.com/j/subject_suggest` 搜索，再解析 `https://movie.douban.com/subject/<id>/` 页面获取评分与票数；需携带桌面 UA。
+- IMDb：使用 `https://v2.sg.media-imdb.com/suggestion/<first>/<query>.json` 获取影片 `id`，随后访问影片页解析 JSON-LD 中的 `aggregateRating`。
+- Rotten Tomatoes：`https://www.rottentomatoes.com/napi/search/?query=` 返回匹配影片，评分数据在 `https://www.rottentomatoes.com/napi/movie/<slug>` 的 `scoreboard` 字段中。
+
 ## 建议
 1. 优先尝试使用 Cloudflare 兼容客户端（`cloudscraper`）直连 AMC，保证数据权威性。
 2. 若短期无法获取官方数据，可先集成 Fandango/Google 数据，后续再切换到 AMC。
