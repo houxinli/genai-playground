@@ -2,7 +2,11 @@
 
 ## 🎯 项目概述
 
-这是一个在 4× RTX 6000 Ada 服务器上部署本地机器翻译服务的项目。项目使用 vLLM + Qwen3-32B-AWQ 技术栈，实现了日语到中文的翻译功能，支持批量翻译和质量检测。
+这是一个多功能的 GenAI 实验平台，包含两个主要子项目：
+
+1. **机器翻译服务**：在 4× RTX 6000 Ada 服务器上部署本地机器翻译服务，使用 vLLM + Qwen3-32B-AWQ 技术栈，实现了日语到中文的翻译功能，支持批量翻译和质量检测。
+
+2. **Sunday Movies 系统**：电影档期和评分抓取系统，目前主要专注于 Fandango 影院场次抓取功能，评分抓取功能（豆瓣、IMDb、Rotten Tomatoes）仍在开发中。
 
 ## 🏗️ 项目结构
 
@@ -49,6 +53,25 @@ genai-playground/
 │   ├── docs/                  # 翻译任务文档
 │   │   └── repetition-detection.md # 重复检测功能说明
 │   └── logs/                  # 翻译任务日志
+├── tasks/sunday-movies/       # Sunday Movies 项目目录
+│   ├── src/                   # 源代码
+│   │   ├── collectors/        # 影院档期抓取器
+│   │   │   ├── amc.py         # AMC 影院抓取
+│   │   │   └── fandango.py    # Fandango 抓取
+│   │   ├── ratings/           # 评分抓取模块
+│   │   │   ├── aggregator.py  # 评分聚合器
+│   │   │   ├── base.py        # 基础接口
+│   │   │   ├── douban.py      # 豆瓣评分
+│   │   │   ├── imdb.py        # IMDb 评分
+│   │   │   ├── rottentomatoes.py # 烂番茄评分
+│   │   │   └── utils.py       # 工具函数
+│   │   ├── scripts/           # 脚本工具
+│   │   │   ├── fetch_fandango_showtimes.py # 档期抓取
+│   │   │   └── fetch_ratings.py # 评分抓取
+│   │   └── tests/             # 测试文件
+│   ├── data/                  # 数据目录（运行时生成）
+│   ├── cache/                 # 缓存目录
+│   └── logs/                  # 日志目录
 └── logs/                      # 主项目日志目录
 ```
 
@@ -97,6 +120,23 @@ make translate-batch INPUT_DIR=tasks/translation/data/pixiv/50235390
 
 # 智能批量翻译（跳过质量良好的文件）
 make translate-batch-smart INPUT_DIR=tasks/translation/data/pixiv/50235390
+```
+
+### 4. Sunday Movies 功能
+```bash
+# 抓取影院档期（需要指定日期）
+python tasks/sunday-movies/src/scripts/fetch_fandango_showtimes.py \
+  --date 2025-10-12
+
+# 获取电影评分（需要 Fandango JSON 文件）
+python tasks/sunday-movies/src/scripts/fetch_ratings.py \
+  tasks/sunday-movies/data/fandango_live_response.json \
+  --top 5 --json
+
+# 限定评分来源
+python tasks/sunday-movies/src/scripts/fetch_ratings.py \
+  tasks/sunday-movies/data/fandango_live_response.json \
+  --provider douban --provider imdb
 ```
 
 ## 🔧 关键技术配置
@@ -178,7 +218,7 @@ tqdm 进度条不显示
 
 ## 📊 项目成果
 
-### 成功功能
+### 翻译服务功能
 - ✅ 本地机器翻译服务（日语→中文）
 - ✅ 完整的服务管理系统（前台/后台模式）
 - ✅ 批量翻译功能（Pixiv 小说）
@@ -187,6 +227,16 @@ tqdm 进度条不显示
 - ✅ 流式输出和实时日志
 - ✅ 时间戳日志系统
 - ✅ 问题解决记录
+
+### Sunday Movies 功能
+- ✅ 影院档期抓取（Fandango）
+- ✅ Fandango API 接口集成
+- ✅ 多端点支持（新旧 API）
+- ✅ 命令行工具和 JSON 输出
+- ✅ 模块化架构设计
+- 🚧 多源电影评分抓取（豆瓣、IMDb、Rotten Tomatoes）- 骨架完成
+- 🚧 评分聚合和排序算法 - 骨架完成
+- 🚧 智能电影标题匹配 - 骨架完成
 
 ### 测试结果
 - ✅ `こんにちは、世界。` → `你好，世界。`
@@ -206,21 +256,29 @@ tqdm 进度条不显示
 - [x] 翻译质量检测机制
 - [x] 前台/后台运行模式
 - [x] 项目文档整理（Journal 结构）
+- [x] Sunday Movies 系统架构搭建
+- [x] Fandango 场次抓取功能开发
+- [x] 多源评分抓取器骨架实现
 
 ### 进行中
 - [ ] 批量翻译剩余文章（约67篇）
 - [ ] 翻译质量评估机制
 - [ ] 性能调优
+- [ ] Sunday Movies 评分抓取功能完善
+- [ ] Fandango 场次抓取稳定性优化
 
 ### 待办
 - [ ] 评估 Sakura-13B-Galgame 模型
 - [ ] 提供完整 32B 下载命令
 - [ ] example_1 使用 32B-AWQ 完整测试
+- [ ] Sunday Movies 缓存机制
+- [ ] 评分抓取稳定性优化
 
 ## 🔗 相关文档
 
 - **[Journal 索引](docs/journal/README.md)** - 按日期组织的项目日志
-- **[2025-09-04 翻译脚本增强](docs/journal/2025-09-04.md)** - 最新功能更新
+- **[2025-10-18 Sunday Movies Fandango 抓取](docs/journal/2025-10-18.md)** - 最新功能开发
+- **[2025-09-04 翻译脚本增强](docs/journal/2025-09-04.md)** - 翻译功能更新
 - **[2025-09-03 vLLM 可观测性](docs/journal/2025-09-03.md)** - 前台/后台运行方案
 - **[2025-09-02 服务收敛](docs/journal/2025-09-02.md)** - 关键问题解决
 - **[技术文档](docs/journal/technical-docs.md)** - 详细技术配置
@@ -283,4 +341,4 @@ nvidia-smi
 ---
 
 **项目状态**: ✅ 运行中  
-**最后更新**: 2025-09-05
+**最后更新**: 2025-10-18

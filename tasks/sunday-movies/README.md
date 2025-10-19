@@ -5,6 +5,7 @@
 ## 目录结构
 - `src/`：核心代码
   - `collectors/`：影院档期抓取器（`amc.py`、`fandango.py`）
+  - `ratings/`：评分抓取（Douban、IMDb、RottenTomatoes）
   - `ratings/`：评分源集成
   - `report/`：报告生成
   - `notifier/`：通知发送
@@ -31,3 +32,10 @@
     --date 2025-10-12
   ```
   如需调用旧版 `theatershowtimegroupings` 接口，加上 `--legacy`。
+- 评分脚本：`tasks/sunday-movies/src/scripts/fetch_ratings.py` 读取 Fandango JSON（viewModel），调用多个评分源并打印整合结果。
+  ```bash
+  python tasks/sunday-movies/src/scripts/fetch_ratings.py \
+    tasks/sunday-movies/data/fandango_live_response.json \
+    --top 5 --json
+  ```
+  可通过 `--provider douban --provider imdb` 限定抓取来源。
