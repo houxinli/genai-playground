@@ -19,6 +19,7 @@ from fandango import FandangoShowtimeCollector
 # Common theater configurations
 THEATERS = {
     "AADYN": {"name": "AMC Mercado 20", "chain": "AMC"},
+    "AATUL": {"name": "AMC Eastridge 15", "chain": "AMC"},
     # Add more theaters here
     # "THEATER_ID": {"name": "Theater Name", "chain": "CHAIN_CODE"},
 }

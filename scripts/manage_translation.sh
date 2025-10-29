@@ -46,7 +46,7 @@ _start_bg() {
     fi
     
     # 构建翻译命令（使用绝对路径）
-    local translate_cmd="/mnt/shengdata1/lujiang/mashiro/github/houxinli/genai-playground/tasks/translation/translate $*"
+    local translate_cmd="$(dirname "$0")/../tasks/translation/translate $*"
     echo "🚀 后台执行翻译命令: $translate_cmd"
     
     # 在tmux中运行翻译任务（使用vllm的成功模式）
