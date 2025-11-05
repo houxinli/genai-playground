@@ -20,6 +20,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-p", dest="top_p", type=float, default=0.9, help="nucleus sampling top_p")
     parser.add_argument("--max-tokens", type=int, default=0, help="最大生成token数，<=0 表示不限制")
     parser.add_argument("--max-context-length", type=int, default=None, help="模型的最大上下文长度")
+
+    # 提供商与连接配置
+    parser.add_argument("--llm-provider", dest="llm_provider", choices=["vllm", "ollama", "openai", "openrouter"], default=None, help="LLM 提供商类型；可用 env LLM_PROVIDER 覆盖")
+    parser.add_argument("--llm-base-url", dest="llm_base_url", default=None, help="OpenAI 兼容 Base URL；可用 env LLM_BASE_URL 覆盖")
+    parser.add_argument("--llm-api-key", dest="llm_api_key", default=None, help="API Key；可用 env LLM_API_KEY/OPENAI_API_KEY/OPENROUTER_API_KEY 覆盖")
     
     # 翻译模式配置
     parser.add_argument("--bilingual-simple", dest="bilingual_simple", action="store_true", help="启用简化双语模式（小批量翻译+代码拼接）")

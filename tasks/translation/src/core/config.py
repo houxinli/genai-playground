@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import argparse
+import os
 
 
 @dataclass
@@ -92,10 +93,26 @@ class TranslationConfig:
     # 分节专用参数改为 profiles 文件覆盖与函数内默认，不再在 config 中分散定义
     # 仅翻译 YAML front matter
     metadata_only: bool = False
+
+    # 提供商与连接（可通过环境变量覆盖）
+    # 支持 provider: vllm | ollama | openai | openrouter
+    llm_provider: str = "vllm"
+    llm_base_url: Optional[str] = None
+    llm_api_key: Optional[str] = None
     
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> 'TranslationConfig':
         """从命令行参数创建配置对象"""
+        # 环境变量优先级：CLI > ENV > 默认
+        env_provider = os.environ.get("LLM_PROVIDER", None)
+        env_base_url = os.environ.get("LLM_BASE_URL", None)
+        # 兼容 OPENAI/OPENROUTER 常见命名
+        env_api_key = (
+            os.environ.get("LLM_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("OPENROUTER_API_KEY")
+        )
+
         return cls(
             model=args.model,
             temperature=args.temperature,
@@ -141,6 +158,9 @@ class TranslationConfig:
             max_retries=getattr(args, 'max_retries', 3),
             retry_delay_s=getattr(args, 'retry_delay_s', 2.0),
             metadata_only=getattr(args, 'metadata_only', False),
+            llm_provider=getattr(args, 'llm_provider', env_provider or 'vllm'),
+            llm_base_url=getattr(args, 'llm_base_url', env_base_url),
+            llm_api_key=getattr(args, 'llm_api_key', env_api_key),
         )
     
     def get_max_context_length(self) -> int:
