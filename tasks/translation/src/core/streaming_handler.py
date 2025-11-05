@@ -6,6 +6,8 @@
 from typing import Tuple, Dict, Optional, List
 from dataclasses import dataclass
 import time
+import json
+import requests
 from openai import OpenAI
 from openai import BadRequestError
 from .logger import UnifiedLogger
@@ -76,14 +78,26 @@ class StreamingHandler:
                     self.logger.info(f"{log_prefix} Prompt (messages):\n{pretty}", mode=UnifiedLogger.LogMode.BOTH)
             except Exception:
                 pass
-            req_kwargs = dict(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty,
-                stream=True,
-            )
+            # 仅保留流式路径
+            stream_flag = True
+
+            # OpenRouter: 使用最小参数集的流式调用
+            if self.config and getattr(self.config, 'llm_provider', '').lower() == 'openrouter':
+                req_kwargs = dict(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    stream=stream_flag,
+                )
+            else:
+                req_kwargs = dict(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    frequency_penalty=frequency_penalty,
+                    presence_penalty=presence_penalty,
+                    stream=stream_flag,
+                )
             # 仅当 max_tokens > 0 时才传入；否则由服务端决定
             if isinstance(max_tokens, int) and max_tokens > 0:
                 req_kwargs["max_tokens"] = max_tokens
@@ -91,18 +105,19 @@ class StreamingHandler:
             if stop:
                 req_kwargs["stop"] = stop
             # vLLM 扩展参数通过 extra_body 传递，避免 SDK 1.x 拦截
-            if top_p is not None:
-                req_kwargs["top_p"] = top_p
-            extra_body = {}
-            if repetition_penalty and repetition_penalty != 1.0:
-                extra_body["repetition_penalty"] = repetition_penalty
-            if no_repeat_ngram_size and no_repeat_ngram_size > 0:
-                extra_body["no_repeat_ngram_size"] = no_repeat_ngram_size
-            if stop:
-                # 同步到 extra_body，保证后端终止词命中
-                extra_body["stop"] = stop
-            if extra_body:
-                req_kwargs["extra_body"] = extra_body
+            if not (self.config and getattr(self.config, 'llm_provider', '').lower() == 'openrouter'):
+                if top_p is not None:
+                    req_kwargs["top_p"] = top_p
+                extra_body = {}
+                if repetition_penalty and repetition_penalty != 1.0:
+                    extra_body["repetition_penalty"] = repetition_penalty
+                if no_repeat_ngram_size and no_repeat_ngram_size > 0:
+                    extra_body["no_repeat_ngram_size"] = no_repeat_ngram_size
+                if stop:
+                    # 同步到 extra_body，保证后端终止词命中
+                    extra_body["stop"] = stop
+                if extra_body:
+                    req_kwargs["extra_body"] = extra_body
 
             # 记录调用参数（避免打印过长内容，仅摘要 messages）
             try:
@@ -132,6 +147,78 @@ class StreamingHandler:
                             self.logger.warning(f"{log_prefix}: 第{attempt}次重试，延迟{retry_delay_s}秒...")
                         time.sleep(retry_delay_s)
                     
+                    # OpenRouter 走 requests + SSE，避免 SDK 流式偶发连接问题
+                    if self.config and getattr(self.config, 'llm_provider', '').lower() == 'openrouter':
+                        result = ""
+                        current_line = ""
+                        flush_threshold = getattr(self.config, 'stream_line_flush_chars', 60) if self.config else 60
+                        start_time = time.time()
+                        finish_reason = "unknown"
+                        url = "https://openrouter.ai/api/v1/chat/completions"
+                        api_key = getattr(self.config, 'llm_api_key', '') or ''
+                        headers = {
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                            "HTTP-Referer": "https://github.com/houxinli/genai-playground",
+                            "X-Title": "Translation Tool",
+                        }
+                        if self.logger:
+                            masked = (api_key[:8] + "..." + api_key[-4:]) if api_key else "<empty>"
+                            self.logger.info(f"OpenRouter headers 就绪，API key 前缀: {masked}")
+                        payload = {
+                            "model": model,
+                            "messages": messages,
+                            "stream": True,
+                        }
+                        with requests.post(url, headers=headers, data=json.dumps(payload), stream=True, timeout=(10, 60)) as r:
+                            r.raise_for_status()
+                            # 强制使用 UTF-8 以避免 SSE 默认 ISO-8859-1 导致乱码
+                            try:
+                                r.encoding = 'utf-8'
+                            except Exception:
+                                pass
+                            for raw in r.iter_lines(decode_unicode=True):
+                                if not raw:
+                                    continue
+                                if raw.startswith(": "):
+                                    continue
+                                if raw.startswith("data: "):
+                                    data_str = raw[6:]
+                                    if data_str.strip() == "[DONE]":
+                                        finish_reason = "stop"
+                                        break
+                                    try:
+                                        chunk = json.loads(data_str)
+                                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                        piece = delta.get("content", "")
+                                        if piece:
+                                            print(piece, end="", flush=True)
+                                            result += piece
+                                            current_line += piece
+                                            if '\n' in current_line:
+                                                lines = current_line.split('\n')
+                                                for line in lines[:-1]:
+                                                    self.logger and self.logger.debug(f"{log_prefix}: {line}", mode=UnifiedLogger.LogMode.FILE)
+                                                current_line = lines[-1]
+                                            elif len(current_line) >= flush_threshold:
+                                                self.logger and self.logger.debug(f"{log_prefix}: {current_line}", mode=UnifiedLogger.LogMode.FILE)
+                                                current_line = ""
+                                    except Exception:
+                                        continue
+                        print()
+                        token_stats = {
+                            'input_tokens': len(str(messages)) // 4,
+                            'output_tokens': len(result) // 4,
+                            'total_tokens': (len(str(messages)) + len(result)) // 4,
+                            'max_tokens': (max_tokens if isinstance(max_tokens, int) else 0),
+                            'finish_reason': finish_reason,
+                        }
+                        if self.logger:
+                            self.logger.info(f"模型调用完成，Token使用情况: {token_stats}")
+                            self.logger.info(f"流式调用结束原因: {finish_reason}")
+                        return result, token_stats
+
+                    # 其他 Provider 使用 SDK 流式
                     resp = self.client.chat.completions.create(**req_kwargs)
                     
                     result = ""
@@ -240,8 +327,21 @@ class StreamingHandler:
                     
                 except Exception as e:
                     last_exception = e
+                    error_msg = f"{type(e).__name__}: {str(e)}"
+                    if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                        error_msg += f" (HTTP {e.response.status_code})"
+                    if hasattr(e, 'response') and hasattr(e.response, 'text'):
+                        try:
+                            error_detail = e.response.text[:200]
+                            error_msg += f" - {error_detail}"
+                        except:
+                            pass
+                    # 打印更详细的异常信息
+                    import traceback
+                    error_detail = traceback.format_exc()
                     if self.logger:
-                        self.logger.error(f"{log_prefix}: 第{attempt + 1}次尝试失败: {e}")
+                        self.logger.error(f"{log_prefix}: 第{attempt + 1}次尝试失败: {error_msg}")
+                        self.logger.debug(f"详细错误信息:\n{error_detail}", mode=UnifiedLogger.LogMode.FILE)
                     
                     # 如果是最后一次尝试，抛出异常
                     if attempt == max_retries:

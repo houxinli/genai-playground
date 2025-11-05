@@ -187,4 +187,5 @@ dependencies:
       - xgrammar==0.1.19
       - xxhash==3.5.0
       - yarl==1.20.1
+      - gallery-dl
 prefix: /path/to/your/conda/envs/llm

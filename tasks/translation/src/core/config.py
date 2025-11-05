@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 import argparse
 import os
+import json
 
 
 @dataclass
@@ -47,7 +48,7 @@ class TranslationConfig:
     
     # 文件配置
     overwrite: bool = False
-    log_dir: Path = Path("logs")
+    log_dir: Path = Path("tasks/translation/logs")
     profiles_file: Optional[Path] = None
     terminology_file: Optional[Path] = None
     sample_file: Optional[Path] = None
@@ -101,17 +102,43 @@ class TranslationConfig:
     llm_api_key: Optional[str] = None
     
     @classmethod
+    def _read_api_key_from_config(cls, config_path: Optional[Path] = None) -> Optional[str]:
+        """从 config.json 读取 API key（优先级：translator.openrouter.api-key > translator.openai.api-key）"""
+        if config_path is None:
+            base_dir = Path(__file__).parent.parent.parent.parent  # translation/
+            config_path = base_dir / "data" / "config.json"
+        try:
+            if not config_path.exists():
+                return None
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+            translator = data.get("translator", {})
+            # 优先读取 openrouter，其次 openai
+            api_key = (
+                translator.get("openrouter", {}).get("api-key")
+                or translator.get("openai", {}).get("api-key")
+            )
+            if api_key:
+                return str(api_key).strip()
+        except Exception:
+            pass
+        return None
+    
+    @classmethod
     def from_args(cls, args: argparse.Namespace) -> 'TranslationConfig':
         """从命令行参数创建配置对象"""
-        # 环境变量优先级：CLI > ENV > 默认
+        # 优先级：CLI > ENV > config.json > 默认
         env_provider = os.environ.get("LLM_PROVIDER", None)
         env_base_url = os.environ.get("LLM_BASE_URL", None)
-        # 兼容 OPENAI/OPENROUTER 常见命名
+        # 兼容 OPENAI/OPENROUTER 常见命名（优先使用专用变量，最后才回退到通用 LLM_API_KEY）
         env_api_key = (
-            os.environ.get("LLM_API_KEY")
+            os.environ.get("OPENROUTER_API_KEY")
             or os.environ.get("OPENAI_API_KEY")
-            or os.environ.get("OPENROUTER_API_KEY")
+            or os.environ.get("LLM_API_KEY")
         )
+        # 从 config.json 读取（如果环境变量未设置）
+        config_api_key = None
+        if not env_api_key:
+            config_api_key = cls._read_api_key_from_config()
 
         return cls(
             model=args.model,
@@ -158,9 +185,9 @@ class TranslationConfig:
             max_retries=getattr(args, 'max_retries', 3),
             retry_delay_s=getattr(args, 'retry_delay_s', 2.0),
             metadata_only=getattr(args, 'metadata_only', False),
-            llm_provider=getattr(args, 'llm_provider', env_provider or 'vllm'),
-            llm_base_url=getattr(args, 'llm_base_url', env_base_url),
-            llm_api_key=getattr(args, 'llm_api_key', env_api_key),
+            llm_provider=getattr(args, 'llm_provider', None) or env_provider or 'vllm',
+            llm_base_url=getattr(args, 'llm_base_url', None) or env_base_url,
+            llm_api_key=getattr(args, 'llm_api_key', None) or env_api_key or config_api_key,
         )
     
     def get_max_context_length(self) -> int:

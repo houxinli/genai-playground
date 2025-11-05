@@ -20,10 +20,12 @@ dependencies:
       # 文本与工具
       - regex==2025.7.34
       - tiktoken==0.11.0
+      - transformers>=4.55.0
       # Pixiv 下载脚本依赖
       - pixivpy3
       - beautifulsoup4
       - html5lib
+      - gallery-dl
       # 日志与测试（可选）
       - python-json-logger==3.3.0
       - pytest==8.3.3
