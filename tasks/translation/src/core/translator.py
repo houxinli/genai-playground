@@ -44,6 +44,14 @@ class Translator:
         base_url = self.config.llm_base_url
         provider = (self.config.llm_provider or "vllm").lower()
         api_key = self.config.llm_api_key or "dummy"
+        
+        # 调试：记录 API key 状态（不打印完整 key）
+        if provider == "openrouter" and api_key and api_key != "dummy":
+            self.logger.debug(f"OpenRouter API key 已读取: {api_key[:20]}...")
+            self.logger.info("OpenRouter: 将禁用流式并使用最小参数集调用")
+        elif provider == "openrouter":
+            self.logger.warning(f"⚠️ OpenRouter API key 未设置，provider={provider}, api_key={api_key}")
+        
         if not base_url:
             if provider == "vllm":
                 base_url = "http://localhost:8000/v1"
@@ -57,7 +65,16 @@ class Translator:
                 base_url = "https://openrouter.ai/api/v1"
             elif provider == "openai":
                 base_url = None  # 使用 SDK 默认 https://api.openai.com/v1
-        self.client = OpenAI(base_url=base_url, api_key=api_key)
+        
+        # OpenRouter 需要额外的 headers（根据官方文档：https://openrouter.ai/docs/quickstart）
+        if provider == "openrouter":
+            default_headers = {
+                "HTTP-Referer": "https://github.com/houxinli/genai-playground",  # 用于排名展示
+                "X-Title": "Translation Tool"  # 用于排名展示
+            }
+            self.client = OpenAI(base_url=base_url, api_key=api_key, default_headers=default_headers, timeout=60)
+        else:
+            self.client = OpenAI(base_url=base_url, api_key=api_key, timeout=60)
         self.profile_manager = ProfileManager(config.profiles_file)
         self.streaming_handler = StreamingHandler(self.client, logger, config, self.profile_manager)
         
@@ -394,6 +411,14 @@ class Translator:
         # 构建最小上下文
         yaml_prof = self.profile_manager.get_profile("yaml")
         parts: list[str] = []
+        # 强制性指令：限制输出为 key: value 行，避免解释/Markdown
+        parts.append(
+            "仅输出以下键的译文行，严格保持 key 与冒号空格，禁止任何额外说明/Markdown/空行：\n"
+            "1) title: 原文\n   title: 中文\n"
+            "2) series.title: 原文（在缩进下）\n   series.title: 中文\n"
+            "3) caption: 原文\n   caption: 中文（保留 HTML 标签/链接）\n"
+            "4) tags: [a, b]\n   tags: [a / a中文, b / b中文]"
+        )
         # 前言
         preface_path = self.config.preface_yaml_file or self.config.preface_file
         if preface_path and Path(preface_path).exists():
@@ -514,7 +539,7 @@ class Translator:
             cap
         )
     
-    def translate_lines_simple(self, target_lines: List[str], previous_io: Tuple[List[str], List[str]] = None) -> Tuple[List[str], str, bool, Dict[str, int], Tuple[List[str], List[str]]]:
+    def translate_lines_simple(self, target_lines: List[str], previous_io: Tuple[List[str], List[str]] = None, start_line_number: Optional[int] = None) -> Tuple[List[str], str, bool, Dict[str, int], Tuple[List[str], List[str]]]:
         """
         简化的行级翻译方法
         输入：目标行列表 + 前一次的输入输出
@@ -541,6 +566,12 @@ class Translator:
                 target_lines=stripped_lines,
                 previous_io=previous_io
             )
+            # 可选：记录批次起始行号，便于定位（不影响功能）
+            if start_line_number is not None and self.logger:
+                try:
+                    self.logger.debug(f"简化翻译批次起始行号: {start_line_number}")
+                except Exception:
+                    pass
             
             # 使用ProfileManager获取bilingual_simple参数
             max_tokens = self._estimate_simple_max_tokens(stripped_lines)

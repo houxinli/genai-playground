@@ -27,6 +27,8 @@ class TranslationPipeline:
             config: 翻译配置
         """
         self.config = config
+        # 始终使用流式（用户要求仅保留流式路径）
+        self.config.stream = True
         
         # 初始化组件（默认开启文件日志；仅当realtime_log关闭且无法定位文件时才退回控制台）
         self.logger = UnifiedLogger.create_console_only()
