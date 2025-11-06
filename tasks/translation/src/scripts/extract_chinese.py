@@ -8,6 +8,19 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
 
+def _extract_first_int(text: str) -> Optional[int]:
+    """提取字符串中的第一个整数，失败返回None。"""
+    if not text:
+        return None
+    match = re.search(r"(\d+)", text)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
 def _normalize_whitespace(text: str) -> str:
     """规范化不可见空白与特殊空格，清除BOM与零宽字符，合并空格。"""
     if not text:
@@ -486,7 +499,7 @@ def process_bilingual_file(input_path: Path, output_path: Path, include_original
 
 
 def extract_novel_id_from_yaml(yaml_content: str) -> Optional[int]:
-    """从YAML内容中提取 novel_id（数字）。失败返回 None。"""
+    """从YAML内容中提取用于排序的整数ID。优先使用 novel_id，其次 post_id。"""
     try:
         lines = yaml_content.strip().split('\n')
         # 跳过开头/结尾分隔
@@ -494,13 +507,19 @@ def extract_novel_id_from_yaml(yaml_content: str) -> Optional[int]:
             lines = lines[1:]
         if lines and lines[-1].strip() == '---':
             lines = lines[:-1]
+        target_keys = ("novel_id", "post_id")
         for line in lines:
-            if line.startswith('novel_id:'):
-                raw = line.split(':', 1)[1].strip()
-                # 只保留数字前缀
-                m = re.match(r"(\d+)", raw)
-                if m:
-                    return int(m.group(1))
+            if not line or line[0].isspace():
+                continue
+            if ':' not in line:
+                continue
+            key, raw = line.split(':', 1)
+            key = key.strip()
+            if key not in target_keys:
+                continue
+            candidate = _extract_first_int(raw)
+            if candidate is not None:
+                return candidate
         return None
     except Exception:
         return None
@@ -540,7 +559,10 @@ def merge_chinese_files(input_dir: Path, include_original: bool = False) -> bool
                 content_lines = lines[yaml_end_line + 1:]
                 novel_id = extract_novel_id_from_yaml(yaml_content)
                 if novel_id is None:
-                    # 将无法识别的 novel_id 放在末尾（使用一个大值）
+                    # 尝试使用文件名中的数字进行排序
+                    novel_id = _extract_first_int(file_path.stem)
+                if novel_id is None:
+                    # 将无法识别的 ID 放在末尾（使用一个大值）
                     novel_id = 10**18
                 file_infos.append((novel_id, file_path, content_lines, yaml_content))
             except Exception as e:
