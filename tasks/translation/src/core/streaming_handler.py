@@ -198,10 +198,12 @@ class StreamingHandler:
                                             if '\n' in current_line:
                                                 lines = current_line.split('\n')
                                                 for line in lines[:-1]:
-                                                    self.logger and self.logger.debug(f"{log_prefix}: {line}", mode=UnifiedLogger.LogMode.FILE)
+                                                    if self.logger:
+                                                        self.logger.info(f"{log_prefix}: {line}", mode=UnifiedLogger.LogMode.FILE)
                                                 current_line = lines[-1]
                                             elif len(current_line) >= flush_threshold:
-                                                self.logger and self.logger.debug(f"{log_prefix}: {current_line}", mode=UnifiedLogger.LogMode.FILE)
+                                                if self.logger:
+                                                    self.logger.info(f"{log_prefix}: {current_line}", mode=UnifiedLogger.LogMode.FILE)
                                                 current_line = ""
                                     except Exception:
                                         continue
@@ -234,8 +236,7 @@ class StreamingHandler:
                         nonlocal current_line
                         if current_line.strip():
                             if self.logger:
-                                # 仅写文件
-                                self.logger.debug(f"{log_prefix}: {current_line}", mode=UnifiedLogger.LogMode.FILE)
+                                self.logger.info(f"{log_prefix}: {current_line}", mode=UnifiedLogger.LogMode.FILE)
                         current_line = ""
                     
                     for chunk in resp:

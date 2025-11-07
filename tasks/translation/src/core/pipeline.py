@@ -122,7 +122,12 @@ class TranslationPipeline:
             custom_basename = None
             if self.config.enhanced_mode and getattr(self.config, 'enhanced_output', 'copy') == 'copy':
                 custom_basename = f"{file_path.stem}_enhanced"
-            self.logger = UnifiedLogger.create_for_file(file_path, log_dir, stream_output=False, custom_basename=custom_basename)
+            self.logger = UnifiedLogger.create_for_file(
+                file_path,
+                log_dir,
+                stream_output=bool(self.config.realtime_log),
+                custom_basename=custom_basename,
+            )
             # 将新日志器分发到组件
             self.enhanced_handler.logger = self.logger
             if hasattr(self.enhanced_handler, 'streaming_handler') and self.enhanced_handler.streaming_handler:
@@ -180,7 +185,11 @@ class TranslationPipeline:
         UnifiedLogger._debug_files_mode = self.config.debug_files
         UnifiedLogger._log_level = self.config.log_level
         log_dir = path.parent if self.config.debug_files else self.config.log_dir
-        self.logger = UnifiedLogger.create_for_file(path, log_dir, stream_output=False)
+        self.logger = UnifiedLogger.create_for_file(
+            path,
+            log_dir,
+            stream_output=bool(self.config.realtime_log),
+        )
         self.translator.logger = self.logger
         self.file_handler.logger = self.logger
         # 同步更新质量检测与流式处理器上的logger，避免控制台重复调试输出
@@ -256,6 +265,7 @@ class TranslationPipeline:
                     # 1) 收集四个目标键的原值
                     title_v = None
                     caption_v = None
+                    excerpt_v = None
                     series_title_v = None
                     tags_v: list[str] | None = None
                     for ln in yaml_raw.splitlines():
@@ -264,6 +274,8 @@ class TranslationPipeline:
                             title_v = s.split(':',1)[1].strip()
                         elif s.startswith('caption:'):
                             caption_v = s.split(':',1)[1].strip()
+                        elif s.startswith('excerpt:'):
+                            excerpt_v = s.split(':',1)[1].strip()
                         elif s.startswith('title:') and ln.startswith('  '):
                             # 可能是 series.title
                             series_title_v = s.split(':',1)[1].strip()
@@ -277,6 +289,8 @@ class TranslationPipeline:
                         batch_in['title'] = title_v
                     if caption_v is not None and caption_v.strip():
                         batch_in['caption'] = caption_v
+                    if excerpt_v is not None and excerpt_v.strip():
+                        batch_in['excerpt'] = excerpt_v
                     if series_title_v is not None and series_title_v.strip():
                         batch_in['series.title'] = series_title_v
                     elif series_title_v is not None and not series_title_v.strip():
@@ -284,6 +298,8 @@ class TranslationPipeline:
                     if tags_v is not None:
                         batch_in['tags'] = tags_v
                     batch_out, _, ok_batch, _ = self.translator.translate_yaml_kv_batch(batch_in)
+                    self.logger.debug(f"YAML KV输入: {batch_in}")
+                    self.logger.debug(f"YAML KV输出: {batch_out}")
                     # 3) 重建 YAML（双行原/译；tags 中文列表）
                     yaml_out_lines: list[str] = ["---"]
                     for ln in yaml_raw.splitlines():
@@ -294,6 +310,8 @@ class TranslationPipeline:
                             yaml_out_lines.append(f"{indent}title: {batch_out['title']}")
                         elif s.startswith('caption:') and 'caption' in batch_out and batch_out['caption'].strip():
                             yaml_out_lines.append(f"{indent}caption: {batch_out['caption']}")
+                        elif s.startswith('excerpt:') and 'excerpt' in batch_out and batch_out['excerpt'].strip():
+                            yaml_out_lines.append(f"{indent}excerpt: {batch_out['excerpt']}")
                         elif s.startswith('title:') and ln.startswith('  ') and 'series.title' in batch_out and batch_out['series.title'].strip():
                             yaml_out_lines.append(f"{indent}title: {batch_out['series.title']}")
                         elif s.startswith('tags:') and 'tags' in batch_out and isinstance(batch_out['tags'], list):
@@ -310,6 +328,7 @@ class TranslationPipeline:
                     # 1) 收集四个目标键的原值
                     title_v = None
                     caption_v = None
+                    excerpt_v = None
                     series_title_v = None
                     tags_v: list[str] | None = None
                     for ln in yaml_raw.splitlines():
@@ -318,6 +337,8 @@ class TranslationPipeline:
                             title_v = s.split(':',1)[1].strip()
                         elif s.startswith('caption:'):
                             caption_v = s.split(':',1)[1].strip()
+                        elif s.startswith('excerpt:'):
+                            excerpt_v = s.split(':',1)[1].strip()
                         elif s.startswith('title:') and ln.startswith('  '):
                             # 可能是 series.title
                             series_title_v = s.split(':',1)[1].strip()
@@ -331,6 +352,8 @@ class TranslationPipeline:
                         batch_in['title'] = title_v
                     if caption_v is not None and caption_v.strip():
                         batch_in['caption'] = caption_v
+                    if excerpt_v is not None and excerpt_v.strip():
+                        batch_in['excerpt'] = excerpt_v
                     if series_title_v is not None and series_title_v.strip():
                         batch_in['series.title'] = series_title_v
                     elif series_title_v is not None and not series_title_v.strip():
@@ -348,6 +371,8 @@ class TranslationPipeline:
                             yaml_out_lines.append(f"{indent}title: {batch_out['title']}")
                         elif s.startswith('caption:') and 'caption' in batch_out and batch_out['caption'].strip():
                             yaml_out_lines.append(f"{indent}caption: {batch_out['caption']}")
+                        elif s.startswith('excerpt:') and 'excerpt' in batch_out and batch_out['excerpt'].strip():
+                            yaml_out_lines.append(f"{indent}excerpt: {batch_out['excerpt']}")
                         elif s.startswith('title:') and ln.startswith('  ') and 'series.title' in batch_out and batch_out['series.title'].strip():
                             yaml_out_lines.append(f"{indent}title: {batch_out['series.title']}")
                         elif s.startswith('tags:') and 'tags' in batch_out and isinstance(batch_out['tags'], list):
@@ -407,7 +432,6 @@ class TranslationPipeline:
         self.logger.info(f"   模型: {self.config.model}")
         self.logger.info(f"   简化双语模式: {self.config.bilingual_simple}")
         self.logger.info(f"   增强模式: {self.config.enhanced_mode}")
-        self.logger.info(f"   流式输出: {self.config.stream}")
         self.logger.info(f"   实时日志: {self.config.realtime_log}")
         self.logger.info(f"   重试次数: {self.config.retries}")
         self.logger.info(f"   重试等待: {self.config.retry_wait} 秒")
@@ -747,7 +771,10 @@ class TranslationPipeline:
             
             # 调用简化翻译
             chinese_lines, prompt, success, token_stats, current_io = self.translator.translate_lines_simple(
-                batch_content_lines, previous_io=previous_io, start_line_number=content_i + 1
+                batch_content_lines,
+                previous_io=previous_io,
+                start_line_number=content_i + 1,
+                context_lines=[line.strip('\n') for line in context_lines],
             )
             
             if success and len(chinese_lines) == len(batch_content_lines):
