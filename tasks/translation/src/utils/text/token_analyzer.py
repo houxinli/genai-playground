@@ -4,10 +4,11 @@
 使用Qwen3 tokenizer进行精确的token计数和估算
 """
 
-from typing import Optional, Dict, Any
-from pathlib import Path
-from transformers import AutoTokenizer
 import logging
+import os
+from typing import Optional, Dict
+
+from transformers import AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -23,15 +24,54 @@ class TokenAnalyzer:
     
     def _load_tokenizer(self):
         """加载tokenizer"""
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_name, 
-                trust_remote_code=True
-            )
-            logger.debug(f"✅ 成功加载tokenizer: {self.model_name}")
-        except Exception as e:
-            logger.warning(f"⚠️ 加载tokenizer失败: {e}, 将使用简单估算")
+        # 强制简易估算直接跳过加载
+        if os.getenv("TRANSLATION_FORCE_SIMPLE_ESTIMATOR", "").lower() in {"1", "true", "yes"}:
+            logger.debug("已启用简易token估算，跳过tokenizer加载")
             self.tokenizer = None
+            return
+
+        # 默认仅尝试本地缓存，避免在离线环境里频繁触发网络请求
+        prefer_local_only = os.getenv("TRANSLATION_SKIP_REMOTE_TOKENIZER", "1").lower() in {"1", "true", "yes"}
+        allow_remote_download = os.getenv("TRANSLATION_ALLOW_REMOTE_TOKENIZER", "").lower() in {"1", "true", "yes"}
+
+        def _load(local_only: bool):
+            return AutoTokenizer.from_pretrained(
+                self.model_name,
+                trust_remote_code=True,
+                local_files_only=local_only,
+            )
+
+        try:
+            self.tokenizer = _load(local_only=True)
+            logger.debug(f"✅ 成功加载本地tokenizer缓存: {self.model_name}")
+            return
+        except Exception as first_exc:
+            if prefer_local_only and not allow_remote_download:
+                logger.info(
+                    "未检测到本地tokenizer缓存，将改用简易估算。若需允许网络下载，可设置环境变量 "
+                    "TRANSLATION_SKIP_REMOTE_TOKENIZER=0 或 TRANSLATION_ALLOW_REMOTE_TOKENIZER=1。"
+                )
+                logger.debug("Tokenizer local load failure: %s", first_exc)
+                self.tokenizer = None
+                return
+
+            if not allow_remote_download:
+                # 明确允许跳过远端下载
+                logger.debug("Tokenizer local load failure: %s", first_exc)
+                self.tokenizer = None
+                return
+
+            try:
+                self.tokenizer = _load(local_only=False)
+                logger.debug(f"✅ 通过网络成功加载tokenizer: {self.model_name}")
+            except Exception as second_exc:
+                logger.warning(
+                    "⚠️ 加载tokenizer失败（local=%s, remote=%s）: %s; 将使用简单估算",
+                    True,
+                    True,
+                    second_exc,
+                )
+                self.tokenizer = None
     
     def count_tokens(self, text: str) -> int:
         """

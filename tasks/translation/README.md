@@ -135,6 +135,9 @@ make translate-stop
 
 # 自定义上下文行数
 ./translate input.txt --bilingual-simple --context-lines 5 --stream
+
+# 离线/受限环境可追加 --token-estimator simple，避免尝试下载 HuggingFace tokenizer
+./translate input.txt --bilingual-simple --token-estimator simple --stream
 ```
 
 ## 模型选择
