@@ -23,7 +23,6 @@ class TranslationConfig:
     bilingual_simple: bool = False  # 简化bilingual模式
     enhanced_mode: bool = False  # 增强模式：QC检测 + 重新翻译
     enhanced_output: str = "copy"  # copy | inplace
-    stream: bool = False
     
     # bilingual-simple模式配置
     line_batch_size_lines: int = 50  # 每批翻译的行数（基于token分析优化）
@@ -58,6 +57,7 @@ class TranslationConfig:
     sample_yaml_file: Optional[Path] = None
     preface_body_file: Optional[Path] = None
     sample_body_file: Optional[Path] = None
+    prompt_style: str = "default"
     
     # 默认生成参数（用于向后兼容，建议使用ProfileManager）
     # 注意：这些参数主要用于CLI参数解析和向后兼容
@@ -74,7 +74,7 @@ class TranslationConfig:
     token_estimator: str = "auto"
     
     # 日志配置
-    realtime_log: bool = False
+    realtime_log: bool = True
     debug: bool = False  # 已弃用，保持向后兼容
     debug_files: bool = False  # 调试文件模式：是否创建debug文件
     log_level: str = "INFO"  # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -98,26 +98,34 @@ class TranslationConfig:
 
     # 提供商与连接（可通过环境变量覆盖）
     # 支持 provider: vllm | ollama | openai | openrouter
-    llm_provider: str = "vllm"
+    llm_provider: str = "openrouter"
     llm_base_url: Optional[str] = None
     llm_api_key: Optional[str] = None
     
     @classmethod
-    def _read_api_key_from_config(cls, config_path: Optional[Path] = None) -> Optional[str]:
+    def _read_api_key_from_config(cls, config_path: Optional[Path] = None, provider: str = "openrouter") -> Optional[str]:
         """从 config.json 读取 API key（优先级：translator.openrouter.api-key > translator.openai.api-key）"""
         if config_path is None:
-            base_dir = Path(__file__).parent.parent.parent.parent  # translation/
+            base_dir = Path(__file__).resolve().parent.parent.parent  # translation/
             config_path = base_dir / "data" / "config.json"
         try:
             if not config_path.exists():
                 return None
             data = json.loads(config_path.read_text(encoding="utf-8"))
             translator = data.get("translator", {})
-            # 优先读取 openrouter，其次 openai
-            api_key = (
-                translator.get("openrouter", {}).get("api-key")
-                or translator.get("openai", {}).get("api-key")
-            )
+            provider = (provider or "openrouter").lower()
+            if provider == "openrouter":
+                api_key = (
+                    translator.get("openrouter", {}).get("api-key")
+                    or translator.get("llm", {}).get("api-key")
+                )
+            elif provider == "openai":
+                api_key = (
+                    translator.get("openai", {}).get("api-key")
+                    or translator.get("llm", {}).get("api-key")
+                )
+            else:
+                api_key = translator.get("llm", {}).get("api-key")
             if api_key:
                 return str(api_key).strip()
         except Exception:
@@ -130,16 +138,21 @@ class TranslationConfig:
         # 优先级：CLI > ENV > config.json > 默认
         env_provider = os.environ.get("LLM_PROVIDER", None)
         env_base_url = os.environ.get("LLM_BASE_URL", None)
-        # 兼容 OPENAI/OPENROUTER 常见命名（优先使用专用变量，最后才回退到通用 LLM_API_KEY）
-        env_api_key = (
-            os.environ.get("OPENROUTER_API_KEY")
-            or os.environ.get("OPENAI_API_KEY")
-            or os.environ.get("LLM_API_KEY")
-        )
-        # 从 config.json 读取（如果环境变量未设置）
+
+        def pick_api_key(provider_name: str) -> Optional[str]:
+            provider_name = (provider_name or "").lower()
+            if provider_name == "openrouter":
+                return os.environ.get("OPENROUTER_API_KEY")
+            if provider_name == "openai":
+                return os.environ.get("OPENAI_API_KEY")
+            # 其它 provider（vllm/ollama）不需要 API key
+            return None
+
+        provider_via_cli = getattr(args, 'llm_provider', None) or env_provider or 'openrouter'
+        env_api_key = pick_api_key(provider_via_cli)
         config_api_key = None
         if not env_api_key:
-            config_api_key = cls._read_api_key_from_config()
+            config_api_key = cls._read_api_key_from_config(provider=provider_via_cli)
 
         return cls(
             model=args.model,
@@ -149,7 +162,6 @@ class TranslationConfig:
             bilingual_simple=getattr(args, 'bilingual_simple', False),
             enhanced_mode=getattr(args, 'enhanced_mode', False),
             enhanced_output=getattr(args, 'enhanced_output', 'copy'),
-            stream=args.stream,
             line_batch_size_lines=getattr(args, 'line_batch_size_lines', 20),
             context_lines=getattr(args, 'context_lines', 3),
             enhanced_qc_threshold=getattr(args, 'enhanced_qc_threshold', 0.7),
@@ -159,7 +171,7 @@ class TranslationConfig:
             retries=args.retries,
             retry_wait=args.retry_wait,
             fallback_on_context=args.fallback_on_context,
-            no_llm_check=args.no_llm_check,
+            no_llm_check=args.no_llm_check or getattr(args, "disable_llm_qc", False),
             strict_repetition_check=args.strict_repetition_check,
             overwrite=args.overwrite,
             log_dir=Path(args.log_dir),
@@ -171,6 +183,7 @@ class TranslationConfig:
             sample_yaml_file=getattr(args, 'sample_yaml_file', None),
             preface_body_file=getattr(args, 'preface_body_file', None),
             sample_body_file=getattr(args, 'sample_body_file', None),
+            prompt_style=getattr(args, 'prompt_style', 'default'),
             stop=args.stop,
             frequency_penalty=args.frequency_penalty,
             presence_penalty=args.presence_penalty,
@@ -187,7 +200,7 @@ class TranslationConfig:
             max_retries=getattr(args, 'max_retries', 3),
             retry_delay_s=getattr(args, 'retry_delay_s', 2.0),
             metadata_only=getattr(args, 'metadata_only', False),
-            llm_provider=getattr(args, 'llm_provider', None) or env_provider or 'vllm',
+            llm_provider=provider_via_cli or 'openrouter',
             llm_base_url=getattr(args, 'llm_base_url', None) or env_base_url,
             llm_api_key=getattr(args, 'llm_api_key', None) or env_api_key or config_api_key,
         )

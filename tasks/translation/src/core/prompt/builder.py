@@ -276,10 +276,10 @@ class PromptBuilder:
         # 限制上下文行数
         limited_context = context_lines[-config.max_context_lines:] if config.max_context_lines > 0 else context_lines
         
-        # 为上下文添加行号
+        # 为上下文添加行号并加上提示
         numbered_context = [f"{i+1}. {line}" for i, line in enumerate(limited_context)]
-        
-        return [{"role": "user", "content": "\n".join(numbered_context)}]
+        content = "【最近上下文】\n" + "\n".join(numbered_context)
+        return [{"role": "user", "content": content}]
     
     def _build_previous_io_messages(self, previous_io: Tuple[List[str], List[str]], config: PromptConfig, start_line_number: int = 1) -> List[Dict[str, str]]:
         """构建前一次输入输出的消息"""
@@ -310,7 +310,8 @@ class PromptBuilder:
             else:
                 numbered_input = input_lines
         
-        messages.append({"role": "user", "content": "\n".join(numbered_input)})
+        prev_user_content = "【上一批原文片段】\n" + "\n".join(numbered_input)
+        messages.append({"role": "user", "content": prev_user_content})
         
         # 输出消息
         if config.use_line_numbers:
@@ -321,7 +322,7 @@ class PromptBuilder:
         content = "\n".join(numbered_output)
         if config.use_end_marker:
             content += f"\n{config.end_marker}"
-        
+        content = "【上一批译文片段】\n" + content
         messages.append({"role": "assistant", "content": content})
         
         return messages

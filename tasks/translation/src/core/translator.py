@@ -14,7 +14,8 @@ from .config import TranslationConfig
 from .logger import UnifiedLogger
 from .quality_checker import QualityChecker
 from .prompt import PromptBuilder, create_config
-from ..utils.text import clean_output_text, detect_and_truncate_repetition, calculate_max_tokens_for_messages, log_model_call
+from ..utils.text.cleaning import clean_output_text, detect_and_truncate_repetition
+from ..utils.text.token_estimation import calculate_max_tokens_for_messages, log_model_call
 from .streaming_handler import StreamingHandler
 from .profile_manager import ProfileManager, GenerationParams
 
@@ -78,13 +79,22 @@ class Translator:
         self.profile_manager = ProfileManager(config.profiles_file)
         self.streaming_handler = StreamingHandler(self.client, logger, config, self.profile_manager)
         
-        # 初始化PromptBuilder
-        prompt_data_dir = Path(__file__).parent.parent.parent / "data" / "prompt"
-        prompt_config = create_config("translation", prompt_data_dir)
-        # 手动设置正确的文件路径
-        prompt_config.preface_file = "preface_simple.txt"
-        prompt_config.sample_file = "sample_simple.txt"
-        prompt_config.terminology_file = "terminology.txt"
+        # 初始化PromptBuilder（支持 prompt style）
+        prompt_styles_dir = Path(__file__).parent.parent.parent / "prompt_styles"
+        style_name = getattr(self.config, "prompt_style", "default") or "default"
+        style_dir = prompt_styles_dir / style_name
+        if not style_dir.exists():
+            style_dir = prompt_styles_dir / "default"
+        prompt_config = create_config("translation", style_dir)
+        if self.config.bilingual_simple:
+            prompt_config.support_previous_io = False
+        prompt_config.preface_file = "preface.txt"
+        prompt_config.sample_file = "sample.txt"
+        if self.config.terminology_file:
+            prompt_config.terminology_file = str(self.config.terminology_file)
+        else:
+            prompt_config.terminology_file = None
+        prompt_config.max_context_lines = getattr(self.config, "context_lines", prompt_config.max_context_lines)
         self.prompt_builder = PromptBuilder(prompt_config)
     
     def translate_text(self, text: str, chunk_index: Optional[int] = None) -> Tuple[str, str, bool, Dict[str, int]]:
@@ -124,10 +134,7 @@ class Translator:
                 self.logger.info(f"动态计算 max_tokens: {max_tokens} (基于输入长度 {len(text)}, 估算输入tokens: {estimated_input_tokens}, 模型上下文长度: {max_context_length})")
                 
                 # 调用模型
-                if self.config.stream:
-                    result, prompt, token_meta = self._translate_with_stream(text, max_tokens)
-                else:
-                    result, prompt, token_meta = self._translate_without_stream(text, max_tokens)
+                result, prompt, token_meta = self._translate_with_stream(text, max_tokens)
                 
                 if result and result.strip():
                     # 进行质量检测
@@ -172,110 +179,39 @@ class Translator:
     def _translate_with_stream(self, text: str, max_tokens: int) -> Tuple[str, str, Dict[str, int]]:
         """流式翻译"""
         messages = self._build_messages(text)
-        
         try:
-            # 基于消息计算生成上限
             allowed = self._calculate_max_tokens(messages, requested_max_tokens=max_tokens, cap=None)
             max_tokens = allowed
-            # 使用统一的流式输出处理器
-            try:
-                # bilingual_simple 时提高频率惩罚，降低连写与口癖
-                from .streaming_handler import StreamingHandler
-                freq_penalty = max(self.config.frequency_penalty, 0.5) if self.config.bilingual_simple else self.config.frequency_penalty
-                params = self.profile_manager.get_generation_params(
-                    "body",
-                    max_tokens=max_tokens,
-                    frequency_penalty=freq_penalty
-                )
-                result, token_stats = self.streaming_handler.stream_with_params(
-                model=self.config.model,
-                    messages=messages,
-                    params=params,
-                )
-            except BadRequestError as e:
-                # 针对 max_tokens 上限错误降档重试一次
-                msg = str(e)
-                if "max_tokens" in msg or "max_completion_tokens" in msg:
-                    # 降档到更保守上限
-                    safe_allowed = self._calculate_max_tokens(messages, requested_max_tokens=max_tokens, cap=int(max_tokens * 0.6))
-                    max_tokens = safe_allowed
-                    self.logger.warning(f"max_tokens 调整为保守值: {max_tokens} 后重试流式调用")
-                    from .streaming_handler import StreamingHandler
-                    retry_params = self.profile_manager.get_generation_params(
-                        "body",
+            freq_penalty = max(self.config.frequency_penalty, 0.5) if self.config.bilingual_simple else self.config.frequency_penalty
+            params = self.profile_manager.get_generation_params(
+                "body",
                 max_tokens=max_tokens,
-                frequency_penalty=self.config.frequency_penalty,
-                        presence_penalty=self.config.presence_penalty
-                    )
-                    result, token_stats = self.streaming_handler.stream_with_params(
-                        model=self.config.model,
-                        messages=messages,
-                        params=retry_params,
-                    )
-                else:
-                    raise
-            
-            return self._process_translation_result(result, str(messages), max_tokens)
-            
-        except Exception as e:
-            self.logger.error(f"模型调用失败: {e}")
-            raise
-    
-    def _translate_without_stream(self, text: str, max_tokens: int) -> Tuple[str, str, Dict[str, int]]:
-        """非流式翻译"""
-        messages = self._build_messages(text)
-        
-        try:
-            # 基于消息计算生成上限
-            max_tokens = self._calculate_max_tokens(messages, requested_max_tokens=max_tokens, cap=None)
-            # 记录调用参数
-            log_model_call(
-                self.logger,
-                self.config.model,
-                messages,
-                max_tokens,
-                self.config.temperature,
-                self.config.top_p,
-                self.config.frequency_penalty,
-                self.config.presence_penalty,
-                "非流式"
+                frequency_penalty=freq_penalty
             )
-            try:
-                resp = self.client.chat.completions.create(
-                    model=self.config.model,
-                    messages=messages,
-                    temperature=self.config.temperature,
-                    max_tokens=max_tokens,
-                    stop=None,
-                    frequency_penalty=self.config.frequency_penalty,
-                    presence_penalty=self.config.presence_penalty,
-                    stream=False,
-                )
-            except BadRequestError as e:
-                msg = str(e)
-                if "max_tokens" in msg or "max_completion_tokens" in msg:
-                    # 重新估算更保守上限
-                    safe_allowed = self._calculate_max_tokens(messages, requested_max_tokens=max_tokens, cap=int(max_tokens * 0.6))
-                    max_tokens = safe_allowed
-                    self.logger.warning(f"max_tokens 调整为保守值: {max_tokens} 后重试非流式调用")
-            resp = self.client.chat.completions.create(
+            result, token_stats = self.streaming_handler.stream_with_params(
                 model=self.config.model,
                 messages=messages,
-                temperature=self.config.temperature,
-                max_tokens=max_tokens,
-                stop=None,
-                frequency_penalty=self.config.frequency_penalty,
-                presence_penalty=self.config.presence_penalty,
-                stream=False,
+                params=params,
             )
-            
-            result = resp.choices[0].message.content
-            
-            return self._process_translation_result(result, str(messages), max_tokens)
-            
-        except Exception as e:
-            self.logger.error(f"模型调用失败: {e}")
-            raise
+        except BadRequestError as e:
+            msg = str(e)
+            if "max_tokens" not in msg and "max_completion_tokens" not in msg:
+                raise
+            safe_allowed = self._calculate_max_tokens(messages, requested_max_tokens=max_tokens, cap=int(max_tokens * 0.6))
+            max_tokens = safe_allowed
+            self.logger.warning(f"max_tokens 调整为保守值: {max_tokens} 后重试流式调用")
+            retry_params = self.profile_manager.get_generation_params(
+                "body",
+                max_tokens=max_tokens,
+                frequency_penalty=self.config.frequency_penalty,
+                presence_penalty=self.config.presence_penalty
+            )
+            result, token_stats = self.streaming_handler.stream_with_params(
+                model=self.config.model,
+                messages=messages,
+                params=retry_params,
+            )
+        return self._process_translation_result(result, str(messages), max_tokens)
     
     def _process_translation_result(self, result: str, prompt: str, max_tokens: int) -> Tuple[str, str, Dict[str, int]]:
         """处理翻译结果的通用逻辑"""
@@ -331,7 +267,7 @@ class Translator:
             preface_path=(self.config.preface_yaml_file or self.config.preface_file),
             sample_path=self.config.sample_yaml_file,
             add_samples=True,
-            default_preface="YAML 特例：仅翻译 title/caption/tags/series.title 的 value，并按双行输出；其他行仅保留原文一行（含 ---）。tags 译文行保留 [] 与逗号，元素用 原词 / 中文。缩进/层级/key/冒号空格必须完全一致。",
+            default_preface="YAML 特例：仅翻译 title、caption 或 excerpt、series.title（若存在）以及 tags 的内容，并按“两行制”输出：先原文行，紧接着中文行；其他键直接原样保留。无论 Pixiv 还是 Fanbox，若存在 caption 或 excerpt 其中之一就翻译相应字段。tags 译文行保留 [] 与逗号，元素需写成 原词 / 中文。必须完全保持缩进、层级以及 key: 后的空格。",
             log_label="YAML Prompt (single user)"
         )
 
@@ -404,8 +340,8 @@ class Translator:
             return "", "", False, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
     def translate_yaml_kv_batch(self, kv: Dict[str, object]) -> Tuple[Dict[str, object], str, bool, Dict[str, int]]:
-        """批量翻译 YAML 目标字段：仅提供四个键的原值，不给整段 YAML。
-        输入 kv 包含可选键：'title': str, 'caption': str, 'series.title': str, 'tags': List[str]
+        """批量翻译 YAML 目标字段：仅提供目标键原值，不给整段 YAML。
+        输入 kv 可包含：'title', 'caption', 'excerpt', 'series.title', 'tags'
         返回同键的译值（tags 返回 List[str]）。
         """
         # 构建最小上下文
@@ -413,11 +349,12 @@ class Translator:
         parts: list[str] = []
         # 强制性指令：限制输出为 key: value 行，避免解释/Markdown
         parts.append(
-            "仅输出以下键的译文行，严格保持 key 与冒号空格，禁止任何额外说明/Markdown/空行：\n"
+            "仅输出以下五个键的译文行，严格保持 key 与冒号空格，禁止任何额外说明/Markdown/空行：\n"
             "1) title: 原文\n   title: 中文\n"
-            "2) series.title: 原文（在缩进下）\n   series.title: 中文\n"
-            "3) caption: 原文\n   caption: 中文（保留 HTML 标签/链接）\n"
-            "4) tags: [a, b]\n   tags: [a / a中文, b / b中文]"
+            "2) caption: 原文\n   caption: 中文（保留 HTML 标签/链接）\n"
+            "3) excerpt: 原文\n   excerpt: 中文（保留 HTML 标签/链接）\n"
+            "4) series.title: 原文（在缩进下）\n   series.title: 中文\n"
+            "5) tags: [a, b]\n   tags: [a / a中文, b / b中文]"
         )
         # 前言
         preface_path = self.config.preface_yaml_file or self.config.preface_file
@@ -436,6 +373,8 @@ class Translator:
             lines.append(f"title: {kv['title']}")
         if isinstance(kv.get('caption'), str) and kv['caption'].strip():
             lines.append(f"caption: {kv['caption']}")
+        if isinstance(kv.get('excerpt'), str) and kv['excerpt'].strip():
+            lines.append(f"excerpt: {kv['excerpt']}")
         if isinstance(kv.get('series.title'), str) and kv['series.title'].strip():
             lines.append(f"series.title: {kv['series.title']}")
         if isinstance(kv.get('tags'), list):
@@ -474,7 +413,7 @@ class Translator:
                 if k == 'tags' and v.startswith('[') and v.endswith(']'):
                     items = [x.strip().strip('"').strip("'") for x in v[1:-1].split(',') if x.strip()]
                     out['tags'] = items
-                elif k in ('title', 'caption', 'series.title'):
+                elif k in ('title', 'caption', 'excerpt', 'series.title'):
                     out[k] = v.strip().strip('"').strip("'")
             prompt = str(messages)
             meta = {
@@ -538,8 +477,31 @@ class Translator:
             requested_max_tokens,
             cap
         )
+
+    def _trim_previous_io(
+        self,
+        previous_io: Optional[Tuple[List[str], List[str]]],
+    ) -> Optional[Tuple[List[str], List[str]]]:
+        """根据 context_lines 限制上一批原/译对的行数，避免把整批加入 prompt。"""
+        if not previous_io:
+            return None
+        context_limit = max(0, getattr(self.config, "context_lines", 0))
+        if context_limit <= 0:
+            return None
+        prev_inputs, prev_outputs = previous_io
+        trimmed_inputs = prev_inputs[-context_limit:] if prev_inputs else []
+        trimmed_outputs = prev_outputs[-context_limit:] if prev_outputs else []
+        if not trimmed_inputs:
+            return None
+        return trimmed_inputs, trimmed_outputs
     
-    def translate_lines_simple(self, target_lines: List[str], previous_io: Tuple[List[str], List[str]] = None, start_line_number: Optional[int] = None) -> Tuple[List[str], str, bool, Dict[str, int], Tuple[List[str], List[str]]]:
+    def translate_lines_simple(
+        self,
+        target_lines: List[str],
+        previous_io: Tuple[List[str], List[str]] = None,
+        start_line_number: Optional[int] = None,
+        context_lines: Optional[List[str]] = None,
+    ) -> Tuple[List[str], str, bool, Dict[str, int], Tuple[List[str], List[str]]]:
         """
         简化的行级翻译方法
         输入：目标行列表 + 前一次的输入输出
@@ -562,9 +524,11 @@ class Translator:
             
             # 构建最小化的prompt（只使用非空白行，去除缩进）
             stripped_lines = [line_stripped for _, line_stripped in non_empty_lines]
+            trimmed_previous_io = self._trim_previous_io(previous_io)
             messages = self.prompt_builder.build_messages(
                 target_lines=stripped_lines,
-                previous_io=previous_io
+                previous_io=trimmed_previous_io,
+                context_lines=context_lines,
             )
             # 可选：记录批次起始行号，便于定位（不影响功能）
             if start_line_number is not None and self.logger:
@@ -595,7 +559,6 @@ class Translator:
             #     self.logger.debug(f"原始翻译结果（{len(result)}字符）:\n{result}")
             
             # 清理思考内容
-            from ..utils.text import clean_output_text
             cleaned_result = clean_output_text(result)
             # 若末尾存在完成标记行，则移除
             cleaned_result = re.sub(r"(?:\n|\r|\r\n)*\[翻译完成\]\s*$", "", cleaned_result.strip())
@@ -698,7 +661,11 @@ class Translator:
 
     
     def _estimate_simple_max_tokens(self, target_lines: List[str]) -> int:
-        """估算简化翻译的max_tokens（使用准确tokenizer）"""
+        """估算简化翻译的max_tokens；token_estimator=simple 时跳过 transformers 依赖。"""
+        if getattr(self.config, "token_estimator", "auto") == "simple":
+            estimated_output = len(target_lines) * 150
+            return min(estimated_output + 1000, 6000)
+        
         from ..utils.text.token_analyzer import get_token_analyzer
         
         try:
