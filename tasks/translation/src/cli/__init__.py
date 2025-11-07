@@ -70,6 +70,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stop", nargs="*", default=["（未完待续）", "[END]", "<|im_end|>", "</s>"], help="停止词")
     parser.add_argument("--frequency-penalty", type=float, default=0.3, help="频率惩罚")
     parser.add_argument("--presence-penalty", type=float, default=0.2, help="存在惩罚")
+    parser.add_argument(
+        "--token-estimator",
+        choices=["auto", "simple"],
+        default="auto",
+        help="Token 估算模式：auto=尽量使用模型tokenizer，simple=全部采用简易估算并跳过远端加载",
+    )
     
     # 日志配置
     parser.add_argument("--realtime-log", action="store_true", help="启用实时日志")

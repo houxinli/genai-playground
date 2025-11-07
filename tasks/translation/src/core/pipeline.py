@@ -3,6 +3,7 @@
 翻译流程控制模块
 """
 
+import os
 import time
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
@@ -29,6 +30,14 @@ class TranslationPipeline:
         self.config = config
         # 始终使用流式（用户要求仅保留流式路径）
         self.config.stream = True
+
+        # 配置 token 估算策略，必要时强制简易模式
+        if getattr(self.config, "token_estimator", "auto") == "simple":
+            os.environ["TRANSLATION_FORCE_SIMPLE_ESTIMATOR"] = "1"
+            # ensure remote download stays disabled
+            os.environ.setdefault("TRANSLATION_SKIP_REMOTE_TOKENIZER", "1")
+        else:
+            os.environ.pop("TRANSLATION_FORCE_SIMPLE_ESTIMATOR", None)
         
         # 初始化组件（默认开启文件日志；仅当realtime_log关闭且无法定位文件时才退回控制台）
         self.logger = UnifiedLogger.create_console_only()

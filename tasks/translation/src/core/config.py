@@ -71,6 +71,7 @@ class TranslationConfig:
     stop: List[str] = field(default_factory=lambda: [
         "（未完待续）", "[END]", "<|im_end|>", "</s>"
     ])
+    token_estimator: str = "auto"
     
     # 日志配置
     realtime_log: bool = False
@@ -173,6 +174,7 @@ class TranslationConfig:
             stop=args.stop,
             frequency_penalty=args.frequency_penalty,
             presence_penalty=args.presence_penalty,
+            token_estimator=getattr(args, "token_estimator", "auto"),
             realtime_log=args.realtime_log,
             debug=getattr(args, 'debug', False),
             debug_files=getattr(args, 'debug_files', False) or getattr(args, 'debug', False),  # 新标志或旧标志
