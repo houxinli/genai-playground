@@ -60,10 +60,11 @@ def _clean_metadata_text(text: str) -> str:
 
 def _transform_yaml_to_localized(chinese_yaml: str) -> List[str]:
     """将提取到的英文key元信息转换为中文本地化键名，并清理内容。
-    目标键名顺序：ID, 标题, 简介, 系列(可选), 标签
+    目标键名顺序：ID, 标题, 简介, 摘要, 系列(可选), 标签
     - novel_id -> ID
     - title -> 标题
     - caption -> 简介
+    - excerpt -> 摘要
     - series.title -> 系列（没有系列则不输出）
     - tags -> 标签
     """
@@ -74,8 +75,11 @@ def _transform_yaml_to_localized(chinese_yaml: str) -> List[str]:
     id_value: Optional[str] = None
     title_value: Optional[str] = None
     caption_value: Optional[str] = None
+    excerpt_value: Optional[str] = None
     series_title_value: Optional[str] = None
     tags_value: Optional[str] = None
+    create_date_value: Optional[str] = None
+    fee_required_value: Optional[str] = None
 
     i = 0
     while i < len(lines):
@@ -88,8 +92,14 @@ def _transform_yaml_to_localized(chinese_yaml: str) -> List[str]:
             title_value = _clean_metadata_text(raw.split(':', 1)[1])
         elif raw.startswith('caption:'):
             caption_value = _clean_metadata_text(raw.split(':', 1)[1])
+        elif raw.startswith('excerpt:'):
+            excerpt_value = _clean_metadata_text(raw.split(':', 1)[1])
         elif raw.startswith('tags:'):
             tags_value = _clean_metadata_text(raw.split(':', 1)[1])
+        elif raw.startswith('create_date:'):
+            create_date_value = _clean_metadata_text(raw.split(':', 1)[1])
+        elif raw.startswith('fee_required:'):
+            fee_required_value = _clean_metadata_text(raw.split(':', 1)[1])
         elif raw.startswith('series:'):
             # 读取子字段 title
             j = i + 1
@@ -109,10 +119,16 @@ def _transform_yaml_to_localized(chinese_yaml: str) -> List[str]:
         localized.append(f"标题: {title_value}")
     if caption_value:
         localized.append(f"简介: {caption_value}")
+    if excerpt_value:
+        localized.append(f"摘要: {excerpt_value}")
     if series_title_value:
         localized.append(f"系列: {series_title_value}")
     if tags_value:
         localized.append(f"标签: {tags_value}")
+    if create_date_value:
+        localized.append(f"创建时间: {create_date_value}")
+    if fee_required_value:
+        localized.append(f"付费等级: {fee_required_value}")
     return localized
 
 def is_japanese_text(text: str) -> bool:
@@ -300,6 +316,31 @@ def extract_chinese_from_yaml(yaml_content: str) -> str:
                         cap_text = _clean_metadata_text(cap_text).strip()
                         chinese_lines.append(f"caption: {cap_text}")
                     i += 1
+                continue
+
+            elif line.startswith('excerpt:'):
+                # 检查下一行是否也是excerpt
+                if i + 1 < len(lines) and lines[i + 1].startswith('excerpt:'):
+                    excerpt_text = lines[i + 1].split(':', 1)[1]
+                    excerpt_text = _clean_metadata_text(excerpt_text).strip()
+                    chinese_lines.append(f"excerpt: {excerpt_text}")
+                    i += 2
+                else:
+                    if is_chinese_text(line):
+                        excerpt_text = line.split(':', 1)[1]
+                        excerpt_text = _clean_metadata_text(excerpt_text).strip()
+                        chinese_lines.append(f"excerpt: {excerpt_text}")
+                    i += 1
+                continue
+            
+            elif line.startswith('create_date:'):
+                chinese_lines.append(line)
+                i += 1
+                continue
+            
+            elif line.startswith('fee_required:'):
+                chinese_lines.append(line)
+                i += 1
                 continue
             
             elif line.startswith('tags:'):
