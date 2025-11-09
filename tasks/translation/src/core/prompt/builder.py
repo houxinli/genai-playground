@@ -269,17 +269,20 @@ class PromptBuilder:
             return [f"{last_user_block_start + i}. {line}" for i, line in enumerate(content)]
     
     def _build_context_messages(self, context_lines: List[str], config: PromptConfig) -> List[Dict[str, str]]:
-        """构建上下文消息"""
+        """构建上下文消息（仅供参考，不要求模型翻译）。"""
         if not context_lines:
             return []
         
-        # 限制上下文行数
         limited_context = context_lines[-config.max_context_lines:] if config.max_context_lines > 0 else context_lines
-        
-        # 为上下文添加行号并加上提示
-        numbered_context = [f"{i+1}. {line}" for i, line in enumerate(limited_context)]
-        content = "【最近上下文】\n" + "\n".join(numbered_context)
-        return [{"role": "user", "content": content}]
+        context_body = "\n".join(line.rstrip('\n') for line in limited_context).strip()
+        if not context_body:
+            return []
+        content = (
+            "【上下文提示（仅供理解语境，禁止翻译或复述，下方用户输入才是待翻内容）】\n"
+            f"{context_body}\n"
+            "【请等待并仅翻译后续用户提供的原文】"
+        )
+        return [{"role": "system", "content": content}]
     
     def _build_previous_io_messages(self, previous_io: Tuple[List[str], List[str]], config: PromptConfig, start_line_number: int = 1) -> List[Dict[str, str]]:
         """构建前一次输入输出的消息"""

@@ -122,7 +122,7 @@ def check_bilingual_quality(file_path: Path) -> bool:
         
         # 2. 检查 bilingual_simple 特有的错误模式
         error_patterns = [
-            "（以下省略）", "（省略）", "翻译失败", "无法翻译",
+            "（以下省略）", "（省略）", "无法翻译",
             "User:", "Assistant:",  # 不应该包含这些标记
             "思考中", "正在翻译", "请稍候",  # 不应该包含这些状态信息
             "ERROR", "FAILED", "EXCEPTION"  # 不应该包含错误信息

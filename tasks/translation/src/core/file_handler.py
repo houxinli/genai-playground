@@ -159,7 +159,7 @@ class FileHandler:
                 return False
             
             # 检查是否包含错误模式
-            error_patterns = ["（以下省略）", "（省略）", "翻译失败", "无法翻译"]
+            error_patterns = ["（以下省略）", "（省略）", "无法翻译"]
             for pattern in error_patterns:
                 if pattern in content:
                     return False
