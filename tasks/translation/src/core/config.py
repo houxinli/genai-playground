@@ -38,6 +38,7 @@ class TranslationConfig:
     retries: int = 3
     retry_wait: float = 2.0
     fallback_on_context: bool = True
+    repair_existing: bool = False
     
     # 质量检测配置
     no_llm_check: bool = False
