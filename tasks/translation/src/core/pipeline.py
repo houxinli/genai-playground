@@ -177,6 +177,12 @@ class TranslationPipeline:
         return success_count
     
     def process_task(self, task: TranslationTask) -> bool:
+        if task.mode == "repair":
+            target = task.existing_bilingual_path or task.output_path
+            self.logger.error(
+                f"暂未在 translate.py 中支持修复流程，请使用 scripts/repair_bilingual.py 处理: {target}"
+            )
+            return False
         if not task.original_path:
             self.logger.error("缺少原文路径，暂不支持此任务类型")
             return False
