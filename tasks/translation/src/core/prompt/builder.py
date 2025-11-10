@@ -175,17 +175,19 @@ class PromptBuilder:
         """构建few-shot示例消息"""
         messages = []
         
-        # 读取sample文件
         sample_path = config.data_dir / config.sample_file
         if not sample_path.exists():
             return messages
-        
-        with open(sample_path, 'r', encoding='utf-8') as f:
-            sample_content = f.read().strip()
-        
-        # 解析多轮对话格式
+        try:
+            with open(sample_path, 'r', encoding='utf-8') as f:
+                sample_content = f.read().strip()
+        except Exception:
+            return messages
+        if not sample_content:
+            return messages
         messages = self._parse_sample_content(sample_content, config)
-        
+        if not messages:
+            return []
         return messages
     
     def _parse_sample_content(self, content: str, config: PromptConfig) -> List[Dict[str, str]]:

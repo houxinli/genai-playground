@@ -85,6 +85,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--realtime-log", action="store_true", default=True, help="启用实时日志")
     parser.add_argument("--debug", action="store_true", help="调试模式：降低重试、增强日志（已弃用，请使用--debug-files和--log-level）")
     parser.add_argument("--debug-files", action="store_true", help="调试文件模式：创建debug文件而不是正式输出文件")
+    parser.add_argument("--repair-existing", action="store_true", help="对已有双语文件执行局部修复，仅翻译缺失或不合格的行")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], default="INFO", help="日志级别：DEBUG=详细日志，INFO=普通日志，WARNING=警告及以上，ERROR=错误及以上，CRITICAL=严重错误")
     
     # 处理限制
