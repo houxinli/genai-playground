@@ -172,6 +172,7 @@ class TranslationConfig:
             retries=args.retries,
             retry_wait=args.retry_wait,
             fallback_on_context=args.fallback_on_context,
+            repair_existing=getattr(args, "repair_existing", False),
             no_llm_check=args.no_llm_check or getattr(args, "disable_llm_qc", False),
             strict_repetition_check=args.strict_repetition_check,
             overwrite=args.overwrite,
