@@ -80,7 +80,7 @@ class Translator:
         self.streaming_handler = StreamingHandler(self.client, logger, config, self.profile_manager)
         
         # 初始化PromptBuilder（支持 prompt style）
-        prompt_styles_dir = Path(__file__).parent.parent.parent / "prompt_styles"
+        prompt_styles_dir = Path(__file__).parent.parent.parent / "data" / "prompt_styles"
         style_name = getattr(self.config, "prompt_style", "default") or "default"
         style_dir = prompt_styles_dir / style_name
         if not style_dir.exists():
