@@ -14,6 +14,7 @@ from .quality_checker import QualityChecker
 from .translator import Translator
 from .file_handler import FileHandler
 from .enhanced_mode import EnhancedModeHandler
+from .task import TranslationTask
 from ..utils.file import parse_yaml_front_matter
 
 
@@ -69,34 +70,39 @@ class TranslationPipeline:
             return 0
         
         # 查找文件
-        files_to_process = self.file_handler.find_files_to_process(inputs)
-        
-        if not files_to_process:
-            self.logger.warning("没有找到需要处理的文件")
-            return 0
-        
-        self.logger.info(f"开始处理 {len(files_to_process)} 个文件")
-        
-        # 应用限制
-        if self.config.offset > 0:
-            files_to_process = files_to_process[self.config.offset:]
-            self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(files_to_process)} 个文件")
-        
-        if self.config.limit > 0:
-            files_to_process = files_to_process[:self.config.limit]
-            self.logger.info(f"限制处理文件数量为: {len(files_to_process)}")
-        
-        # 处理文件
-        success_count = 0
-        
+        target_total = 0
         if self.config.enhanced_mode:
+            files_to_process = self.file_handler.find_files_to_process(inputs)
+            if not files_to_process:
+                self.logger.warning("没有找到需要处理的文件")
+                return 0
+            if self.config.offset > 0:
+                files_to_process = files_to_process[self.config.offset:]
+                self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(files_to_process)} 个文件")
+            if self.config.limit > 0:
+                files_to_process = files_to_process[:self.config.limit]
+                self.logger.info(f"限制处理文件数量为: {len(files_to_process)} 个文件")
+            target_total = len(files_to_process)
+            self.logger.info(f"开始处理 {target_total} 个文件")
             # 增强模式：处理双语文件
             success_count = self._run_enhanced_mode(files_to_process)
         else:
+            tasks_to_process = self.file_handler.plan_tasks(inputs)
+            if not tasks_to_process:
+                self.logger.warning("没有找到需要处理的文件")
+                return 0
+            if self.config.offset > 0:
+                tasks_to_process = tasks_to_process[self.config.offset:]
+                self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(tasks_to_process)} 个文件")
+            if self.config.limit > 0:
+                tasks_to_process = tasks_to_process[:self.config.limit]
+                self.logger.info(f"限制处理文件数量为: {len(tasks_to_process)} 个文件")
+            target_total = len(tasks_to_process)
+            self.logger.info(f"开始处理 {target_total} 个文件")
             # 普通模式：处理原始文件
-            success_count = self._run_normal_mode(files_to_process)
+            success_count = self._run_normal_mode(tasks_to_process)
         
-        self.logger.info(f"处理完成: {success_count}/{len(files_to_process)} 个文件成功")
+        self.logger.info(f"处理完成: {success_count}/{target_total} 个文件成功")
         return success_count
     
     def _run_enhanced_mode(self, files_to_process: List[Path]) -> int:
@@ -150,11 +156,12 @@ class TranslationPipeline:
         
         return success_count
     
-    def _run_normal_mode(self, files_to_process: List[Path]) -> int:
+    def _run_normal_mode(self, tasks_to_process: List[TranslationTask]) -> int:
         """运行普通模式"""
         success_count = 0
-        for i, file_path in enumerate(files_to_process, 1):
-            self.logger.info(f"处理文件 {i}/{len(files_to_process)}: {file_path}")
+        for i, task in enumerate(tasks_to_process, 1):
+            display_path = task.original_path or task.output_path
+            self.logger.info(f"处理文件 {i}/{len(tasks_to_process)}: {display_path}")
             
             # 在显式调试模式下限制重试次数以加快迭代
             if getattr(self.config, 'debug', False):
@@ -162,13 +169,19 @@ class TranslationPipeline:
                     self.logger.info("调试模式下将重试次数限制为 1")
                     self.config.retries = 1
 
-            if self.process_file(file_path):
+            if self.process_task(task):
                 success_count += 1
             else:
-                self.logger.error(f"文件处理失败: {file_path}")
+                self.logger.error(f"文件处理失败: {display_path}")
         
         return success_count
     
+    def process_task(self, task: TranslationTask) -> bool:
+        if not task.original_path:
+            self.logger.error("缺少原文路径，暂不支持此任务类型")
+            return False
+        return self.process_file(task.original_path)
+
     def process_file(self, path: Path) -> bool:
         """
         处理单个文件
