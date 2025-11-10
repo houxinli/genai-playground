@@ -4,8 +4,9 @@
 import argparse
 import re
 import yaml
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 
 
 def _extract_first_int(text: str) -> Optional[int]:
@@ -19,6 +20,92 @@ def _extract_first_int(text: str) -> Optional[int]:
         return int(match.group(1))
     except ValueError:
         return None
+
+
+def _parse_timestamp(text: str) -> Optional[datetime]:
+    """尽力将文本解析为 datetime，失败返回 None。"""
+    if not text:
+        return None
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+    # 标准化常见符号
+    cleaned = cleaned.replace('/', '-').replace('Z', '+00:00')
+    iso_candidates = [cleaned]
+    if ' ' in cleaned and 'T' not in cleaned:
+        iso_candidates.append(cleaned.replace(' ', 'T', 1))
+    for candidate in iso_candidates:
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            pass
+    # 常见格式回退
+    formats = [
+        "%Y-%m-%d %H:%M:%S%z",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d",
+        "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d",
+    ]
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(cleaned, fmt)
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt
+        except ValueError:
+            continue
+    if cleaned.isdigit():
+        try:
+            return datetime.fromtimestamp(int(cleaned), tz=timezone.utc)
+        except (ValueError, OSError):
+            return None
+    return None
+
+
+def _extract_timestamp_from_yaml(yaml_content: str) -> Optional[datetime]:
+    """从 YAML 中提取 create_date/published_at 时间戳，优先后出现的中文译值。"""
+    if not yaml_content.strip():
+        return None
+    lines = yaml_content.strip().split('\n')
+    if lines and lines[0].strip() == '---':
+        lines = lines[1:]
+    if lines and lines[-1].strip() == '---':
+        lines = lines[:-1]
+    target_keys = ("create_date", "published_at")
+    for key in target_keys:
+        for line in reversed(lines):
+            if line.startswith(f"{key}:"):
+                _, raw = line.split(":", 1)
+                candidate = _parse_timestamp(raw.strip())
+                if candidate:
+                    if candidate.tzinfo is None:
+                        return candidate.replace(tzinfo=timezone.utc)
+                    return candidate
+    return None
+
+
+def _timestamp_sort_value(timestamp: Optional[datetime]) -> float:
+    """将 datetime 转换为排序值，None 放在末尾。"""
+    if timestamp is None:
+        return float("inf")
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.timestamp()
+
+
+def _is_bilingual_candidate(path: Path) -> bool:
+    """判断文件是否来自 *_bilingual* 目录或文件名包含该标记。"""
+    if "_bilingual" in path.name:
+        return True
+    for ancestor in path.parents:
+        if "_bilingual" in ancestor.name:
+            return True
+        if ancestor.parent == ancestor:
+            break
+    return False
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -566,22 +653,52 @@ def extract_novel_id_from_yaml(yaml_content: str) -> Optional[int]:
         return None
 
 
-def merge_chinese_files(input_dir: Path, include_original: bool = False) -> bool:
-    """合并文件夹中所有双语文件的中文部分到一个文件，按 novel_id 升序排序。"""
+def merge_chinese_files(
+    input_dirs: List[Path],
+    include_original: bool = False,
+    min_lines: int = 100,
+    output_override: Optional[Path] = None,
+) -> bool:
+    """
+    合并多个文件夹中的双语文件中文部分，并按 create_date/published_at 时间戳排序。
+    缺失时间戳则回退到 novel_id / 文件名排序，支持过滤短篇。
+    """
     try:
-        candidate_files = list(input_dir.rglob("*.txt"))
+        min_lines = max(0, int(min_lines))
+        candidate_files: List[Path] = []
+        seen: Set[str] = set()
+        for input_dir in input_dirs:
+            if not input_dir.exists():
+                print(f"输入路径不存在，跳过: {input_dir}")
+                continue
+            if input_dir.is_file():
+                if not _is_bilingual_candidate(input_dir):
+                    print(f"⚠️ 非双语文件，跳过: {input_dir}")
+                    continue
+                resolved = str(input_dir.resolve())
+                if resolved not in seen:
+                    candidate_files.append(input_dir)
+                    seen.add(resolved)
+                continue
+            for file_path in input_dir.rglob("*.txt"):
+                if not _is_bilingual_candidate(file_path):
+                    continue
+                resolved = str(file_path.resolve())
+                if resolved in seen:
+                    continue
+                candidate_files.append(file_path)
+                seen.add(resolved)
+
         if not candidate_files:
-            print(f"在目录 {input_dir} 中未找到双语文件")
+            print("未找到任何符合条件的双语文件")
             return False
 
-        # 先预读每个文件，解析 YAML 与 novel_id，用于排序
-        file_infos: List[Tuple[int, Path, List[str], str]] = []
+        file_infos: List[Tuple[float, int, Path, List[str], str, Optional[str]]] = []
         failed_count = 0
         for file_path in candidate_files:
             try:
                 content = file_path.read_text(encoding='utf-8', errors='ignore')
                 lines = content.split('\n')
-                # 找第二个 '---'
                 yaml_end_line = -1
                 found_first_separator = False
                 for i, line in enumerate(lines):
@@ -591,7 +708,6 @@ def merge_chinese_files(input_dir: Path, include_original: bool = False) -> bool
                             break
                         found_first_separator = True
                 if yaml_end_line == -1:
-                    # 跳过无YAML结构的文件
                     print(f"跳过文件 {file_path}: 未找到YAML分隔符")
                     failed_count += 1
                     continue
@@ -600,65 +716,84 @@ def merge_chinese_files(input_dir: Path, include_original: bool = False) -> bool
                 content_lines = lines[yaml_end_line + 1:]
                 novel_id = extract_novel_id_from_yaml(yaml_content)
                 if novel_id is None:
-                    # 尝试使用文件名中的数字进行排序
-                    novel_id = _extract_first_int(file_path.stem)
-                if novel_id is None:
-                    # 将无法识别的 ID 放在末尾（使用一个大值）
-                    novel_id = 10**18
-                file_infos.append((novel_id, file_path, content_lines, yaml_content))
+                    novel_id = _extract_first_int(file_path.stem) or 10**18
+                timestamp_dt = _extract_timestamp_from_yaml(yaml_content)
+                timestamp_label = timestamp_dt.isoformat() if timestamp_dt else None
+                sort_value = _timestamp_sort_value(timestamp_dt)
+                file_infos.append(
+                    (sort_value, novel_id, file_path, content_lines, yaml_content, timestamp_label)
+                )
             except Exception as e:
                 print(f"预读失败 {file_path}: {e}")
                 failed_count += 1
 
-        # 按 novel_id 升序排序；若 novel_id 相同则按文件名作为次序键
-        file_infos.sort(key=lambda t: (t[0], t[1].name))
+        if not file_infos:
+            print("没有可用于合并的文件")
+            return False
+
+        file_infos.sort(key=lambda t: (t[0], t[1], t[2].name))
 
         merged_content: List[str] = []
         processed_count = 0
         chapter_count = 0
+        skipped_short = 0
 
-        for novel_id, file_path, content_lines, yaml_content in file_infos:
+        for _, novel_id, file_path, content_lines, yaml_content, timestamp_label in file_infos:
             try:
-                # 标题与YAML中文提取
                 title = extract_title_from_yaml(yaml_content)
                 chinese_yaml = extract_chinese_from_yaml(yaml_content)
                 chinese_content = extract_chinese_from_content(content_lines, include_original)
 
-                # 章节标题：第X章 标题（数字无空格；标题最多15字，遇首标点截断，规范空白）
-                chapter_count += 1
                 safe_title = _normalize_whitespace(title)
-                # 微信图书对标题行长度有限制, 建议不超过25字符
                 m = re.search(r"[，。、；：,.!?！？]", safe_title)
                 if m:
                     safe_title = safe_title[:m.start()]
-                merged_content.append(f"第{chapter_count}章 {safe_title[:25]}")
-                merged_content.append("")
+                chapter_label = f"第{chapter_count + 1}章 {safe_title[:25]}"
 
-                # YAML（含 novel_id），转换为本地化键名并清理
+                article_block: List[str] = [chapter_label, ""]
                 if chinese_yaml.strip():
                     localized_yaml = _transform_yaml_to_localized(chinese_yaml)
-                    merged_content.extend(localized_yaml)
-                    merged_content.append("")
-                    merged_content.append("")
+                    article_block.extend(localized_yaml)
+                    article_block.append("")
+                    article_block.append("")
+                article_block.extend(chinese_content)
 
-                # 正文
-                merged_content.extend(chinese_content)
+                effective_lines = sum(1 for line in article_block if line.strip())
+                if effective_lines < min_lines:
+                    skipped_short += 1
+                    print(
+                        f"跳过短篇: {file_path} "
+                        f"(有效行 {effective_lines} < {min_lines}, 时间: {timestamp_label})"
+                    )
+                    continue
 
-                # 文章之间增加 10 行空行（无分割线）
+                chapter_count += 1
+                merged_content.extend(article_block)
                 merged_content.extend([""] * 10)
-
                 processed_count += 1
-                print(f"已处理: {file_path}")
+                print(f"已处理: {file_path} (时间: {timestamp_label}, ID: {novel_id})")
             except Exception as e:
                 print(f"处理文件失败 {file_path}: {e}")
                 failed_count += 1
 
-        # 输出文件
+        if processed_count == 0:
+            print("没有符合条件的内容可写入合并文件")
+            return False
+
         suffix = "_bilingual.txt" if include_original else "_zh.txt"
-        output_file = input_dir.parent / f"{input_dir.name}{suffix}"
+        if output_override:
+            output_file = Path(output_override)
+        else:
+            base = input_dirs[0]
+            base_dir = base if base.is_dir() else base.parent
+            output_file = base_dir.parent / f"{base_dir.name}{suffix}"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text('\n'.join(merged_content), encoding='utf-8')
 
-        print(f"\n合并完成: 成功={processed_count}, 失败={failed_count}")
+        print(
+            f"\n合并完成: 成功={processed_count}, 失败={failed_count}, "
+            f"跳过短篇={skipped_short}"
+        )
         print(f"合并文件: {output_file}")
         return True
     except Exception as e:
@@ -668,80 +803,96 @@ def merge_chinese_files(input_dir: Path, include_original: bool = False) -> bool
 
 def main():
     parser = argparse.ArgumentParser(description="从双语文件中提取中文部分")
-    parser.add_argument("input", type=str, help="输入文件或目录路径")
+    parser.add_argument("inputs", nargs="+", help="输入文件或目录路径，可指定多个")
     parser.add_argument("--debug", action="store_true", help="debug模式：输出文件与原文件在同一文件夹，文件名加_zh后缀")
     parser.add_argument("--output", type=str, help="输出目录路径（非debug模式时使用）")
-    parser.add_argument("--merge", action="store_true", help="合并模式：将文件夹中所有文件的中文部分合并到一个文件")
+    parser.add_argument("--merge", dest="merge", action="store_true", default=True, help="（默认启用）合并模式：将多个文件夹中文部分合并到一个文件")
+    parser.add_argument("--no-merge", dest="merge", action="store_false", help="禁用合并模式，逐文件输出")
     parser.add_argument("--bilingual", action="store_true", help="双语模式：正文保留原文行与中文译文行")
+    parser.add_argument("--merge-output", type=str, help="合并模式：自定义输出文件路径")
+    parser.add_argument("--merge-min-lines", type=int, default=100, help="合并模式：跳过有效行数低于该阈值的文本（默认100）")
     
     args = parser.parse_args()
     
-    input_path = Path(args.input)
-    if not input_path.exists():
-        print(f"输入路径不存在: {input_path}")
+    raw_inputs = [Path(p) for p in args.inputs]
+    input_paths = []
+    for path in raw_inputs:
+        if not path.exists():
+            print(f"输入路径不存在: {path}")
+            continue
+        input_paths.append(path)
+    
+    if not input_paths:
+        print("没有有效的输入路径，程序结束。")
+        return
+    
+    if args.merge:
+        merge_output = Path(args.merge_output).expanduser() if args.merge_output else None
+        merge_chinese_files(
+            input_paths,
+            include_original=args.bilingual,
+            min_lines=args.merge_min_lines,
+            output_override=merge_output,
+        )
         return
     
     processed_count = 0
     failed_count = 0
     
-    if input_path.is_file():
-        # 处理单个文件
-        if args.debug:
-            # debug模式：在同一文件夹，依据模式选择后缀
-            suffix = "_bilingual" if args.bilingual else "_zh"
-            output_path = input_path.parent / f"{input_path.stem}{suffix}{input_path.suffix}"
-        else:
-            # 非debug模式：在平行文件夹
-            if args.output:
-                output_dir = Path(args.output)
+    for input_path in input_paths:
+        if input_path.is_file():
+            if args.debug:
+                suffix = "_bilingual" if args.bilingual else "_zh"
+                output_path = input_path.parent / f"{input_path.stem}{suffix}{input_path.suffix}"
             else:
-                # 自动生成输出目录名
-                if '_bilingual' in str(input_path.parent):
-                    output_dir = input_path.parent.parent / input_path.parent.name.replace('_bilingual', '_zh')
+                if args.output:
+                    output_dir = Path(args.output)
                 else:
-                    output_dir = input_path.parent / f"{input_path.parent.name}_zh"
+                    if '_bilingual' in str(input_path.parent):
+                        output_dir = input_path.parent.parent / input_path.parent.name.replace('_bilingual', '_zh')
+                    else:
+                        output_dir = input_path.parent / f"{input_path.parent.name}_zh"
+                output_path = output_dir / input_path.name
             
-            output_path = output_dir / input_path.name
+            if process_bilingual_file(input_path, output_path, include_original=args.bilingual):
+                print(f"成功处理: {input_path} -> {output_path}")
+                processed_count += 1
+            else:
+                failed_count += 1
+            continue
         
-        if process_bilingual_file(input_path, output_path, include_original=args.bilingual):
-            print(f"成功处理: {input_path} -> {output_path}")
-            processed_count += 1
-        else:
-            failed_count += 1
-    
-    else:
-        # 处理目录
-        if args.merge:
-            # 合并模式
-            merge_chinese_files(input_path, include_original=args.bilingual)
-        else:
-            # 普通模式：处理目录中的每个文件
-            bilingual_files = list(input_path.rglob("*_bilingual.txt"))
-            
+        if input_path.is_dir():
+            bilingual_files = [
+                file_path
+                for file_path in input_path.rglob("*.txt")
+                if _is_bilingual_candidate(file_path)
+            ]
+            if not bilingual_files:
+                print(f"目录 {input_path} 中没有匹配的双语文件")
+                continue
             for file_path in bilingual_files:
                 if args.debug:
-                    # debug模式：在同一文件夹，文件名加_zh后缀
                     output_path = file_path.parent / f"{file_path.stem}_zh{file_path.suffix}"
                 else:
-                    # 非debug模式：在平行文件夹
                     if args.output:
                         output_dir = Path(args.output)
                     else:
-                        # 自动生成输出目录名
                         if '_bilingual' in str(file_path.parent):
                             output_dir = file_path.parent.parent / file_path.parent.name.replace('_bilingual', '_zh')
                         else:
                             output_dir = file_path.parent / f"{file_path.parent.name}_zh"
-                    
                     output_path = output_dir / file_path.name
                 
-                if process_bilingual_file(file_path, output_path, include_original):
+                if process_bilingual_file(file_path, output_path, include_original=args.bilingual):
                     print(f"成功处理: {file_path} -> {output_path}")
                     processed_count += 1
                 else:
                     failed_count += 1
-            
-            print(f"\n处理完成: 成功={processed_count}, 失败={failed_count}")
+            continue
+        
+        print(f"无法处理的路径类型，跳过: {input_path}")
+    
+    print(f"\n处理完成: 成功={processed_count}, 失败={failed_count}")
 
 
 if __name__ == "__main__":
