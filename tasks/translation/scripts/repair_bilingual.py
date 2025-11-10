@@ -81,26 +81,35 @@ def is_bilingual_file(path: Path) -> bool:
     return any("_bilingual" in part for part in parts)
 
 
+def normalize_line(text: str) -> str:
+    return text.strip()
+
+
 def align_existing_translations(
     body_lines: List[str], bilingual_body: List[str]
-) -> List[Optional[str]]:
+) -> Tuple[List[Optional[str]], List[int]]:
     translations: List[Optional[str]] = [None] * len(body_lines)
     b_idx = 0
     total = len(bilingual_body)
+    unmatched: List[int] = []
     for idx, line in enumerate(body_lines):
         if not line.strip():
             continue
-        while b_idx < total and bilingual_body[b_idx] != line:
+        normalized_line = normalize_line(line)
+        while b_idx < total and normalize_line(bilingual_body[b_idx]) != normalized_line:
             b_idx += 1
         if b_idx >= total:
-            break
+            unmatched.append(idx)
+            continue
         b_idx += 1
         while b_idx < total and not bilingual_body[b_idx].strip():
             b_idx += 1
         if b_idx < total:
             translations[idx] = bilingual_body[b_idx]
             b_idx += 1
-    return translations
+        else:
+            unmatched.append(idx)
+    return translations, unmatched
 
 
 def has_japanese(text: str) -> bool:
@@ -112,17 +121,35 @@ def has_japanese(text: str) -> bool:
     return bool(re.search(r"[\u3040-\u309f\u30a0-\u30ff]", normalized))
 
 
-def needs_translation(orig: str, translation: Optional[str]) -> bool:
+def detect_kana_chars(text: str) -> List[str]:
+    if not text:
+        return []
+    chars = {
+        ch
+        for ch in text
+        if "\u3040" <= ch <= "\u30ff" and ch not in {"\u30fb", "\u30fc"}
+    }
+    return sorted(chars)
+
+
+def analyze_translation(original: str, translation: Optional[str]) -> Tuple[bool, Optional[str], Optional[List[str]]]:
     if translation is None:
-        return True
+        return True, "missing", None
     stripped = translation.strip()
     if not stripped:
-        return True
+        return True, "empty", None
     if stripped in {"[翻译未完成]", "[翻译失败]"}:
-        return True
-    if has_japanese(stripped):
-        return True
-    return False
+        return True, "placeholder", None
+    if stripped == original.strip():
+        return True, "same_as_original", None
+    kana_chars = detect_kana_chars(stripped)
+    if kana_chars:
+        return True, "kana", kana_chars
+    return False, None, None
+
+
+def needs_translation(orig: str, translation: Optional[str]) -> bool:
+    return analyze_translation(orig, translation)[0]
 
 
 def build_segments(body_lines: List[str], missing_mask: List[bool]) -> List[Tuple[int, int]]:
@@ -317,14 +344,26 @@ def process_single_file(
         original_yaml = existing_yaml
 
     base_yaml = existing_yaml if existing_yaml else original_yaml
-    existing_trans = align_existing_translations(original_body, existing_body)
+    existing_trans, unmatched = align_existing_translations(original_body, existing_body)
+    if unmatched:
+        snippets = ", ".join(
+            f"{idx + 1}: {original_body[idx][:20].strip()}" for idx in unmatched[:5]
+        )
+        extra = "..." if len(unmatched) > 5 else ""
+        repair_logger.warning(
+            f"未在旧双语中对齐的原文行（仅列前5条）: {snippets}{extra}"
+        )
 
     missing_mask: List[bool] = []
-    for orig_line, trans_line in zip(original_body, existing_trans):
+    issues: Dict[int, Tuple[str, Optional[List[str]]]] = {}
+    for idx_line, (orig_line, trans_line) in enumerate(zip(original_body, existing_trans)):
         if not orig_line.strip():
             missing_mask.append(False)
             continue
-        missing_mask.append(needs_translation(orig_line, trans_line))
+        needs, reason, details = analyze_translation(orig_line, trans_line)
+        missing_mask.append(needs)
+        if needs and reason:
+            issues[idx_line] = (reason, details)
 
     for idx, (orig_line, is_missing) in enumerate(zip(original_body, missing_mask)):
         if not is_missing:
@@ -333,6 +372,21 @@ def process_single_file(
             continue
         existing_trans[idx] = orig_line
         missing_mask[idx] = False
+        issues.pop(idx, None)
+
+    if issues:
+        for line_idx in sorted(issues.keys()):
+            reason, details = issues[line_idx]
+            if reason == "kana" and details:
+                repair_logger.info(f"行 {line_idx + 1} 含假名 -> {'/'.join(details)}")
+            elif reason == "placeholder":
+                repair_logger.info(f"行 {line_idx + 1} 仍为占位符")
+            elif reason == "empty":
+                repair_logger.info(f"行 {line_idx + 1} 译文为空")
+            elif reason == "same_as_original":
+                repair_logger.info(f"行 {line_idx + 1} 与原文完全相同")
+            else:
+                repair_logger.info(f"行 {line_idx + 1} 判定缺失: {reason}")
 
     segments = build_segments(original_body, missing_mask)
     if args.max_lines > 0:
@@ -393,11 +447,11 @@ def process_single_file(
         writer.translations[idx] = value
     writer.finalize()
 
-    unresolved = [
-        idx + 1
-        for idx in new_translations.keys()
-        if needs_translation(original_body[idx], writer.translations[idx])
-    ]
+    unresolved = []
+    for idx in new_translations.keys():
+        needs, reason, _ = analyze_translation(original_body[idx], writer.translations[idx])
+        if needs:
+            unresolved.append(idx + 1)
     if updated_indices:
         unique = sorted(set(updated_indices))
         repair_logger.info(

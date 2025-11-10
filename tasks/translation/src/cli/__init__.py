@@ -146,7 +146,7 @@ def validate_args(args: argparse.Namespace) -> List[str]:
 def setup_default_paths(args: argparse.Namespace) -> None:
     """设置默认文件路径"""
     base_dir = Path(__file__).parent.parent.parent  # 从 src/cli/ 回到 translation/
-    prompt_styles_dir = base_dir / "prompt_styles"
+    prompt_styles_dir = base_dir / "data" / "prompt_styles"
     style_name = getattr(args, "prompt_style", None) or "default"
     style_dir = prompt_styles_dir / style_name
     if not style_dir.exists():
