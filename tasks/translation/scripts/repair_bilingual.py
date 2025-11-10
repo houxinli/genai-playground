@@ -73,7 +73,7 @@ def collect_input_files(inputs: List[str]) -> List[Path]:
             files.extend(sorted(path.rglob("*.txt")))
         elif path.is_file():
             files.append(path)
-    return sorted(set(files))
+    return sorted({p.resolve() for p in files})
 
 
 def is_bilingual_file(path: Path) -> bool:
@@ -258,13 +258,18 @@ def process_single_file(
     treating_bilingual = is_bilingual_file(input_path)
     original_path = None if treating_bilingual else input_path
 
-    existing_path = input_path if treating_bilingual else ensure_bilingual_path(
-        original_path,
-        args.existing_bilingual,
-        args.existing_bilingual_dir,
+    existing_path = (
+        input_path
+        if treating_bilingual
+        else ensure_bilingual_path(
+            original_path,
+            args.existing_bilingual,
+            args.existing_bilingual_dir,
+        )
     )
+    target_base = original_path or existing_path
     output_path = ensure_output_path(
-        original_path or existing_path,
+        target_base,
         args.output,
         args.output_dir,
     )

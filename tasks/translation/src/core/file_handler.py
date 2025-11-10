@@ -12,6 +12,7 @@ from typing import List, Tuple, Optional, Dict
 from .config import TranslationConfig
 from .logger import UnifiedLogger
 from .quality_checker import QualityChecker
+from .task import TranslationTask
 from ..utils.file import parse_yaml_front_matter
 
 
@@ -210,31 +211,40 @@ class FileHandler:
     
     def find_files_to_process(self, inputs: List[str]) -> List[Path]:
         """查找需要处理的文件"""
-        files = []
-        
+        return [task.original_path for task in self.plan_tasks(inputs)]
+
+    def plan_tasks(self, inputs: List[str]) -> List[TranslationTask]:
+        """根据输入路径规划翻译任务。"""
+        files: List[Path] = []
         for input_path in inputs:
             path = Path(input_path)
-            
             if path.is_file():
                 files.append(path)
             elif path.is_dir():
-                # 查找目录中的txt文件并按自然顺序排序
                 txt_files = sorted(path.glob("*.txt"), key=lambda x: self._natural_sort_key(x.name))
                 files.extend(txt_files)
             else:
-                # 尝试glob模式
                 glob_files = glob.glob(input_path)
                 files.extend([Path(f) for f in glob_files if Path(f).is_file()])
-        
-        # 过滤掉不需要处理的文件
-        filtered_files = []
+
+        filtered_files: List[Path] = []
         for file_path in files:
             if self._should_process_file(file_path):
                 filtered_files.append(file_path)
-        
-        # 按长度排序（如果启用）
+
         if self.config.sort_by_length:
             filtered_files.sort(key=lambda x: self._get_file_length(x), reverse=True)
-            self.logger.info(f"按文件长度排序（从长到短）")
-        
-        return filtered_files
+            self.logger.info("按文件长度排序（从长到短）")
+
+        tasks: List[TranslationTask] = []
+        for file_path in filtered_files:
+            output_path = self._get_output_path(file_path)
+            tasks.append(
+                TranslationTask(
+                    original_path=file_path,
+                    existing_bilingual_path=None,
+                    output_path=output_path,
+                    mode="translate",
+                )
+            )
+        return tasks
