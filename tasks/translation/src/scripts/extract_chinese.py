@@ -6,7 +6,7 @@ import re
 import yaml
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Set
+from typing import Dict, List, Tuple, Optional, Set, Iterable
 
 
 def _extract_first_int(text: str) -> Optional[int]:
@@ -106,6 +106,61 @@ def _is_bilingual_candidate(path: Path) -> bool:
         if ancestor.parent == ancestor:
             break
     return False
+
+
+def _extract_series_id(yaml_content: str) -> Optional[str]:
+    """从 YAML 中提取 series.id"""
+    if not yaml_content:
+        return None
+    lines = yaml_content.splitlines()
+    in_series = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if not line.startswith(" "):
+            in_series = stripped.startswith("series:")
+            continue
+        if in_series and stripped.startswith("id:"):
+            return stripped.split(":", 1)[1].strip()
+    return None
+
+
+def _should_skip_article(
+    yaml_content: str,
+    title_filters: Iterable[str],
+    series_filters: Iterable[str],
+) -> Tuple[bool, Optional[str]]:
+    """根据标题关键字或系列 ID 判断是否跳过，返回 (skip, reason)。"""
+    if yaml_content:
+        for keyword in title_filters:
+            if keyword and keyword in yaml_content:
+                return True, f"标题包含关键字「{keyword}」"
+        if series_filters:
+            series_id = _extract_series_id(yaml_content)
+            if series_id and any(series_id == target for target in series_filters):
+                return True, f"series.id={series_id} 被过滤"
+    return False, None
+
+
+def _log_article_result(
+    status: str,
+    timestamp: Optional[str],
+    title: str,
+    novel_id: Optional[int],
+    reason: Optional[str] = None,
+    path: Optional[Path] = None,
+) -> None:
+    """标准化的日志输出。"""
+    ts_display = timestamp or "N/A"
+    if ts_display and ts_display != "N/A":
+        ts_display = ts_display.split("T", 1)[0]
+    title_display = title or "未知标题"
+    id_display = novel_id if novel_id is not None else "N/A"
+    suffix = f"，原因: {reason}" if reason else ""
+    path_part = f"{path}" if path else ""
+    prefix = "✅" if status == "处理完成" else "❌"
+    print(f"{status}: {ts_display} {prefix} {path_part} {title_display}, id={id_display}{suffix}")
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -570,7 +625,13 @@ def extract_chinese_from_content(content_lines: List[str], include_original: boo
     return compressed_lines
 
 
-def process_bilingual_file(input_path: Path, output_path: Path, include_original: bool = False) -> bool:
+def process_bilingual_file(
+    input_path: Path,
+    output_path: Path,
+    include_original: bool = False,
+    title_filters: Optional[List[str]] = None,
+    series_filters: Optional[List[str]] = None,
+) -> bool:
     """处理单个双语文件"""
     try:
         # 读取文件内容
@@ -597,7 +658,17 @@ def process_bilingual_file(input_path: Path, output_path: Path, include_original
         
         # 提取正文部分
         content_lines = lines[yaml_end_line + 1:]
-        
+
+        title = extract_title_from_yaml(yaml_content)
+        novel_id = extract_novel_id_from_yaml(yaml_content)
+        timestamp_dt = _extract_timestamp_from_yaml(yaml_content)
+        timestamp_label = timestamp_dt.isoformat() if timestamp_dt else None
+
+        skip, reason = _should_skip_article(yaml_content, title_filters or [], series_filters or [])
+        if skip:
+            _log_article_result("跳过文件", timestamp_label, title, novel_id, reason, input_path)
+            return True
+
         # 处理YAML
         chinese_yaml = extract_chinese_from_yaml(yaml_content)
         
@@ -618,7 +689,7 @@ def process_bilingual_file(input_path: Path, output_path: Path, include_original
         
         # 写入文件
         output_path.write_text('\n'.join(result_lines), encoding='utf-8')
-        
+        _log_article_result("处理完成", timestamp_label, title, novel_id, None, input_path)
         return True
     
     except Exception as e:
@@ -656,8 +727,10 @@ def extract_novel_id_from_yaml(yaml_content: str) -> Optional[int]:
 def merge_chinese_files(
     input_dirs: List[Path],
     include_original: bool = False,
-    min_lines: int = 100,
+    min_lines: int = 50,
     output_override: Optional[Path] = None,
+    title_filters: Optional[List[str]] = None,
+    series_filters: Optional[List[str]] = None,
 ) -> bool:
     """
     合并多个文件夹中的双语文件中文部分，并按 create_date/published_at 时间戳排序。
@@ -708,7 +781,15 @@ def merge_chinese_files(
                             break
                         found_first_separator = True
                 if yaml_end_line == -1:
-                    print(f"跳过文件 {file_path}: 未找到YAML分隔符")
+                    approx_id = _extract_first_int(file_path.stem)
+                    _log_article_result(
+                        "跳过文件",
+                        None,
+                        "未知标题",
+                        approx_id,
+                        "未找到YAML分隔符",
+                        file_path,
+                    )
                     failed_count += 1
                     continue
                 yaml_lines = lines[:yaml_end_line + 1]
@@ -724,7 +805,15 @@ def merge_chinese_files(
                     (sort_value, novel_id, file_path, content_lines, yaml_content, timestamp_label)
                 )
             except Exception as e:
-                print(f"预读失败 {file_path}: {e}")
+                approx_id = _extract_first_int(file_path.stem)
+                _log_article_result(
+                    "预读失败",
+                    None,
+                    "未知标题",
+                    approx_id,
+                    str(e),
+                    file_path,
+                )
                 failed_count += 1
 
         if not file_infos:
@@ -741,6 +830,10 @@ def merge_chinese_files(
         for _, novel_id, file_path, content_lines, yaml_content, timestamp_label in file_infos:
             try:
                 title = extract_title_from_yaml(yaml_content)
+                skip, reason = _should_skip_article(yaml_content, title_filters or [], series_filters or [])
+                if skip:
+                    _log_article_result("跳过文件", timestamp_label, title, novel_id, reason, file_path)
+                    continue
                 chinese_yaml = extract_chinese_from_yaml(yaml_content)
                 chinese_content = extract_chinese_from_content(content_lines, include_original)
 
@@ -761,9 +854,13 @@ def merge_chinese_files(
                 effective_lines = sum(1 for line in article_block if line.strip())
                 if effective_lines < min_lines:
                     skipped_short += 1
-                    print(
-                        f"跳过短篇: {file_path} "
-                        f"(有效行 {effective_lines} < {min_lines}, 时间: {timestamp_label})"
+                    _log_article_result(
+                        "跳过短篇",
+                        timestamp_label,
+                        title,
+                        novel_id,
+                        f"有效行 {effective_lines} < {min_lines}",
+                        file_path,
                     )
                     continue
 
@@ -771,9 +868,9 @@ def merge_chinese_files(
                 merged_content.extend(article_block)
                 merged_content.extend([""] * 10)
                 processed_count += 1
-                print(f"已处理: {file_path} (时间: {timestamp_label}, ID: {novel_id})")
+                _log_article_result("处理完成", timestamp_label, title, novel_id, None, file_path)
             except Exception as e:
-                print(f"处理文件失败 {file_path}: {e}")
+                _log_article_result("处理失败", timestamp_label, title, novel_id, str(e), file_path)
                 failed_count += 1
 
         if processed_count == 0:
@@ -810,7 +907,9 @@ def main():
     parser.add_argument("--no-merge", dest="merge", action="store_false", help="禁用合并模式，逐文件输出")
     parser.add_argument("--bilingual", action="store_true", help="双语模式：正文保留原文行与中文译文行")
     parser.add_argument("--merge-output", type=str, help="合并模式：自定义输出文件路径")
-    parser.add_argument("--merge-min-lines", type=int, default=100, help="合并模式：跳过有效行数低于该阈值的文本（默认100）")
+    parser.add_argument("--merge-min-lines", type=int, default=50, help="合并模式：跳过有效行数低于该阈值的文本（默认50）")
+    parser.add_argument("--exclude-title", action="append", default=[], help="过滤标题包含指定关键字的文章（可多次提供）")
+    parser.add_argument("--exclude-series-id", action="append", default=[], help="过滤指定 series.id 的文章（可多次提供）")
     
     args = parser.parse_args()
     
@@ -826,6 +925,9 @@ def main():
         print("没有有效的输入路径，程序结束。")
         return
     
+    title_filters = [kw for kw in (args.exclude_title or []) if kw]
+    series_filters = [sid for sid in (args.exclude_series_id or []) if sid]
+
     if args.merge:
         merge_output = Path(args.merge_output).expanduser() if args.merge_output else None
         merge_chinese_files(
@@ -833,6 +935,8 @@ def main():
             include_original=args.bilingual,
             min_lines=args.merge_min_lines,
             output_override=merge_output,
+            title_filters=title_filters,
+            series_filters=series_filters,
         )
         return
     
@@ -854,7 +958,13 @@ def main():
                         output_dir = input_path.parent / f"{input_path.parent.name}_zh"
                 output_path = output_dir / input_path.name
             
-            if process_bilingual_file(input_path, output_path, include_original=args.bilingual):
+            if process_bilingual_file(
+                input_path,
+                output_path,
+                include_original=args.bilingual,
+                title_filters=title_filters,
+                series_filters=series_filters,
+            ):
                 print(f"成功处理: {input_path} -> {output_path}")
                 processed_count += 1
             else:
@@ -883,7 +993,13 @@ def main():
                             output_dir = file_path.parent / f"{file_path.parent.name}_zh"
                     output_path = output_dir / file_path.name
                 
-                if process_bilingual_file(file_path, output_path, include_original=args.bilingual):
+                if process_bilingual_file(
+                    file_path,
+                    output_path,
+                    include_original=args.bilingual,
+                    title_filters=title_filters,
+                    series_filters=series_filters,
+                ):
                     print(f"成功处理: {file_path} -> {output_path}")
                     processed_count += 1
                 else:
