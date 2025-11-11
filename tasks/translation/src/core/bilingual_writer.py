@@ -50,8 +50,6 @@ class BilingualWriter:
 
     def _build_text(self) -> str:
         lines = list(self.yaml_lines)
-        if lines:
-            lines.append("")
         for idx, line in enumerate(self.body_lines):
             lines.append(line)
             if not line.strip():
