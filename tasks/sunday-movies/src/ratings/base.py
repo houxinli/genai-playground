@@ -17,6 +17,7 @@ class RatingResult:
     url: str
     summary: Optional[str] = None
     confidence: float = 0.5
+    local_title: Optional[str] = None
 
 
 class RatingFetcher(abc.ABC):
@@ -30,4 +31,3 @@ class RatingFetcher(abc.ABC):
     @abc.abstractmethod
     def fetch(self, title: str, *, year: Optional[int] = None) -> Optional[RatingResult]:
         """Return the best rating result for the given title."""
-

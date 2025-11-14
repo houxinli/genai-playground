@@ -22,7 +22,8 @@ class DoubanFetcher(RatingFetcher):
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
+        # requests 没有原生 br 解码能力，因此强制服务端返回 gzip/deflate，避免解析到压缩内容
+        "Accept-Encoding": "gzip, deflate",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
     }
@@ -161,6 +162,11 @@ class DoubanFetcher(RatingFetcher):
             
             details = {}
             
+            # 中文片名
+            title_elem = soup.find('span', property='v:itemreviewed')
+            if title_elem:
+                details['title'] = title_elem.get_text(strip=True)
+            
             # 提取评分 - 尝试多种选择器
             rating = None
             rating_selectors = [
@@ -280,6 +286,8 @@ class DoubanFetcher(RatingFetcher):
         if details and details.get('year'):
             summary_parts.append(f"年份: {details['year']}")
         
+        local_title = details.get('title') if details else movie_info.get('title')
+
         # 如果从详情页没有获取到信息，使用搜索结果中的信息
         if not summary_parts and movie_info.get('info'):
             info_text = movie_info['info']
@@ -287,6 +295,9 @@ class DoubanFetcher(RatingFetcher):
             year_match = re.search(r'(\d{4})', info_text)
             if year_match:
                 summary_parts.append(f"年份: {year_match.group(1)}")
+        
+        if local_title and local_title not in summary_parts:
+            summary_parts.insert(0, local_title)
         
         summary = " | ".join(summary_parts) if summary_parts else "豆瓣评分"
         
@@ -298,7 +309,7 @@ class DoubanFetcher(RatingFetcher):
             confidence += 0.1  # 有导演信息加分
         if details:  # 如果成功获取到详情页信息
             confidence += 0.1
-        
+       
         return RatingResult(
             source=self.source,
             score=rating,
@@ -306,5 +317,5 @@ class DoubanFetcher(RatingFetcher):
             url=movie_info['url'],
             summary=summary,
             confidence=min(confidence, 1.0),
+            local_title=local_title,
         )
-
