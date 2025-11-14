@@ -63,6 +63,11 @@ class RottenTomatoesFetcher(RatingFetcher):
             critics_score = float(fallback)
             summary_parts.append(f"Search Tomatometer {critics_score:.0f}%")
 
+        selected_score = critics_score if critics_score is not None else audience_score
+        converted_score = None
+        if selected_score is not None:
+            converted_score = (selected_score / 100.0) * 10.0
+
         confidence = 0.55
         available_sources = sum(
             1 for score in (critics_score, audience_score) if score is not None
@@ -75,14 +80,24 @@ class RottenTomatoesFetcher(RatingFetcher):
             confidence += 0.05
         confidence = min(confidence, 0.95)
 
-        return RatingResult(
+        if converted_score is None:
+            return None
+
+        metadata = {
+            "critics_score": critics_score,
+            "audience_score": audience_score,
+        }
+
+        result = RatingResult(
             source=self.source,
-            score=float(critics_score if critics_score is not None else audience_score),
-            scale=100.0,
+            score=converted_score,
+            scale=10.0,
             url=detail.get("url", candidate["url"]),
             summary=" | ".join(summary_parts) if summary_parts else "Rotten Tomatoes",
             confidence=confidence,
+            metadata=metadata,
         )
+        return result
 
     # ------------------------------------------------------------------
     # Internal helpers
