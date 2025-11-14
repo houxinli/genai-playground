@@ -4,7 +4,7 @@
 import json
 import sys
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime
 from typing import List, Dict, Any
 
 SCRIPT_PATH = Path(__file__).resolve()
@@ -17,6 +17,7 @@ from collectors.fandango import FandangoShowtimeCollector
 from collectors.models import MovieSchedule
 from ratings.douban import DoubanFetcher
 from ratings.imdb import ImdbFetcher
+from ratings.rottentomatoes import RottenTomatoesFetcher
 from ratings.aggregator import RatingsAggregator
 
 
@@ -46,9 +47,10 @@ def fetch_showtimes_with_all_ratings(
     # 初始化评分抓取器
     douban_fetcher = DoubanFetcher(delay=1.5)
     imdb_fetcher = ImdbFetcher()
+    rt_fetcher = RottenTomatoesFetcher()
     
     # 创建评分聚合器
-    aggregator = RatingsAggregator([douban_fetcher, imdb_fetcher])
+    aggregator = RatingsAggregator([douban_fetcher, imdb_fetcher, rt_fetcher])
     
     # 处理每个电影
     results = []
@@ -84,7 +86,8 @@ def fetch_showtimes_with_all_ratings(
             "showtimes": [],
             "ratings": {},
             "aggregated_score": None,
-            "rating_count": len(ratings)
+            "rating_count": len(ratings),
+            "local_title": None,
         }
         
         # 处理各个评分源的数据
@@ -95,13 +98,21 @@ def fetch_showtimes_with_all_ratings(
                 "confidence": rating.confidence,
                 "summary": rating.summary,
                 "url": rating.url,
+                "local_title": rating.local_title,
             }
+            if rating.source == "douban" and rating.local_title and not movie_data["local_title"]:
+                movie_data["local_title"] = rating.local_title
         
         # 计算聚合评分
         if ratings:
-            # 简单的加权平均（可以改进为更复杂的算法）
+            # 简单的加权平均（统一换算成 10 分制）
             total_weight = sum(r.confidence for r in ratings)
-            weighted_sum = sum(r.score * r.confidence for r in ratings)
+            weighted_sum = 0.0
+            for r in ratings:
+                normalized = r.score
+                if r.scale and r.scale != 10:
+                    normalized = (r.score / r.scale) * 10
+                weighted_sum += normalized * r.confidence
             if total_weight > 0:
                 movie_data["aggregated_score"] = weighted_sum / total_weight
                 print(f"   🎯 Aggregated score: {movie_data['aggregated_score']:.1f}/10")
@@ -139,10 +150,12 @@ def print_summary(results: List[Dict[str, Any]]) -> None:
     # 统计各评分源的成功率
     douban_count = sum(1 for r in results if "douban" in r["ratings"])
     imdb_count = sum(1 for r in results if "imdb" in r["ratings"])
+    rt_count = sum(1 for r in results if "rottentomatoes" in r["ratings"])
     
     print(f"\n📊 Rating Source Success:")
     print(f"   🟢 Douban: {douban_count}/{total_movies} ({douban_count/total_movies*100:.1f}%)")
     print(f"   🔵 IMDb: {imdb_count}/{total_movies} ({imdb_count/total_movies*100:.1f}%)")
+    print(f"   🍅 Rotten Tomatoes: {rt_count}/{total_movies} ({rt_count/total_movies*100:.1f}%)")
     
     print(f"\n🎯 Top Rated Movies (by aggregated score):")
     # 按聚合评分排序
@@ -151,6 +164,8 @@ def print_summary(results: List[Dict[str, Any]]) -> None:
     
     for i, movie in enumerate(rated_movies[:5]):
         title = movie["title"]
+        if movie.get("local_title") and movie["local_title"] != movie["title"]:
+            title = f"{movie['title']} / {movie['local_title']}"
         score = movie["aggregated_score"]
         rating_count = movie["rating_count"]
         showtime_count = len(movie["showtimes"])
@@ -158,11 +173,38 @@ def print_summary(results: List[Dict[str, Any]]) -> None:
         # 显示各评分源的评分
         rating_info = []
         for source, rating_data in movie["ratings"].items():
-            rating_info.append(f"{source}: {rating_data['score']:.1f}")
+            scale = rating_data.get("scale", 10)
+            rating_info.append(f"{source}: {rating_data['score']:.1f}/{scale}")
         
         rating_str = " | ".join(rating_info)
         
         print(f"   {i+1}. {title}: {score:.1f}/10 ({rating_str}, {showtime_count} showtimes)")
+
+
+def print_markdown_table(results: List[Dict[str, Any]]) -> None:
+    """Output Markdown table sorted by showtime count."""
+    print("\n📝 Markdown 排片表（按场次数量排序）")
+    print("| English Title | 中文标题 | Aggregated Score | Showtimes |")
+    print("| --- | --- | --- | --- |")
+    
+    sorted_results = sorted(results, key=lambda r: len(r["showtimes"]), reverse=True)
+    
+    for movie in sorted_results:
+        english = movie["title"]
+        chinese = movie.get("local_title") or "—"
+        score = movie["aggregated_score"]
+        score_str = f"{score:.1f}/10" if score is not None else "—"
+        
+        showtimes = []
+        for st in movie["showtimes"]:
+            try:
+                time_obj = datetime.fromisoformat(st["start_time"])
+                showtimes.append(time_obj.strftime("%H:%M"))
+            except Exception:
+                continue
+        showtimes_str = f"{len(showtimes)} 场: {', '.join(showtimes)}" if showtimes else "—"
+        
+        print(f"| {english} | {chinese} | {score_str} | {showtimes_str} |")
 
 
 def save_results(results: List[Dict[str, Any]], output_file: Path) -> None:
@@ -177,6 +219,7 @@ def save_results(results: List[Dict[str, Any]], output_file: Path) -> None:
         "rating_sources": {
             "douban": sum(1 for r in results if "douban" in r["ratings"]),
             "imdb": sum(1 for r in results if "imdb" in r["ratings"]),
+            "rottentomatoes": sum(1 for r in results if "rottentomatoes" in r["ratings"]),
         },
         "movies": results
     }
@@ -205,7 +248,7 @@ def main():
     print(f"🎭 Theater: {args.theater_name} ({args.theater_id})")
     print(f"📅 Date: {args.date}")
     print(f"🎯 Max movies: {args.max_movies}")
-    print(f"📊 Rating sources: Douban + IMDb")
+    print(f"📊 Rating sources: Douban + IMDb + Rotten Tomatoes")
     
     # 获取场次和评分数据
     results = fetch_showtimes_with_all_ratings(
@@ -221,6 +264,7 @@ def main():
     
     # 显示摘要
     print_summary(results)
+    print_markdown_table(results)
     
     # 保存结果
     if args.output:
