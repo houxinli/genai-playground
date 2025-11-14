@@ -108,6 +108,22 @@ def _is_bilingual_candidate(path: Path) -> bool:
     return False
 
 
+def _parse_bilingual_pairs(content_lines: List[str]) -> List[Tuple[str, Optional[str]]]:
+    """按行解析出 (原文, 译文) 对。"""
+    pairs: List[Tuple[str, Optional[str]]] = []
+    idx = 0
+    total = len(content_lines)
+    while idx < total:
+        original = content_lines[idx]
+        idx += 1
+        translation: Optional[str] = None
+        if original.strip() and idx < total:
+            translation = content_lines[idx]
+            idx += 1
+        pairs.append((original, translation))
+    return pairs
+
+
 def _extract_series_id(yaml_content: str) -> Optional[str]:
     """从 YAML 中提取 series.id"""
     if not yaml_content:
@@ -126,10 +142,35 @@ def _extract_series_id(yaml_content: str) -> Optional[str]:
     return None
 
 
+def _extract_caption(yaml_content: str) -> str:
+    """从 YAML 中提取 caption 文本（中文优先）。"""
+    if not yaml_content:
+        return ""
+    lines = yaml_content.splitlines()
+    # strip surrounding ---
+    if lines and lines[0].strip() == "---":
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "---":
+        lines = lines[:-1]
+    captions: List[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("caption:"):
+            captions.append(_clean_metadata_text(line.split(":", 1)[1]))
+            if i + 1 < len(lines) and lines[i + 1].startswith("caption:"):
+                captions.append(_clean_metadata_text(lines[i + 1].split(":", 1)[1]))
+                i += 2
+                continue
+        i += 1
+    return " ".join(filter(None, captions))
+
+
 def _should_skip_article(
     yaml_content: str,
     title_filters: Iterable[str],
     series_filters: Iterable[str],
+    caption_filters: Iterable[str],
 ) -> Tuple[bool, Optional[str]]:
     """根据标题关键字或系列 ID 判断是否跳过，返回 (skip, reason)。"""
     if yaml_content:
@@ -140,6 +181,12 @@ def _should_skip_article(
             series_id = _extract_series_id(yaml_content)
             if series_id and any(series_id == target for target in series_filters):
                 return True, f"series.id={series_id} 被过滤"
+        if caption_filters:
+            caption = _extract_caption(yaml_content)
+            if caption:
+                for keyword in caption_filters:
+                    if keyword and keyword in caption:
+                        return True, f"简介包含关键字「{keyword}」"
     return False, None
 
 
@@ -422,7 +469,8 @@ def extract_chinese_from_yaml(yaml_content: str) -> str:
             
             # 处理novel_id字段
             if line.startswith('novel_id:'):
-                chinese_lines.append(line)
+                id_value = _clean_metadata_text(line.split(':', 1)[1])
+                chinese_lines.append(f"ID: {id_value}" if id_value else "ID:")
                 i += 1
                 continue
             
@@ -535,79 +583,20 @@ def extract_chinese_from_yaml(yaml_content: str) -> str:
 def extract_chinese_from_content(content_lines: List[str], include_original: bool = False) -> List[str]:
     """从正文内容中提取中文译文行"""
     result = []
-    i = 0
-    
-    while i < len(content_lines):
-        line = content_lines[i]
-        
-        # 空行直接保留
-        if not line.strip():
-            result.append(line)
-            i += 1
+    pairs = _parse_bilingual_pairs(content_lines)
+    for original, translation in pairs:
+        if not original.strip():
+            result.append("")
             continue
-        
-        # 检查是否是日文行（优先判断为日文）
-        if is_japanese_text(line):
-            # 检查下一行是否是中文翻译
-            if i + 1 < len(content_lines):
-                next_line = content_lines[i + 1]
-                if is_chinese_text(next_line):
-                    # 找到翻译
-                    if include_original:
-                        # 双语模式：保留原文行和中文行
-                        result.append(line)
-                        result.append(next_line)
-                    else:
-                        # 纯中文模式：只保留中文行
-                        result.append(next_line)
-                    i += 2  # 跳过日文行和中文行
-                    continue
-                elif next_line.strip() == line.strip():
-                    # 如果下一行与当前行完全相同（如 B:111, ◇），只保留一次
-                    result.append(line)
-                    i += 2  # 跳过重复行
-                    continue
-                elif not is_japanese_text(next_line) and not is_chinese_text(next_line) and next_line.strip():
-                    # 下一行既不是日文也不是中文，但非空，可能是符号翻译
-                    result.append(next_line)
-                    i += 2  # 跳过日文行和符号行
-                    continue
-                else:
-                    # 没有找到翻译，保留日文行并标记
-                    result.append(line.rstrip() + " [日]")
-                    i += 1
-                    continue
-            else:
-                # 最后一行是日文，标记翻译缺失
-                result.append(line.rstrip() + " [日]")
-                i += 1
-                continue
-        
-        # 检查是否是中文行
-        elif is_chinese_text(line):
-            # 如果中文行中包含假名，标记为[中]
-            if is_japanese_text(line):
-                result.append(line.rstrip() + " [中]")
-            else:
-                result.append(line)
-            i += 1
-            continue
-        
-        # 其他情况：保留原行（可能是数字、符号等）
+        translated_line = translation or ""
+        translated_line = translated_line.rstrip()
+        if not translated_line:
+            translated_line = "[翻译未完成]"
+        if include_original:
+            result.append(original)
+            result.append(translated_line)
         else:
-            # 检查下一行是否与当前行完全相同
-            if i + 1 < len(content_lines):
-                next_line = content_lines[i + 1]
-                if next_line.strip() == line.strip():
-                    # 如果下一行与当前行完全相同（如 B:111, ◇），只保留一次
-                    result.append(line)
-                    i += 2  # 跳过重复行
-                    continue
-            
-            # 其他情况，保留原行
-            result.append(line)
-            i += 1
-            continue
+            result.append(translated_line)
     
     # 压缩文章内部的空行，最多保留2个连续空行
     compressed_lines = []
@@ -631,6 +620,7 @@ def process_bilingual_file(
     include_original: bool = False,
     title_filters: Optional[List[str]] = None,
     series_filters: Optional[List[str]] = None,
+    caption_filters: Optional[List[str]] = None,
 ) -> bool:
     """处理单个双语文件"""
     try:
@@ -664,7 +654,12 @@ def process_bilingual_file(
         timestamp_dt = _extract_timestamp_from_yaml(yaml_content)
         timestamp_label = timestamp_dt.isoformat() if timestamp_dt else None
 
-        skip, reason = _should_skip_article(yaml_content, title_filters or [], series_filters or [])
+        skip, reason = _should_skip_article(
+            yaml_content,
+            title_filters or [],
+            series_filters or [],
+            caption_filters or [],
+        )
         if skip:
             _log_article_result("跳过文件", timestamp_label, title, novel_id, reason, input_path)
             return True
@@ -731,6 +726,7 @@ def merge_chinese_files(
     output_override: Optional[Path] = None,
     title_filters: Optional[List[str]] = None,
     series_filters: Optional[List[str]] = None,
+    caption_filters: Optional[List[str]] = None,
 ) -> bool:
     """
     合并多个文件夹中的双语文件中文部分，并按 create_date/published_at 时间戳排序。
@@ -830,7 +826,12 @@ def merge_chinese_files(
         for _, novel_id, file_path, content_lines, yaml_content, timestamp_label in file_infos:
             try:
                 title = extract_title_from_yaml(yaml_content)
-                skip, reason = _should_skip_article(yaml_content, title_filters or [], series_filters or [])
+                skip, reason = _should_skip_article(
+                    yaml_content,
+                    title_filters or [],
+                    series_filters or [],
+                    caption_filters or [],
+                )
                 if skip:
                     _log_article_result("跳过文件", timestamp_label, title, novel_id, reason, file_path)
                     continue
@@ -910,6 +911,7 @@ def main():
     parser.add_argument("--merge-min-lines", type=int, default=50, help="合并模式：跳过有效行数低于该阈值的文本（默认50）")
     parser.add_argument("--exclude-title", action="append", default=[], help="过滤标题包含指定关键字的文章（可多次提供）")
     parser.add_argument("--exclude-series-id", action="append", default=[], help="过滤指定 series.id 的文章（可多次提供）")
+    parser.add_argument("--exclude-caption", action="append", default=[], help="过滤简介包含指定关键字的文章（可多次提供）")
     
     args = parser.parse_args()
     
@@ -927,6 +929,7 @@ def main():
     
     title_filters = [kw for kw in (args.exclude_title or []) if kw]
     series_filters = [sid for sid in (args.exclude_series_id or []) if sid]
+    caption_filters = [kw for kw in (args.exclude_caption or []) if kw]
 
     if args.merge:
         merge_output = Path(args.merge_output).expanduser() if args.merge_output else None
@@ -937,6 +940,7 @@ def main():
             output_override=merge_output,
             title_filters=title_filters,
             series_filters=series_filters,
+            caption_filters=caption_filters,
         )
         return
     
@@ -964,6 +968,7 @@ def main():
                 include_original=args.bilingual,
                 title_filters=title_filters,
                 series_filters=series_filters,
+                caption_filters=caption_filters,
             ):
                 print(f"成功处理: {input_path} -> {output_path}")
                 processed_count += 1
@@ -999,6 +1004,7 @@ def main():
                     include_original=args.bilingual,
                     title_filters=title_filters,
                     series_filters=series_filters,
+                    caption_filters=caption_filters,
                 ):
                     print(f"成功处理: {file_path} -> {output_path}")
                     processed_count += 1
