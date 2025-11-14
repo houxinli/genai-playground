@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, Optional
 
 
 @dataclass(slots=True)
@@ -18,6 +18,7 @@ class RatingResult:
     summary: Optional[str] = None
     confidence: float = 0.5
     local_title: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class RatingFetcher(abc.ABC):

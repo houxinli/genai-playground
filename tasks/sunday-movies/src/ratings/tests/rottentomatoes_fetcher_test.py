@@ -70,7 +70,10 @@ class RottenTomatoesFetcherTest(unittest.TestCase):
 
         self.assertIsNotNone(result)
         assert result  # for type checker
-        self.assertEqual(result.score, 54.0)
+        self.assertAlmostEqual(result.score, 5.4)
+        self.assertIsNotNone(result.metadata)
+        self.assertEqual(result.metadata.get("critics_score"), 54.0)
+        self.assertEqual(result.metadata.get("audience_score"), 85.0)
         self.assertIn("Critics 54%", result.summary)
         self.assertIn("Audience 85%", result.summary)
 
