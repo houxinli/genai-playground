@@ -211,14 +211,16 @@ def print_summary(results: List[Dict[str, Any]]) -> None:
         print(f"   {i+1}. {title}: {score:.1f}/10 ({rating_str}, {showtime_count} showtimes)")
 
 
-def print_markdown_table(results: List[Dict[str, Any]], theater_name: Optional[str] = None) -> None:
-    """Output Markdown table sorted by showtime count."""
+def format_markdown_table(results: List[Dict[str, Any]], theater_name: Optional[str] = None) -> str:
+    """Return Markdown table sorted by showtime count."""
     header = "📝 Markdown 排片表（按场次数量排序）"
     if theater_name:
         header = f"📝 {theater_name} 排片表（按场次数量排序）"
-    print(f"\n{header}")
-    print("| English Title | 中文标题 | Aggregated Score | Showtimes |")
-    print("| --- | --- | --- | --- |")
+    lines = [
+        header,
+        "| English Title | 中文标题 | Aggregated Score | Showtimes |",
+        "| --- | --- | --- | --- |",
+    ]
     
     sorted_results = sorted(results, key=lambda r: len(r["showtimes"]), reverse=True)
     
@@ -237,7 +239,14 @@ def print_markdown_table(results: List[Dict[str, Any]], theater_name: Optional[s
                 continue
         showtimes_str = f"{len(showtimes)} 场: {', '.join(showtimes)}" if showtimes else "—"
         
-        print(f"| {english} | {chinese} | {score_str} | {showtimes_str} |")
+        lines.append(f"| {english} | {chinese} | {score_str} | {showtimes_str} |")
+    
+    return "\n".join(lines)
+
+
+def print_markdown_table(results: List[Dict[str, Any]], theater_name: Optional[str] = None) -> None:
+    table = format_markdown_table(results, theater_name)
+    print(f"\n{table}")
 
 
 def _parse_time_arg(value: Optional[str]) -> Optional[int]:

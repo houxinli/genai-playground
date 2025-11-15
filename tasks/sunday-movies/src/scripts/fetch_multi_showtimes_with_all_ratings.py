@@ -17,7 +17,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 from fetch_showtimes_with_all_ratings import (  # type: ignore
     fetch_showtimes_with_all_ratings,
     print_summary,
-    print_markdown_table,
+    format_markdown_table,
     save_results,
 )
 from ratings.base import RatingResult  # type: ignore
@@ -87,6 +87,11 @@ def main() -> None:
         type=str,
         help="Only include showtimes at or before HH:MM (24h)",
     )
+    parser.add_argument(
+        "--markdown-output",
+        type=Path,
+        help="Optional file to save rendered Markdown tables",
+    )
 
     args = parser.parse_args()
 
@@ -108,6 +113,10 @@ def main() -> None:
     if min_minutes is not None or max_minutes is not None:
         print(f"🕒 Time window: {args.min_time or '--'} - {args.max_time or '--'}")
 
+    markdown_lines: Optional[List[str]] = None
+    if args.markdown_output:
+        markdown_lines = [f"# Sunday Movies Showtimes ({args.date})", ""]
+
     theater_results: List[Tuple[str, List[Dict]]] = []
 
     for theater_id, theater_name in theaters:
@@ -127,7 +136,13 @@ def main() -> None:
             continue
 
         print_summary(results)
-        print_markdown_table(results, theater_name)
+        table_md = format_markdown_table(results, theater_name)
+        print("\n" + table_md)
+        if markdown_lines is not None:
+            markdown_lines.append(f"## {theater_name}")
+            markdown_lines.append("")
+            markdown_lines.append(table_md)
+            markdown_lines.append("")
         theater_results.append((theater_name, results))
 
         if args.output_dir:
@@ -139,12 +154,24 @@ def main() -> None:
 
     if theater_results:
         print("\n" + "=" * 80)
+        combined_md = format_combined_markdown_table(theater_results)
         print("🧮 Combined Schedule (all theaters)")
-        print_combined_markdown_table(theater_results)
+        print("\n" + combined_md)
+        if markdown_lines is not None:
+            markdown_lines.append("## Combined Schedule")
+            markdown_lines.append("")
+            markdown_lines.append(combined_md)
+            markdown_lines.append("")
+
+    if markdown_lines is not None:
+        output_path = args.markdown_output
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("\n".join(markdown_lines), encoding="utf-8")
+        print(f"\n📝 Markdown saved to {output_path}")
 
 
-def print_combined_markdown_table(theater_results: List[Tuple[str, List[Dict]]]) -> None:
-    """Print a single Markdown table with columns per theater."""
+def format_combined_markdown_table(theater_results: List[Tuple[str, List[Dict]]]) -> str:
+    """Return a Markdown table with columns per theater."""
     theater_names = [name for name, _ in theater_results]
     header_cols = ["English Title", "中文标题"]
     for name in theater_names:
@@ -152,8 +179,10 @@ def print_combined_markdown_table(theater_results: List[Tuple[str, List[Dict]]])
             header_cols.append(f"{label} · {name}")
         header_cols.append(f"Showtimes · {name}")
 
-    print("| " + " | ".join(header_cols) + " |")
-    print("| " + " | ".join(["---"] * len(header_cols)) + " |")
+    lines = [
+        "| " + " | ".join(header_cols) + " |",
+        "| " + " | ".join(["---"] * len(header_cols)) + " |",
+    ]
 
     merged: Dict[str, Dict] = {}
     for theater_name, movies in theater_results:
@@ -202,7 +231,8 @@ def print_combined_markdown_table(theater_results: List[Tuple[str, List[Dict]]])
                         cell = f"{score:.1f}/{scale}"
                 row.append(cell)
             row.append(data["text"] if data else "—")
-        print("| " + " | ".join(row) + " |")
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
 
 
 def summarize_showtimes(showtimes: List[Dict]) -> Tuple[int, str]:
