@@ -22,6 +22,13 @@ from ratings.rottentomatoes import RottenTomatoesFetcher
 from ratings.aggregator import RatingsAggregator
 from ratings.utils import normalize_title
 
+RATING_COLUMNS = [
+    ("douban", "豆瓣"),
+    ("imdb", "IMDb"),
+    ("rottentomatoes_critics", "RT Critics"),
+    ("rottentomatoes_audience", "RT Audience"),
+]
+
 
 def fetch_showtimes_with_all_ratings(
     theater_id: str,
@@ -178,12 +185,16 @@ def print_summary(results: List[Dict[str, Any]]) -> None:
     # 统计各评分源的成功率
     douban_count = sum(1 for r in results if "douban" in r["ratings"])
     imdb_count = sum(1 for r in results if "imdb" in r["ratings"])
-    rt_count = sum(1 for r in results if "rottentomatoes" in r["ratings"])
+    rt_main_count = sum(1 for r in results if "rottentomatoes" in r["ratings"])
+    rt_critics_count = sum(1 for r in results if "rottentomatoes_critics" in r["ratings"])
+    rt_audience_count = sum(1 for r in results if "rottentomatoes_audience" in r["ratings"])
     
     print(f"\n📊 Rating Source Success:")
     print(f"   🟢 Douban: {douban_count}/{total_movies} ({douban_count/total_movies*100:.1f}%)")
     print(f"   🔵 IMDb: {imdb_count}/{total_movies} ({imdb_count/total_movies*100:.1f}%)")
-    print(f"   🍅 Rotten Tomatoes: {rt_count}/{total_movies} ({rt_count/total_movies*100:.1f}%)")
+    print(f"   🍅 Rotten Tomatoes (main): {rt_main_count}/{total_movies} ({rt_main_count/total_movies*100:.1f}%)")
+    print(f"   🍅 RT Critics: {rt_critics_count}/{total_movies} ({rt_critics_count/total_movies*100:.1f}%)")
+    print(f"   🍿 RT Audience: {rt_audience_count}/{total_movies} ({rt_audience_count/total_movies*100:.1f}%)")
     
     print(f"\n🎯 Top Rated Movies (by aggregated score):")
     # 按聚合评分排序
@@ -216,10 +227,13 @@ def format_markdown_table(results: List[Dict[str, Any]], theater_name: Optional[
     header = "📝 Markdown 排片表（按场次数量排序）"
     if theater_name:
         header = f"📝 {theater_name} 排片表（按场次数量排序）"
+    columns = ["English Title", "中文标题", "Aggregated"]
+    columns.extend(label for _, label in RATING_COLUMNS)
+    columns.append("Showtimes")
     lines = [
         header,
-        "| English Title | 中文标题 | Aggregated Score | Showtimes |",
-        "| --- | --- | --- | --- |",
+        "| " + " | ".join(columns) + " |",
+        "| " + " | ".join(["---"] * len(columns)) + " |",
     ]
     
     sorted_results = sorted(results, key=lambda r: len(r["showtimes"]), reverse=True)
@@ -228,7 +242,13 @@ def format_markdown_table(results: List[Dict[str, Any]], theater_name: Optional[
         english = movie["title"]
         chinese = movie.get("local_title") or "—"
         score = movie["aggregated_score"]
-        score_str = f"{score:.1f}/10" if score is not None else "—"
+        row = [english, chinese, f"{score:.1f}/10" if score is not None else "—"]
+        for source, _ in RATING_COLUMNS:
+            rating_data = movie["ratings"].get(source)
+            if rating_data and rating_data.get("score") is not None:
+                row.append(f"{rating_data['score']:.1f}/10")
+            else:
+                row.append("—")
         
         showtimes = []
         for st in movie["showtimes"]:
@@ -238,8 +258,9 @@ def format_markdown_table(results: List[Dict[str, Any]], theater_name: Optional[
             except Exception:
                 continue
         showtimes_str = f"{len(showtimes)} 场: {', '.join(showtimes)}" if showtimes else "—"
+        row.append(showtimes_str)
         
-        lines.append(f"| {english} | {chinese} | {score_str} | {showtimes_str} |")
+        lines.append("| " + " | ".join(row) + " |")
     
     return "\n".join(lines)
 
@@ -304,6 +325,8 @@ def save_results(results: List[Dict[str, Any]], output_file: Path) -> None:
             "douban": sum(1 for r in results if "douban" in r["ratings"]),
             "imdb": sum(1 for r in results if "imdb" in r["ratings"]),
             "rottentomatoes": sum(1 for r in results if "rottentomatoes" in r["ratings"]),
+            "rottentomatoes_critics": sum(1 for r in results if "rottentomatoes_critics" in r["ratings"]),
+            "rottentomatoes_audience": sum(1 for r in results if "rottentomatoes_audience" in r["ratings"]),
         },
         "movies": results
     }

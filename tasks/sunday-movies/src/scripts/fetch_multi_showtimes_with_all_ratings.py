@@ -13,22 +13,23 @@ SCRIPT_PATH = Path(__file__).resolve()
 SCRIPTS_DIR = SCRIPT_PATH.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+SUNDAY_MOVIES_ROOT = SCRIPT_PATH.parents[2]
+SRC_DIR = SUNDAY_MOVIES_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from fetch_showtimes_with_all_ratings import (  # type: ignore
     fetch_showtimes_with_all_ratings,
     print_summary,
     format_markdown_table,
     save_results,
+    RATING_COLUMNS,
 )
+from notifier.email import send_markdown_email  # type: ignore
 from ratings.base import RatingResult  # type: ignore
 from ratings.utils import normalize_title  # type: ignore
 
-RATING_COLUMNS = [
-    ("douban", "豆瓣"),
-    ("imdb", "IMDb"),
-    ("rottentomatoes_critics", "RT Critics"),
-    ("rottentomatoes_audience", "RT Audience"),
-]
+
 
 
 DEFAULT_THEATERS: List[Tuple[str, str]] = [
@@ -92,6 +93,17 @@ def main() -> None:
         type=Path,
         help="Optional file to save rendered Markdown tables",
     )
+    parser.add_argument(
+        "--email-to",
+        action="append",
+        help="Send the markdown summary to the specified email (can repeat)",
+    )
+    parser.add_argument(
+        "--email-subject",
+        type=str,
+        default=None,
+        help="Subject when sending email notifications",
+    )
 
     args = parser.parse_args()
 
@@ -114,7 +126,7 @@ def main() -> None:
         print(f"🕒 Time window: {args.min_time or '--'} - {args.max_time or '--'}")
 
     markdown_lines: Optional[List[str]] = None
-    if args.markdown_output:
+    if args.markdown_output or args.email_to:
         markdown_lines = [f"# Sunday Movies Showtimes ({args.date})", ""]
 
     theater_results: List[Tuple[str, List[Dict]]] = []
@@ -164,19 +176,24 @@ def main() -> None:
             markdown_lines.append("")
 
     if markdown_lines is not None:
-        output_path = args.markdown_output
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("\n".join(markdown_lines), encoding="utf-8")
-        print(f"\n📝 Markdown saved to {output_path}")
+        markdown_text = "\n".join(markdown_lines)
+        if args.markdown_output:
+            output_path = args.markdown_output
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(markdown_text, encoding="utf-8")
+            print(f"\n📝 Markdown saved to {output_path}")
+        if args.email_to:
+            subject = args.email_subject or f"Sunday Movies Showtimes - {args.date}"
+            send_markdown_email(markdown_text, subject=subject, to_addresses=args.email_to)
+            print(f"✉️  Email sent to: {', '.join(args.email_to)}")
 
 
 def format_combined_markdown_table(theater_results: List[Tuple[str, List[Dict]]]) -> str:
-    """Return a Markdown table with columns per theater."""
+    """Return a Markdown table showing unique ratings per platform plus theater showtimes."""
     theater_names = [name for name, _ in theater_results]
     header_cols = ["English Title", "中文标题"]
+    header_cols.extend(label for _, label in RATING_COLUMNS)
     for name in theater_names:
-        for _, label in RATING_COLUMNS:
-            header_cols.append(f"{label} · {name}")
         header_cols.append(f"Showtimes · {name}")
 
     lines = [
@@ -193,44 +210,38 @@ def format_combined_markdown_table(theater_results: List[Tuple[str, List[Dict]]]
                 {
                     "english": movie["title"],
                     "chinese": movie.get("local_title"),
-                    "by_theater": {},
+                    "ratings": {},
+                    "showtimes": {},
                 },
             )
             if not entry.get("chinese") and movie.get("local_title"):
                 entry["chinese"] = movie["local_title"]
 
-            score = movie.get("aggregated_score")
+            ratings = movie.get("ratings", {})
+            for source, _ in RATING_COLUMNS:
+                if source in ratings and source not in entry["ratings"]:
+                    entry["ratings"][source] = ratings[source]
+
             count, showtime_text = summarize_showtimes(movie["showtimes"])
-            entry["by_theater"][theater_name] = {
-                "aggregated": score,
-                "ratings": movie["ratings"],
-                "count": count,
-                "text": showtime_text,
-            }
+            entry["showtimes"][theater_name] = showtime_text
+            entry["total_count"] = entry.get("total_count", 0) + count
 
     sorted_movies = sorted(
         merged.values(),
-        key=lambda item: sum(
-            entry.get("count", 0) for entry in item["by_theater"].values()
-        ),
+        key=lambda item: item.get("total_count", 0),
         reverse=True,
     )
 
     for item in sorted_movies:
         row = [item["english"], item.get("chinese") or "—"]
+        for source, _ in RATING_COLUMNS:
+            rating_data = item["ratings"].get(source)
+            if rating_data and rating_data.get("score") is not None:
+                row.append(f"{rating_data['score']:.1f}/10")
+            else:
+                row.append("—")
         for theater_name in theater_names:
-            data = item["by_theater"].get(theater_name)
-            ratings = data.get("ratings") if data else None
-            for source, _ in RATING_COLUMNS:
-                cell = "—"
-                if ratings and source in ratings:
-                    rating_data = ratings[source]
-                    score = rating_data.get("score")
-                    scale = rating_data.get("scale", 10)
-                    if score is not None:
-                        cell = f"{score:.1f}/{scale}"
-                row.append(cell)
-            row.append(data["text"] if data else "—")
+            row.append(item["showtimes"].get(theater_name, "—"))
         lines.append("| " + " | ".join(row) + " |")
     return "\n".join(lines)
 
