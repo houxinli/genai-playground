@@ -4,13 +4,14 @@
 
 ## 准备工作
 - 建议继续使用仓库里的 `llm` conda 环境：`conda run -n llm python ...`
-- 依赖：`ytmusicapi`（后续可按需要加入环境文件或单独 `pip install ytmusicapi`）
+- 依赖：`ytmusicapi`，可通过 `conda run -n llm pip install -r tasks/ytmusic/requirements.txt` 安装
 - 在浏览器中登录同一 Google 账号，运行 `python -m ytmusicapi setup` 按提示导出 headers，再把生成的 `headers_auth.json` 放到 `tasks/ytmusic/config/`，或通过 `--headers` 指定自定义路径。
 
 ## 快速开始
 - 列出播放列表：`conda run -n llm python tasks/ytmusic/src/cli.py list`
 - 创建播放列表：`conda run -n llm python tasks/ytmusic/src/cli.py create --name "AI Mix" --description "LLM demo" --privacy PRIVATE`
 - 向播放列表添加歌曲：`conda run -n llm python tasks/ytmusic/src/cli.py add --playlist-id <PL_ID> --video-ids VIDEO_ID1 VIDEO_ID2`
+- 查看指定播放列表曲目：`conda run -n llm python tasks/ytmusic/src/cli.py items --url "https://music.youtube.com/playlist?list=..." --limit 200`
 
 ## 目录结构
 - `src/cli.py`：命令行入口。

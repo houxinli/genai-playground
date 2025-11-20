@@ -2,6 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 from typing import List, Sequence
+from urllib.parse import parse_qs, urlparse
 
 from client import DEFAULT_HEADERS_PATH, build_client
 from playlist_manager import PlaylistManager
@@ -55,6 +56,16 @@ def create_parser() -> argparse.ArgumentParser:
         help="要添加的歌曲/视频 ID，来自 YouTube Music/YouTube 的视频 ID",
     )
 
+    items_parser = subparsers.add_parser("items", help="获取播放列表的曲目列表")
+    items_parser.add_argument("--playlist-id", help="播放列表 ID（URL 中的 list 参数）")
+    items_parser.add_argument("--url", help="播放列表 URL，会自动解析出 list 参数")
+    items_parser.add_argument(
+        "--limit",
+        type=positive_int,
+        default=200,
+        help="最多拉取多少首，默认 200",
+    )
+
     return parser
 
 
@@ -67,6 +78,34 @@ def print_playlists(playlists: List[dict]) -> None:
         title = entry.get("title") or "<untitled>"
         count = entry.get("count", "?")
         print(f"- {title} | 曲目数: {count} | id: {playlist_id}")
+
+
+def extract_playlist_id(url: str) -> str | None:
+    parsed = urlparse(url)
+    if parsed.query:
+        query = parse_qs(parsed.query)
+        if "list" in query and query["list"]:
+            return query["list"][0]
+    # 有些链接可能把 id 放在路径最后
+    path_parts = [p for p in parsed.path.split("/") if p]
+    if path_parts:
+        last = path_parts[-1]
+        if last.startswith("PL"):
+            return last
+    return None
+
+
+def print_tracks(playlist_title: str, tracks: List[dict]) -> None:
+    if not tracks:
+        print(f"播放列表「{playlist_title}」为空")
+        return
+    for idx, track in enumerate(tracks, start=1):
+        title = track.get("title") or "<untitled>"
+        artists_list = track.get("artists") or []
+        artists = ", ".join(a.get("name", "?") for a in artists_list) or "?"
+        album_info = track.get("album") or {}
+        album = album_info.get("name") if isinstance(album_info, dict) else ""
+        print(f"{idx:02d}. {title} - {artists}{f' | {album}' if album else ''}")
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -86,6 +125,18 @@ def main(argv: Sequence[str] | None = None) -> None:
         result = manager.add_tracks(args.playlist_id, args.video_ids)
         status = result.get("status") or "unknown"
         print(f"添加结果: {status} -> {result}")
+    elif args.command == "items":
+        playlist_id = args.playlist_id
+        if not playlist_id:
+            if not args.url:
+                parser.error("必须提供 --playlist-id 或者 --url")
+            playlist_id = extract_playlist_id(args.url)
+            if not playlist_id:
+                parser.error("无法从 URL 解析出 playlist id")
+        playlist = manager.get_playlist_tracks(playlist_id, limit=args.limit)
+        title = playlist.get("title") or playlist_id
+        tracks = playlist.get("tracks", [])
+        print_tracks(title, tracks)
     else:
         parser.error(f"未知指令: {args.command}")
 

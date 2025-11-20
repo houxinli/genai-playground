@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ytmusicapi import YTMusic
 
@@ -31,3 +31,15 @@ class PlaylistManager:
         if not video_ids:
             return {"status": "noop", "playlistId": playlist_id}
         return self.client.add_playlist_items(playlist_id, video_ids)
+
+    def get_playlist_tracks(self, playlist_id: str, limit: Optional[int] = 100) -> Dict[str, Any]:
+        """获取播放列表详情和曲目列表。"""
+        playlist = self.client.get_playlist(playlist_id, limit=limit)
+        tracks = playlist.get("tracks", [])
+        track_count = playlist.get("trackCount")
+        return {
+            "id": playlist_id,
+            "title": playlist.get("title", ""),
+            "trackCount": track_count,
+            "tracks": tracks,
+        }

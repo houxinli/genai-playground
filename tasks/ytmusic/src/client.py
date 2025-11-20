@@ -22,4 +22,4 @@ def resolve_headers_path(headers_path: Optional[Union[str, Path]]) -> Path:
 def build_client(headers_path: Optional[Union[str, Path]] = None) -> YTMusic:
     """Create a YTMusic client pointing at the desired headers file."""
     resolved_path = resolve_headers_path(headers_path)
-    return YTMusic(resolved_path)
+    return YTMusic(str(resolved_path))
