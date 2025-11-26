@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from tasks.ytmusic.src.qq_extractor import extract_from_csv
+from tasks.ytmusic.src.qqmusic.qq_extractor import extract_from_csv
 
 
 FIXTURE = Path(__file__).parent / "data" / "qq_sample.csv"

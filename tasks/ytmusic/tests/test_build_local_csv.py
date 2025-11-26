@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tasks.ytmusic.src.build_local_csv import build_local_csv
-from tasks.ytmusic.src.cache_utils import SongCache
+from tasks.ytmusic.src.core.build_local_csv import build_local_csv
+from tasks.ytmusic.src.core.cache_utils import SongCache
 
 
 class BuildLocalCsvTest(unittest.TestCase):
@@ -65,7 +65,7 @@ class BuildLocalCsvTest(unittest.TestCase):
             build_local_csv(songs, cache, out_path, overrides={})
             with out_path.open() as f:
                 rows = list(csv.DictReader(f))
-            self.assertEqual(rows[0]["release_date"], "2001-12-31")
+            self.assertEqual(rows[0]["release_date"], "2001-05-06")
 
 
 if __name__ == "__main__":

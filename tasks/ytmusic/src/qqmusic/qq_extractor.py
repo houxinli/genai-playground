@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 from typing import Dict, Iterable, List
 
-from .normalize import make_key, normalize_artists, normalize_title
+from tasks.ytmusic.src.core.normalize import make_key, normalize_artists, normalize_title
 
 
 QQ_FIELDS = [

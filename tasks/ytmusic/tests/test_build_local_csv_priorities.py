@@ -3,8 +3,8 @@ import csv
 from pathlib import Path
 import unittest
 
-from tasks.ytmusic.src.build_local_csv import build_local_csv
-from tasks.ytmusic.src.cache_utils import SongCache
+from tasks.ytmusic.src.core.build_local_csv import build_local_csv
+from tasks.ytmusic.src.core.cache_utils import SongCache
 
 
 class BuildLocalCsvPriorityTest(unittest.TestCase):

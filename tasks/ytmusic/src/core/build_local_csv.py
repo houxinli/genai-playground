@@ -4,8 +4,8 @@ import csv
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from .cache_utils import SongCache
-from .normalize import make_key
+from tasks.ytmusic.src.core.cache_utils import SongCache
+from tasks.ytmusic.src.core.normalize import make_key
 
 
 def parse_year(val: str) -> Optional[int]:

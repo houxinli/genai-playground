@@ -2,8 +2,8 @@ import unittest
 from pathlib import Path
 from typing import Dict, List
 
-from tasks.ytmusic.src.cache_utils import SongCache
-from tasks.ytmusic.src.yt_search_updater import update_yt_cache
+from tasks.ytmusic.src.core.cache_utils import SongCache
+from tasks.ytmusic.src.ytmusic.yt_search_updater import update_yt_cache
 
 
 class DummyYT:

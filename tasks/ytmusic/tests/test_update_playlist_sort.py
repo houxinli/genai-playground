@@ -1,6 +1,6 @@
 import unittest
 
-from tasks.ytmusic.src.update_playlist import sort_rows
+from tasks.ytmusic.src.ytmusic.sync_pipeline import sort_rows
 
 
 class UpdatePlaylistSortTest(unittest.TestCase):

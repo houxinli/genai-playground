@@ -8,8 +8,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
-from .cache_utils import SongCache
-from .normalize import make_key, normalized_query
+from tasks.ytmusic.src.core.cache_utils import SongCache
+from tasks.ytmusic.src.core.normalize import make_key, normalized_query
 
 MB_USER_AGENT = "ytmusic-playlist-tool/1.0 (contact: none)"
 

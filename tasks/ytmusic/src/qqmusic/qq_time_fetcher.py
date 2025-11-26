@@ -6,8 +6,8 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
-from .cache_utils import SongCache
-from .normalize import make_key
+from tasks.ytmusic.src.core.cache_utils import SongCache
+from tasks.ytmusic.src.core.normalize import make_key
 
 
 def fetch_song_detail(song_mid: str, timeout: float = 8.0) -> Dict:

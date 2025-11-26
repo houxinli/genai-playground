@@ -2,8 +2,8 @@ import unittest
 from pathlib import Path
 from typing import Dict, List
 
-from tasks.ytmusic.src.cache_utils import SongCache
-from tasks.ytmusic.src.mb_cache_updater import update_mb_cache
+from tasks.ytmusic.src.core.cache_utils import SongCache
+from tasks.ytmusic.src.musicbrainz.mb_cache_updater import update_mb_cache
 
 
 def fake_search(title: str, artists: str, limit: int) -> List[Dict]:
