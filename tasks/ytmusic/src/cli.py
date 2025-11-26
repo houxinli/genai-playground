@@ -66,6 +66,20 @@ def create_parser() -> argparse.ArgumentParser:
         help="最多拉取多少首，默认 200",
     )
 
+    remove_parser = subparsers.add_parser("remove", help="从播放列表删除曲目")
+    remove_parser.add_argument("--playlist-id", help="播放列表 ID")
+    remove_parser.add_argument("--url", help="播放列表 URL，会自动解析出 list 参数")
+    remove_parser.add_argument(
+        "--title",
+        help="要删除的歌曲标题（精确匹配，不区分大小写）。如有多首同名将全部删除。",
+    )
+    remove_parser.add_argument(
+        "--limit",
+        type=positive_int,
+        default=500,
+        help="扫描播放列表的最大曲目数，默认 500",
+    )
+
     return parser
 
 
@@ -137,6 +151,34 @@ def main(argv: Sequence[str] | None = None) -> None:
         title = playlist.get("title") or playlist_id
         tracks = playlist.get("tracks", [])
         print_tracks(title, tracks)
+    elif args.command == "remove":
+        playlist_id = args.playlist_id
+        if not playlist_id:
+            if not args.url:
+                parser.error("必须提供 --playlist-id 或者 --url")
+            playlist_id = extract_playlist_id(args.url)
+            if not playlist_id:
+                parser.error("无法从 URL 解析出 playlist id")
+
+        if not args.title:
+            parser.error("当前删除命令需要提供 --title")
+
+        matches = manager.find_tracks_by_title(playlist_id, args.title, limit=args.limit)
+        if not matches:
+            print(f"未找到标题为「{args.title}」的曲目")
+            return
+        items = []
+        for track in matches:
+            if track.get("setVideoId"):
+                entry = {"setVideoId": track["setVideoId"]}
+                if track.get("videoId"):
+                    entry["videoId"] = track["videoId"]
+                items.append(entry)
+        if not items:
+            print(f"找到 {len(matches)} 条同名曲目，但缺少必要的 setVideoId/videoId 字段，未执行删除")
+            return
+        result = manager.remove_playlist_items(playlist_id, items)
+        print(f"删除请求已发送，匹配 {len(matches)} 条，提交 {len(items)} 条 -> {result}")
     else:
         parser.error(f"未知指令: {args.command}")
 

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from ytmusicapi import YTMusic
 
@@ -43,3 +43,23 @@ class PlaylistManager:
             "trackCount": track_count,
             "tracks": tracks,
         }
+
+    def find_tracks_by_title(
+        self,
+        playlist_id: str,
+        title: str,
+        limit: Optional[int] = 200,
+    ) -> List[Dict[str, Any]]:
+        """按标题匹配（忽略大小写/首尾空格），返回匹配到的曲目列表。"""
+        playlist = self.get_playlist_tracks(playlist_id, limit=limit)
+        target = title.strip().lower()
+        matches = []
+        for track in playlist.get("tracks", []):
+            track_title = (track.get("title") or "").strip().lower()
+            if track_title == target:
+                matches.append(track)
+        return matches
+
+    def remove_playlist_items(self, playlist_id: str, items: Sequence[Dict[str, Any]]) -> Dict:
+        """调用 API 删除播放列表中的指定条目（需包含 setVideoId 或 videoId）。"""
+        return self.client.remove_playlist_items(playlist_id, list(items))

@@ -12,6 +12,7 @@
 - 创建播放列表：`conda run -n llm python tasks/ytmusic/src/cli.py create --name "AI Mix" --description "LLM demo" --privacy PRIVATE`
 - 向播放列表添加歌曲：`conda run -n llm python tasks/ytmusic/src/cli.py add --playlist-id <PL_ID> --video-ids VIDEO_ID1 VIDEO_ID2`
 - 查看指定播放列表曲目：`conda run -n llm python tasks/ytmusic/src/cli.py items --url "https://music.youtube.com/playlist?list=..." --limit 200`
+- 删除播放列表内指定标题的曲目：`conda run -n llm python tasks/ytmusic/src/cli.py remove --url "https://music.youtube.com/playlist?list=..." --title "稻香" --limit 500`
 
 ## 目录结构
 - `src/cli.py`：命令行入口。
