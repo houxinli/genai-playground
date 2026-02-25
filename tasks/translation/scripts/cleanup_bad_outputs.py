@@ -52,6 +52,7 @@ def main() -> None:
     ap.add_argument("--bilingual-dir", required=True, help="双语输出目录，如 tasks/translation/data/pixiv/50235390_bilingual")
     ap.add_argument("--original-dir", required=True, help="原文目录，如 tasks/translation/data/pixiv/50235390")
     ap.add_argument("--copy-threshold", type=int, default=10, help="判定复制原文的行数阈值（含假名且完全相同）")
+    ap.add_argument("--dry-run", action="store_true", help="仅打印将删除的文件，不实际删除")
     args = ap.parse_args()
 
     bi_root = Path(args.bilingual_dir)
@@ -88,12 +89,15 @@ def main() -> None:
             copy_cnt = count_copied_kana_lines(orig_text, bi_text) if orig_text else 0
 
             if leak or copy_cnt >= args.copy_threshold:
-                try:
-                    p.unlink()
-                    deleted += 1
-                    print(f"DELETE {p} (leak={leak}, copy_cnt={copy_cnt})")
-                except Exception as e:
-                    print(f"WARN 删除失败 {p}: {e}")
+                if args.dry_run:
+                    print(f"DRY-RUN DELETE {p} (leak={leak}, copy_cnt={copy_cnt})")
+                else:
+                    try:
+                        p.unlink()
+                        deleted += 1
+                        print(f"DELETE {p} (leak={leak}, copy_cnt={copy_cnt})")
+                    except Exception as e:
+                        print(f"WARN 删除失败 {p}: {e}")
         except Exception as e:
             print(f"WARN 处理失败 {p}: {e}")
 
@@ -102,5 +106,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 

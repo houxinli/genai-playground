@@ -11,11 +11,12 @@ Pixiv 小说按作者批量直连下载（路线B）：
 
 配置与参数：
 - refresh-token 读取优先级：CLI --refresh-token > data/config.json > 环境变量 PIXIV_REFRESH_TOKEN
-- 示例测试参数：--limit 10 --offset 0 --workers 2 --rate-limit 1 --retries 5
+- 示例测试参数：--limit 10 --offset 0 --workers 1 --rate-limit 1 --retries 5
 
 注意：
 - 本脚本不启动任何外部服务；下载速率受 --rate-limit 限制，失败指数退避重试
 - ruby 注音统一保留为 "漢字(かな)"；pixiv 特殊语法 [[rb:漢字 > かな]] 也做同样转换
+- --workers 为兼容保留参数，当前实现固定串行下载（传入 >1 会给出提示）
 """
 
 from __future__ import annotations
@@ -363,7 +364,12 @@ def main() -> None:
     )
     parser.add_argument("--limit", type=int, default=0, help="下载数量；<=0 表示不限（默认）")
     parser.add_argument("--offset", type=int, default=0)
-    parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="兼容保留参数：当前实现固定串行下载，建议保持 1",
+    )
     parser.add_argument("--rate-limit", type=float, default=1.0, help="每秒请求数上限（近似）")
     parser.add_argument("--retries", type=int, default=5)
     parser.add_argument("--overwrite", action="store_true")
@@ -381,6 +387,8 @@ def main() -> None:
         default=Path("tasks/translation/logs") / f"batch_download_{datetime.now().strftime('%Y%m%d-%H%M%S')}.log",
     )
     args = parser.parse_args()
+    if args.workers != 1:
+        print("⚠️ --workers 当前为兼容参数，尚未启用并发下载；将按串行模式执行。")
 
     # 解析 token 并登录
     token = resolve_refresh_token(args.refresh_token, args.config_json)

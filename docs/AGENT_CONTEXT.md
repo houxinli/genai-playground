@@ -42,7 +42,7 @@ genai-playground/
 │   │   │   ├── streaming_handler.py # 流式处理
 │   │   │   └── pipeline.py    # 翻译流水线
 │   │   ├── cli/               # 命令行接口
-│   │   └── translate_v3.py    # 主翻译脚本
+│   │   └── translate.py       # 主翻译脚本
 │   ├── translate              # 便捷调用器
 │   ├── data/                  # 数据目录
 │   │   ├── input/             # 输入文件
@@ -324,7 +324,7 @@ make vllm-logs           # 查看日志
 ```bash
 make translate-batch INPUT_DIR=path/to/input
 make translate-batch-smart INPUT_DIR=path/to/input
-python tasks/translation/scripts/test_translation.py --input input.txt --output output.txt
+make translate-start-fg ARGS="path/to/input.txt --bilingual-simple --stream"
 ```
 
 ### 监控和调试

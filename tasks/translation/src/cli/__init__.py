@@ -12,7 +12,7 @@ from ..core.config import TranslationConfig
 
 def create_argument_parser() -> argparse.ArgumentParser:
     """创建命令行参数解析器"""
-    parser = argparse.ArgumentParser(description="批量翻译 Pixiv 小说到 _zh.txt")
+    parser = argparse.ArgumentParser(description="批量翻译文本到双语/中文输出")
     
     # 模型配置
     parser.add_argument("--model", default="Qwen/Qwen3-32B", help="使用的模型名称")
@@ -57,7 +57,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     
     # 文件配置
     parser.add_argument("--overwrite", action="store_true", help="覆盖已存在的输出文件")
-    parser.add_argument("--log-dir", default="logs", help="日志目录")
+    parser.add_argument("--log-dir", default="tasks/translation/logs", help="日志目录")
     parser.add_argument("--profiles-file", type=Path, default=None, help="可选：分节超参配置 JSON 文件路径")
     parser.add_argument("--enable-terminology", action="store_true", help="启用术语表提示")
     parser.add_argument("--terminology-file", type=Path, help="术语文件路径（需配合 --enable-terminology）")

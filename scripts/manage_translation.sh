@@ -18,13 +18,31 @@ create_latest_link() {
     ln -sf "$LOG_FILE" "$LATEST_LOG"
 }
 
+build_translate_cmd() {
+    local translate_bin="$1"
+    shift
+    local escaped_args=()
+    local arg
+    for arg in "$@"; do
+        escaped_args+=("$(printf '%q' "$arg")")
+    done
+    local escaped_bin
+    escaped_bin="$(printf '%q' "$translate_bin")"
+    if [ ${#escaped_args[@]} -eq 0 ]; then
+        printf '%s' "$escaped_bin"
+    else
+        printf '%s %s' "$escaped_bin" "${escaped_args[*]}"
+    fi
+}
+
 # 前台运行翻译任务
 _start_fg() {
     echo "📝 翻译日志文件: $LOG_FILE"
     create_latest_link
     
     # 构建翻译命令
-    local translate_cmd="./tasks/translation/translate $*"
+    local translate_cmd
+    translate_cmd="$(build_translate_cmd "./tasks/translation/translate" "$@")"
     echo "🚀 执行翻译命令: $translate_cmd"
     
     # 使用script记录日志并实时显示
@@ -46,7 +64,10 @@ _start_bg() {
     fi
     
     # 构建翻译命令（使用绝对路径）
-    local translate_cmd="$(dirname "$0")/../tasks/translation/translate $*"
+    local translate_bin
+    translate_bin="$(cd "$(dirname "$0")/../tasks/translation" && pwd)/translate"
+    local translate_cmd
+    translate_cmd="$(build_translate_cmd "$translate_bin" "$@")"
     echo "🚀 后台执行翻译命令: $translate_cmd"
     
     # 在tmux中运行翻译任务（使用vllm的成功模式）
@@ -132,7 +153,8 @@ _batch_translate() {
     shift
     
     # 构建批量翻译命令
-    local batch_cmd="./tasks/translation/translate \"$input_path\" $*"
+    local batch_cmd
+    batch_cmd="$(build_translate_cmd "./tasks/translation/translate" "$input_path" "$@")"
     
     echo "🚀 批量翻译命令: $batch_cmd"
     echo "📁 输入路径: $input_path"

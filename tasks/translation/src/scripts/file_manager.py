@@ -8,7 +8,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List
 
 def rename_series_files(base_dir: Path, dry_run: bool = False) -> bool:
     """
@@ -47,21 +47,36 @@ def rename_series_files(base_dir: Path, dry_run: bool = False) -> bool:
         print(f"\n处理系列 {series_id}，包含 {len(novel_ids)} 篇文章:")
         
         for novel_id in novel_ids:
-            # 查找所有相关文件
-            old_files = list(base_dir.glob(f"{novel_id}.*"))
+            # 查找所有相关文件（包含常见后缀与meta）
+            old_files = [
+                base_dir / f"{novel_id}.txt",
+                base_dir / f"{novel_id}_zh.txt",
+                base_dir / f"{novel_id}_bilingual.txt",
+                base_dir / f"{novel_id}_awq_zh.txt",
+                base_dir / f"{novel_id}_awq_bilingual.txt",
+                base_dir / f"{novel_id}.meta.json",
+            ]
             
             for old_file in old_files:
+                if not old_file.exists():
+                    continue
                 total_count += 1
                 
                 # 构建新文件名
-                if old_file.suffix == ".txt":
+                name = old_file.name
+                if name == f"{novel_id}.txt":
                     new_name = f"{series_id}_{novel_id}.txt"
-                elif old_file.suffix == "_zh.txt":
+                elif name == f"{novel_id}_zh.txt":
                     new_name = f"{series_id}_{novel_id}_zh.txt"
-                elif old_file.suffix == "_bilingual.txt":
+                elif name == f"{novel_id}_bilingual.txt":
                     new_name = f"{series_id}_{novel_id}_bilingual.txt"
+                elif name == f"{novel_id}_awq_zh.txt":
+                    new_name = f"{series_id}_{novel_id}_awq_zh.txt"
+                elif name == f"{novel_id}_awq_bilingual.txt":
+                    new_name = f"{series_id}_{novel_id}_awq_bilingual.txt"
+                elif name == f"{novel_id}.meta.json":
+                    new_name = f"{series_id}_{novel_id}.meta.json"
                 else:
-                    # 其他文件保持原样
                     continue
                 
                 new_file = base_dir / new_name
@@ -228,8 +243,8 @@ def main():
                        help="目标目录路径")
     parser.add_argument("--pattern", type=str, default="*.txt",
                        help="文件匹配模式 (仅用于list命令)")
-    parser.add_argument("--reverse", action="store_true", default=True,
-                       help="按长度降序排列 (仅用于list命令)")
+    parser.add_argument("--asc", action="store_true",
+                       help="按长度升序排列 (仅用于list命令，默认降序)")
     parser.add_argument("--dry-run", action="store_true",
                        help="试运行模式，不实际执行操作")
     parser.add_argument("--limit", type=int, default=0,
@@ -247,12 +262,13 @@ def main():
         sys.exit(0 if success else 1)
     
     elif args.command == "list":
-        files = list_files_by_length(base_dir, args.pattern, args.reverse)
+        reverse = not args.asc
+        files = list_files_by_length(base_dir, args.pattern, reverse)
         
         if args.limit > 0:
             files = files[:args.limit]
         
-        print(f"\n文件列表 (按长度{'降序' if args.reverse else '升序'}排列):")
+        print(f"\n文件列表 (按长度{'降序' if reverse else '升序'}排列):")
         print("-" * 80)
         for file_path, length in files:
             print(f"{length:8d} 字符  {file_path}")

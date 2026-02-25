@@ -1,22 +1,73 @@
-# scripts 目录说明
+# Translation Scripts Guide
 
-该目录存放与翻译流水线配套的辅助脚本。
+本目录存放翻译流水线的辅助脚本。按场景分为 3 类：下载、修复、清理。
 
-## cleanup_bad_outputs.py
-- 作用：清理存在 few-shot 泄漏样例、或译文中大段复制原文（日文片段）的双语输出文件。
-- 用法：
-  ```bash
-  python scripts/cleanup_bad_outputs.py \
-    --bilingual-dir tasks/translation/data/pixiv/<数据集>_bilingual \
-    --original-dir  tasks/translation/data/pixiv/<数据集>
+## 1) Fanbox 下载（浏览器版，推荐）
+
+### `fanbox_browser_downloader.js`（批量下载）
+- 场景：整站批量拉取某个创作者全部文章。
+- 方式：在已登录 Fanbox 的 Chrome/Edge 页面打开 DevTools Console，粘贴脚本后运行。
+- 最小命令：
+  ```javascript
+  await downloadFanboxPosts({ creatorId: "momizi813" })
   ```
-- 参数：
-  - `--copy-threshold`: 判定“复制原文”行数阈值（默认 10）。
-- 建议：先在小样本目录上验证；如需安全模式，可新增 `--dry-run` 仅打印而不删除。
+- 首次需选择目录：
+  ```javascript
+  await fanboxSelectDownloadDirectory()
+  ```
+- 支持断点续传（目录内 `.fanbox_state.json`）。
 
-## 已删除脚本
-- `batch_translate_improved.py`：已废弃，统一使用 `tasks/translation/translate` / `src/translate.py`。
+### `fanbox_browser_snippet.js`（单篇下载）
+- 场景：当前文章页单篇导出。
+- 页面示例：`https://<creator>.fanbox.cc/posts/<post_id>`
+- 最小命令：
+  ```javascript
+  await downloadCurrentFanboxPost()
+  ```
+- 常用：
+  ```javascript
+  await downloadCurrentFanboxPost({ forcePickDirectory: true })
+  ```
 
-## 其他建议
-- 新增脚本前优先考虑能否通过 `src/translate.py` 的参数直接覆盖使用场景。
-- 若确需脚本，请在此 README 中补充用途、参数与示例，避免重复功能。
+提示：你如果已经把脚本保存到 Chrome Snippets，可以直接右键 `Run`，不必每次粘贴。
+
+## 2) Fanbox 下载（终端版）
+
+### `fanbox_download.py`
+- 场景：不走浏览器，直接通过 `FANBOXSESSID` 拉取。
+- 依赖：`FANBOXSESSID`（CLI 参数/环境变量/cookie 文件）。
+- 示例：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/fanbox_download.py \
+    --creator-id momizi813 \
+    --max-posts 20
+  ```
+
+## 3) 修复与清理
+
+### `repair_bilingual.py`
+- 作用：对已有双语文件做增量修复，只重译缺失/异常行。
+- 示例（目录批量）：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/repair_bilingual.py \
+    tasks/translation/data/pixiv/50235390 \
+    --existing-bilingual-dir tasks/translation/data/pixiv/50235390_bilingual \
+    --output-dir tasks/translation/data/pixiv/50235390_bilingual_fixed \
+    --repair-existing --bilingual-simple --stream
+  ```
+
+### `cleanup_bad_outputs.py`
+- 作用：删除 few-shot 泄漏或大段复制原文的双语文件。
+- 示例：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/cleanup_bad_outputs.py \
+    --bilingual-dir tasks/translation/data/pixiv/50235390_bilingual \
+    --original-dir tasks/translation/data/pixiv/50235390 \
+    --dry-run
+  ```
+
+## 4) 其他相关脚本位置
+
+- Pixiv 批量下载：`tasks/translation/src/scripts/batch_download_v1.py`
+- 文件管理（rename/list/cleanup）：`tasks/translation/src/scripts/file_manager.py`
+- 双语质量清理：`tasks/translation/src/scripts/cleanup_bilingual.py`
