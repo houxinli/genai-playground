@@ -25,6 +25,7 @@ tasks/translation/
 ├── scripts/fanbox_browser_downloader.js # Fanbox 浏览器批量下载
 ├── scripts/fanbox_browser_snippet.js    # Fanbox 浏览器单篇下载
 ├── scripts/repair_bilingual.py         # 增量修复双语文件
+├── scripts/convert_bilingual_to_simplified.py # 双语译文繁转简
 └── scripts/cleanup_bad_outputs.py      # 清理异常双语输出
 ```
 
@@ -127,6 +128,24 @@ conda run -n llm python tasks/translation/scripts/cleanup_bad_outputs.py \
   --bilingual-dir tasks/translation/data/pixiv/50235390_bilingual \
   --original-dir tasks/translation/data/pixiv/50235390 \
   --dry-run
+```
+
+### 批量繁转简（仅译文行）
+默认输出到 `<原目录>_simp/同名文件`（不覆盖原文件）。
+
+先安装本地 opencc（任选其一）：
+
+```bash
+brew install opencc
+# 或 conda 环境安装 Python 版
+conda run -n llm pip install opencc-python-reimplemented
+```
+
+```bash
+conda run -n llm python tasks/translation/scripts/convert_bilingual_to_simplified.py \
+  tasks/translation/data/fanbox/momizi813_bilingual \
+  --output-dir tasks/translation/data/fanbox/momizi813_bilingual_simp \
+  --backend opencc
 ```
 
 ## 常用查看命令

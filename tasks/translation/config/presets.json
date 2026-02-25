@@ -11,7 +11,7 @@
   },
   "fanbox_grok4_fast": {
     "llm_provider": "openrouter",
-    "model": "x-ai/grok-4-fast",
+    "model": "x-ai/grok-4.1-fast",
     "bilingual_simple": true,
     "prompt_style": "fanfic",
     "token_estimator": "simple",
