@@ -40,6 +40,18 @@ async function ensureDownloadDirectory(forcePick = false) {
   return fanboxSelectDownloadDirectory();
 }
 
+function detectCreatorIdFromLocation() {
+  const hostMatch = location.hostname.match(/^([^.]+)\.fanbox\.cc$/);
+  if (hostMatch && hostMatch[1] && hostMatch[1] !== "www") {
+    return hostMatch[1];
+  }
+  const pathMatch = location.pathname.match(/@([^/]+)/);
+  if (pathMatch && pathMatch[1]) {
+    return pathMatch[1];
+  }
+  return FANBOX_HOST_CREATOR_ID || null;
+}
+
 async function downloadFanboxPosts(options) {
   const {
     creatorId,
@@ -54,16 +66,23 @@ async function downloadFanboxPosts(options) {
     retryDelayMs,
   } = options || {};
 
-  if (!creatorId) {
-    throw new Error("creatorId is required");
+  const detectedCreatorId = creatorId || detectCreatorIdFromLocation();
+  if (!detectedCreatorId) {
+    throw new Error("creatorId is required (or run on <creator>.fanbox.cc page).");
   }
+  const parsedLimit = Number(limit);
+  const normalizedLimit = Number.isFinite(parsedLimit)
+    ? Math.max(1, Math.min(100, Math.trunc(parsedLimit)))
+    : 50;
 
   const rootHandle =
     explicitHandle || (await ensureDownloadDirectory(forcePickDirectory));
-  const creatorDir = await rootHandle.getDirectoryHandle(creatorId, { create: true });
+  const creatorDir = await rootHandle.getDirectoryHandle(detectedCreatorId, { create: true });
 
   const seen = new Set();
   let fetched = 0;
+  let skipped = 0;
+  let failed = 0;
   const postSummaries = [];
 
   const authHeaders = await resolveAuthHeaders();
@@ -75,7 +94,7 @@ async function downloadFanboxPosts(options) {
   // 整理现有文件，构建已完成集合
   let existingEntries = [];
   if (resume) {
-    existingEntries = await collectExistingPosts(creatorDir, creatorId);
+    existingEntries = await collectExistingPosts(creatorDir);
   }
   const state = resume ? await loadState(creatorDir) : { completed: [] };
   const completedSet = new Set([...(state.completed || []), ...existingEntries]);
@@ -83,8 +102,8 @@ async function downloadFanboxPosts(options) {
   let sinceLastPersist = 0;
 
   const firstUrl = new URL("https://api.fanbox.cc/post.listCreator");
-  firstUrl.searchParams.set("creatorId", creatorId);
-  firstUrl.searchParams.set("limit", String(limit));
+  firstUrl.searchParams.set("creatorId", detectedCreatorId);
+  firstUrl.searchParams.set("limit", String(normalizedLimit));
   firstUrl.searchParams.set("withPinned", "true");
 
   let nextUrl = firstUrl.toString();
@@ -115,7 +134,7 @@ async function downloadFanboxPosts(options) {
 
   if (!postSummaries.length) {
     console.warn("[fanbox] post.listCreator 未返回内容，尝试 post.paginateCreator 回退。");
-    const urls = await fetchPaginateUrls(creatorId, authHeaders, retryConfig);
+    const urls = await fetchPaginateUrls(detectedCreatorId, authHeaders, retryConfig);
     for (const pageUrl of urls) {
       const pageData = await fetchJson(pageUrl, authHeaders, retryConfig);
       const items = pageData.body || [];
@@ -141,7 +160,7 @@ async function downloadFanboxPosts(options) {
     if (resume) {
       if (completedSet.has(postId)) {
         console.log(`[fanbox] skip completed ${postId}`);
-        console.log(`[fanbox] skip existing file ${postId}`);
+        skipped += 1;
         continue;
       }
     }
@@ -151,6 +170,7 @@ async function downloadFanboxPosts(options) {
       detail = await fetchPostDetail(postId, authHeaders, retryConfig);
     } catch (error) {
       console.error(`[fanbox] 获取详情失败，跳过 ${postId}:`, error);
+      failed += 1;
       if (resume) {
         await saveState(creatorDir, completedSet);
       }
@@ -158,10 +178,11 @@ async function downloadFanboxPosts(options) {
     }
     if (!detail) {
       console.warn(`[fanbox] empty detail for ${postId}`);
+      failed += 1;
       continue;
     }
     const { bodyType, bodyText } = extractBody(detail);
-    const yaml = buildYamlFrontmatter(detail, bodyType, creatorId);
+    const yaml = buildYamlFrontmatter(detail, bodyType, detectedCreatorId);
     await writeFile(creatorDir, `${postId}.meta.json`, JSON.stringify(detail, null, 2));
     await writeFile(creatorDir, `${postId}.txt`, `${yaml}${bodyText}\n`);
     fetched += 1;
@@ -182,7 +203,19 @@ async function downloadFanboxPosts(options) {
     await saveState(creatorDir, completedSet);
   }
 
-  console.log(`[fanbox] 完成，共写入 ${fetched} 篇文章。目标目录：`, creatorDir);
+  const summary = {
+    creatorId: detectedCreatorId,
+    fetched,
+    skipped,
+    failed,
+    totalCandidates: postSummaries.length,
+    outputDir: creatorDir,
+  };
+  console.log(
+    `[fanbox] 完成，新增 ${fetched}，跳过 ${skipped}，失败 ${failed}。目标目录：`,
+    creatorDir
+  );
+  return summary;
 }
 
 async function fetchJson(url, headers, retryOptions = {}) {
@@ -334,7 +367,11 @@ async function loadState(dirHandle) {
     const fileHandle = await dirHandle.getFileHandle(".fanbox_state.json", { create: false });
     const file = await fileHandle.getFile();
     const text = await file.text();
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+    const completed = Array.isArray(parsed?.completed)
+      ? parsed.completed.map((id) => String(id))
+      : [];
+    return { completed };
   } catch (err) {
     return { completed: [] };
   }
@@ -360,7 +397,7 @@ async function fileExists(dirHandle, filename) {
   }
 }
 
-async function collectExistingPosts(dirHandle, creatorId) {
+async function collectExistingPosts(dirHandle) {
   const files = [];
   for await (const entry of dirHandle.values()) {
     if (entry.kind === "file" && entry.name.endsWith(".txt")) {

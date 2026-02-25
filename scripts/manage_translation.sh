@@ -18,6 +18,18 @@ create_latest_link() {
     ln -sf "$LOG_FILE" "$LATEST_LOG"
 }
 
+run_with_script_log() {
+    local cmd="$1"
+    local log_file="$2"
+    # GNU script: script -q -f -c "<cmd>" <log>
+    # BSD/macOS script: script -qF <log> <cmd> [args...]
+    if script --version >/dev/null 2>&1; then
+        script -q -f -c "$cmd" "$log_file"
+    else
+        script -qF "$log_file" bash -lc "$cmd"
+    fi
+}
+
 build_translate_cmd() {
     local translate_bin="$1"
     shift
@@ -46,7 +58,7 @@ _start_fg() {
     echo "🚀 执行翻译命令: $translate_cmd"
     
     # 使用script记录日志并实时显示
-    script -q -f -c "$translate_cmd" "$LOG_FILE"
+    run_with_script_log "$translate_cmd" "$LOG_FILE"
 }
 
 # 后台运行翻译任务
@@ -73,7 +85,7 @@ _start_bg() {
     # 在tmux中运行翻译任务（使用vllm的成功模式）
     export LOG_FILE
     tmux new-session -d -s "$SESSION" \
-        "bash -lc 'script -q -f -c \"$translate_cmd\" \"$LOG_FILE\"'"
+        "bash -lc 'if script --version >/dev/null 2>&1; then script -q -f -c \"$translate_cmd\" \"$LOG_FILE\"; else script -qF \"$LOG_FILE\" bash -lc \"$translate_cmd\"; fi'"
     
     echo "$SESSION" > "$PID_FILE"
     echo "✅ 翻译任务已启动，tmux session: $SESSION"

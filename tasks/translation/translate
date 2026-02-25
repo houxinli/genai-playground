@@ -1,14 +1,14 @@
 #!/bin/bash
 # 翻译脚本的便捷调用器
 
-# 切换到脚本所在目录
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TRANSLATE_PY="$SCRIPT_DIR/src/translate.py"
 
 # 优先使用 llm conda 环境；若当前已在 llm 环境则直接调用 python
 if [ "${CONDA_DEFAULT_ENV:-}" = "llm" ]; then
-  python src/translate.py "$@"
+  python "$TRANSLATE_PY" "$@"
 elif command -v conda >/dev/null 2>&1; then
-  conda run -n llm python src/translate.py "$@"
+  conda run -n llm python "$TRANSLATE_PY" "$@"
 else
-  python src/translate.py "$@"
+  python "$TRANSLATE_PY" "$@"
 fi

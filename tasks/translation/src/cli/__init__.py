@@ -83,6 +83,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     
     # 日志配置
     parser.add_argument("--realtime-log", action="store_true", default=True, help="启用实时日志")
+    parser.add_argument("--stream", action="store_true", help="兼容参数：当前默认流式处理，传入后忽略")
     parser.add_argument("--debug", action="store_true", help="调试模式：降低重试、增强日志（已弃用，请使用--debug-files和--log-level）")
     parser.add_argument("--debug-files", action="store_true", help="调试文件模式：创建debug文件而不是正式输出文件")
     parser.add_argument("--repair-existing", action="store_true", help="对已有双语文件执行局部修复，仅翻译缺失或不合格的行")

@@ -367,18 +367,19 @@ def write_outputs(
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download all posts from a Fanbox creator.")
+    translation_root = Path(__file__).resolve().parents[1]
     parser.add_argument("--creator-id", required=True, help="Fanbox creator ID, e.g. momizi813")
     parser.add_argument("--session", help="FANBOXSESSID value (optional if env/cookie file provided)")
     parser.add_argument(
         "--cookie-file",
         type=Path,
-        default=Path(__file__).resolve().parents[2] / "data" / "fanbox-cookies.txt",
+        default=translation_root / "data" / "fanbox-cookies.txt",
         help="Path to Netscape cookie file containing FANBOXSESSID",
     )
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path(__file__).resolve().parents[2] / "data" / "fanbox",
+        default=translation_root / "data" / "fanbox",
         help="Directory to store downloads (default: tasks/translation/data/fanbox)",
     )
     parser.add_argument("--limit", type=int, default=50, help="Pagination size per API call (default 50)")
