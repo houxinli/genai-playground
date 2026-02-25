@@ -66,6 +66,31 @@
     --dry-run
   ```
 
+### `convert_bilingual_to_simplified.py`
+- 作用：批量将双语文件中的“译文行”统一为简体中文（不改原文行）。
+- 默认输出：`<原目录>_simp/同名文件.txt`（例如 `momizi813_bilingual_simp/9807258.txt`）。
+- 推荐（deterministic）：`opencc` backend
+  先准备本地 opencc（任选其一）：
+  ```bash
+  brew install opencc
+  # 或
+  conda run -n llm pip install opencc-python-reimplemented
+  ```
+  ```bash
+  conda run -n llm python tasks/translation/scripts/convert_bilingual_to_simplified.py \
+    tasks/translation/data/fanbox/momizi813_bilingual \
+    --output-dir tasks/translation/data/fanbox/momizi813_bilingual_simp \
+    --backend opencc
+  ```
+- 无 opencc 时可用 `llm` backend（OpenRouter）：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/convert_bilingual_to_simplified.py \
+    tasks/translation/data/fanbox/momizi813_bilingual \
+    --output-dir tasks/translation/data/fanbox/momizi813_bilingual_simp \
+    --backend llm \
+    --model x-ai/grok-4.1-fast
+  ```
+
 ## 4) 其他相关脚本位置
 
 - Pixiv 批量下载：`tasks/translation/src/scripts/batch_download_v1.py`
