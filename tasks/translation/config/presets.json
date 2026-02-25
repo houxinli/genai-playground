@@ -1,0 +1,20 @@
+{
+  "fanbox_grok4": {
+    "llm_provider": "openrouter",
+    "model": "x-ai/grok-4",
+    "bilingual_simple": true,
+    "prompt_style": "fanfic",
+    "token_estimator": "simple",
+    "disable_llm_qc": true,
+    "line_batch_size_lines": 40,
+    "context_lines": 3
+  },
+  "fanbox_grok4_fast": {
+    "llm_provider": "openrouter",
+    "model": "x-ai/grok-4-fast",
+    "bilingual_simple": true,
+    "prompt_style": "fanfic",
+    "token_estimator": "simple",
+    "disable_llm_qc": true
+  }
+}

@@ -3,6 +3,7 @@
 翻译流程控制模块
 """
 
+import os
 import time
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
@@ -13,6 +14,7 @@ from .quality_checker import QualityChecker
 from .translator import Translator
 from .file_handler import FileHandler
 from .enhanced_mode import EnhancedModeHandler
+from .task import TranslationTask
 from ..utils.file import parse_yaml_front_matter
 
 
@@ -27,6 +29,16 @@ class TranslationPipeline:
             config: 翻译配置
         """
         self.config = config
+        # 始终使用流式（用户要求仅保留流式路径）
+        self.config.stream = True
+
+        # 配置 token 估算策略，必要时强制简易模式
+        if getattr(self.config, "token_estimator", "auto") == "simple":
+            os.environ["TRANSLATION_FORCE_SIMPLE_ESTIMATOR"] = "1"
+            # ensure remote download stays disabled
+            os.environ.setdefault("TRANSLATION_SKIP_REMOTE_TOKENIZER", "1")
+        else:
+            os.environ.pop("TRANSLATION_FORCE_SIMPLE_ESTIMATOR", None)
         
         # 初始化组件（默认开启文件日志；仅当realtime_log关闭且无法定位文件时才退回控制台）
         self.logger = UnifiedLogger.create_console_only()
@@ -58,34 +70,39 @@ class TranslationPipeline:
             return 0
         
         # 查找文件
-        files_to_process = self.file_handler.find_files_to_process(inputs)
-        
-        if not files_to_process:
-            self.logger.warning("没有找到需要处理的文件")
-            return 0
-        
-        self.logger.info(f"开始处理 {len(files_to_process)} 个文件")
-        
-        # 应用限制
-        if self.config.offset > 0:
-            files_to_process = files_to_process[self.config.offset:]
-            self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(files_to_process)} 个文件")
-        
-        if self.config.limit > 0:
-            files_to_process = files_to_process[:self.config.limit]
-            self.logger.info(f"限制处理文件数量为: {len(files_to_process)}")
-        
-        # 处理文件
-        success_count = 0
-        
+        target_total = 0
         if self.config.enhanced_mode:
+            files_to_process = self.file_handler.find_files_to_process(inputs)
+            if not files_to_process:
+                self.logger.warning("没有找到需要处理的文件")
+                return 0
+            if self.config.offset > 0:
+                files_to_process = files_to_process[self.config.offset:]
+                self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(files_to_process)} 个文件")
+            if self.config.limit > 0:
+                files_to_process = files_to_process[:self.config.limit]
+                self.logger.info(f"限制处理文件数量为: {len(files_to_process)} 个文件")
+            target_total = len(files_to_process)
+            self.logger.info(f"开始处理 {target_total} 个文件")
             # 增强模式：处理双语文件
             success_count = self._run_enhanced_mode(files_to_process)
         else:
+            tasks_to_process = self.file_handler.plan_tasks(inputs)
+            if not tasks_to_process:
+                self.logger.warning("没有找到需要处理的文件")
+                return 0
+            if self.config.offset > 0:
+                tasks_to_process = tasks_to_process[self.config.offset:]
+                self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(tasks_to_process)} 个文件")
+            if self.config.limit > 0:
+                tasks_to_process = tasks_to_process[:self.config.limit]
+                self.logger.info(f"限制处理文件数量为: {len(tasks_to_process)} 个文件")
+            target_total = len(tasks_to_process)
+            self.logger.info(f"开始处理 {target_total} 个文件")
             # 普通模式：处理原始文件
-            success_count = self._run_normal_mode(files_to_process)
+            success_count = self._run_normal_mode(tasks_to_process)
         
-        self.logger.info(f"处理完成: {success_count}/{len(files_to_process)} 个文件成功")
+        self.logger.info(f"处理完成: {success_count}/{target_total} 个文件成功")
         return success_count
     
     def _run_enhanced_mode(self, files_to_process: List[Path]) -> int:
@@ -111,7 +128,12 @@ class TranslationPipeline:
             custom_basename = None
             if self.config.enhanced_mode and getattr(self.config, 'enhanced_output', 'copy') == 'copy':
                 custom_basename = f"{file_path.stem}_enhanced"
-            self.logger = UnifiedLogger.create_for_file(file_path, log_dir, stream_output=False, custom_basename=custom_basename)
+            self.logger = UnifiedLogger.create_for_file(
+                file_path,
+                log_dir,
+                stream_output=bool(self.config.realtime_log),
+                custom_basename=custom_basename,
+            )
             # 将新日志器分发到组件
             self.enhanced_handler.logger = self.logger
             if hasattr(self.enhanced_handler, 'streaming_handler') and self.enhanced_handler.streaming_handler:
@@ -134,11 +156,12 @@ class TranslationPipeline:
         
         return success_count
     
-    def _run_normal_mode(self, files_to_process: List[Path]) -> int:
+    def _run_normal_mode(self, tasks_to_process: List[TranslationTask]) -> int:
         """运行普通模式"""
         success_count = 0
-        for i, file_path in enumerate(files_to_process, 1):
-            self.logger.info(f"处理文件 {i}/{len(files_to_process)}: {file_path}")
+        for i, task in enumerate(tasks_to_process, 1):
+            display_path = task.original_path or task.output_path
+            self.logger.info(f"处理文件 {i}/{len(tasks_to_process)}: {display_path}")
             
             # 在显式调试模式下限制重试次数以加快迭代
             if getattr(self.config, 'debug', False):
@@ -146,13 +169,25 @@ class TranslationPipeline:
                     self.logger.info("调试模式下将重试次数限制为 1")
                     self.config.retries = 1
 
-            if self.process_file(file_path):
+            if self.process_task(task):
                 success_count += 1
             else:
-                self.logger.error(f"文件处理失败: {file_path}")
+                self.logger.error(f"文件处理失败: {display_path}")
         
         return success_count
     
+    def process_task(self, task: TranslationTask) -> bool:
+        if task.mode == "repair":
+            target = task.existing_bilingual_path or task.output_path
+            self.logger.error(
+                f"暂未在 translate.py 中支持修复流程，请使用 scripts/repair_bilingual.py 处理: {target}"
+            )
+            return False
+        if not task.original_path:
+            self.logger.error("缺少原文路径，暂不支持此任务类型")
+            return False
+        return self.process_file(task.original_path)
+
     def process_file(self, path: Path) -> bool:
         """
         处理单个文件
@@ -169,7 +204,11 @@ class TranslationPipeline:
         UnifiedLogger._debug_files_mode = self.config.debug_files
         UnifiedLogger._log_level = self.config.log_level
         log_dir = path.parent if self.config.debug_files else self.config.log_dir
-        self.logger = UnifiedLogger.create_for_file(path, log_dir, stream_output=False)
+        self.logger = UnifiedLogger.create_for_file(
+            path,
+            log_dir,
+            stream_output=bool(self.config.realtime_log),
+        )
         self.translator.logger = self.logger
         self.file_handler.logger = self.logger
         # 同步更新质量检测与流式处理器上的logger，避免控制台重复调试输出
@@ -245,6 +284,7 @@ class TranslationPipeline:
                     # 1) 收集四个目标键的原值
                     title_v = None
                     caption_v = None
+                    excerpt_v = None
                     series_title_v = None
                     tags_v: list[str] | None = None
                     for ln in yaml_raw.splitlines():
@@ -253,6 +293,8 @@ class TranslationPipeline:
                             title_v = s.split(':',1)[1].strip()
                         elif s.startswith('caption:'):
                             caption_v = s.split(':',1)[1].strip()
+                        elif s.startswith('excerpt:'):
+                            excerpt_v = s.split(':',1)[1].strip()
                         elif s.startswith('title:') and ln.startswith('  '):
                             # 可能是 series.title
                             series_title_v = s.split(':',1)[1].strip()
@@ -266,6 +308,8 @@ class TranslationPipeline:
                         batch_in['title'] = title_v
                     if caption_v is not None and caption_v.strip():
                         batch_in['caption'] = caption_v
+                    if excerpt_v is not None and excerpt_v.strip():
+                        batch_in['excerpt'] = excerpt_v
                     if series_title_v is not None and series_title_v.strip():
                         batch_in['series.title'] = series_title_v
                     elif series_title_v is not None and not series_title_v.strip():
@@ -273,6 +317,8 @@ class TranslationPipeline:
                     if tags_v is not None:
                         batch_in['tags'] = tags_v
                     batch_out, _, ok_batch, _ = self.translator.translate_yaml_kv_batch(batch_in)
+                    self.logger.debug(f"YAML KV输入: {batch_in}")
+                    self.logger.debug(f"YAML KV输出: {batch_out}")
                     # 3) 重建 YAML（双行原/译；tags 中文列表）
                     yaml_out_lines: list[str] = ["---"]
                     for ln in yaml_raw.splitlines():
@@ -283,6 +329,8 @@ class TranslationPipeline:
                             yaml_out_lines.append(f"{indent}title: {batch_out['title']}")
                         elif s.startswith('caption:') and 'caption' in batch_out and batch_out['caption'].strip():
                             yaml_out_lines.append(f"{indent}caption: {batch_out['caption']}")
+                        elif s.startswith('excerpt:') and 'excerpt' in batch_out and batch_out['excerpt'].strip():
+                            yaml_out_lines.append(f"{indent}excerpt: {batch_out['excerpt']}")
                         elif s.startswith('title:') and ln.startswith('  ') and 'series.title' in batch_out and batch_out['series.title'].strip():
                             yaml_out_lines.append(f"{indent}title: {batch_out['series.title']}")
                         elif s.startswith('tags:') and 'tags' in batch_out and isinstance(batch_out['tags'], list):
@@ -299,6 +347,7 @@ class TranslationPipeline:
                     # 1) 收集四个目标键的原值
                     title_v = None
                     caption_v = None
+                    excerpt_v = None
                     series_title_v = None
                     tags_v: list[str] | None = None
                     for ln in yaml_raw.splitlines():
@@ -307,6 +356,8 @@ class TranslationPipeline:
                             title_v = s.split(':',1)[1].strip()
                         elif s.startswith('caption:'):
                             caption_v = s.split(':',1)[1].strip()
+                        elif s.startswith('excerpt:'):
+                            excerpt_v = s.split(':',1)[1].strip()
                         elif s.startswith('title:') and ln.startswith('  '):
                             # 可能是 series.title
                             series_title_v = s.split(':',1)[1].strip()
@@ -320,6 +371,8 @@ class TranslationPipeline:
                         batch_in['title'] = title_v
                     if caption_v is not None and caption_v.strip():
                         batch_in['caption'] = caption_v
+                    if excerpt_v is not None and excerpt_v.strip():
+                        batch_in['excerpt'] = excerpt_v
                     if series_title_v is not None and series_title_v.strip():
                         batch_in['series.title'] = series_title_v
                     elif series_title_v is not None and not series_title_v.strip():
@@ -337,6 +390,8 @@ class TranslationPipeline:
                             yaml_out_lines.append(f"{indent}title: {batch_out['title']}")
                         elif s.startswith('caption:') and 'caption' in batch_out and batch_out['caption'].strip():
                             yaml_out_lines.append(f"{indent}caption: {batch_out['caption']}")
+                        elif s.startswith('excerpt:') and 'excerpt' in batch_out and batch_out['excerpt'].strip():
+                            yaml_out_lines.append(f"{indent}excerpt: {batch_out['excerpt']}")
                         elif s.startswith('title:') and ln.startswith('  ') and 'series.title' in batch_out and batch_out['series.title'].strip():
                             yaml_out_lines.append(f"{indent}title: {batch_out['series.title']}")
                         elif s.startswith('tags:') and 'tags' in batch_out and isinstance(batch_out['tags'], list):
@@ -396,7 +451,6 @@ class TranslationPipeline:
         self.logger.info(f"   模型: {self.config.model}")
         self.logger.info(f"   简化双语模式: {self.config.bilingual_simple}")
         self.logger.info(f"   增强模式: {self.config.enhanced_mode}")
-        self.logger.info(f"   流式输出: {self.config.stream}")
         self.logger.info(f"   实时日志: {self.config.realtime_log}")
         self.logger.info(f"   重试次数: {self.config.retries}")
         self.logger.info(f"   重试等待: {self.config.retry_wait} 秒")
@@ -601,8 +655,13 @@ class TranslationPipeline:
         
         self.logger.info(f"✅ 更新双语文件YAML部分: {output_path}")
 
-    def _update_bilingual_file_batch(self, output_path: Path, batch_start_idx: int, batch_end_idx: int, 
-                                    bilingual_lines: list) -> None:
+    def _update_bilingual_file_batch(
+        self,
+        output_path: Path,
+        batch_start_idx: int,
+        batch_end_idx: int,
+        bilingual_pairs: List[Tuple[str, str]],
+    ) -> None:
         """
         更新双语文件中的特定批次行
         """
@@ -626,21 +685,22 @@ class TranslationPipeline:
         file_start_idx = yaml_end_idx + batch_start_idx * 2  # 每行原文+译文占2行
         file_end_idx = yaml_end_idx + batch_end_idx * 2
         
-        # 更新文件内容
-        bilingual_lines_split = []
-        for line in bilingual_lines:
-            bilingual_lines_split.extend(line.split('\n'))
+        # 确保文件内容长度足够
+        if file_end_idx > len(lines):
+            lines.extend(['\n'] * (file_end_idx - len(lines)))
         
-        for i, bilingual_line in enumerate(bilingual_lines_split):
-            file_idx = file_start_idx + i
+        # 更新文件内容（成对写入原文/译文）
+        for offset, (orig_line, trans_line) in enumerate(bilingual_pairs):
+            file_idx = file_start_idx + offset * 2
             if file_idx < len(lines):
-                # 替换对应的行
-                lines[file_idx] = bilingual_line + '\n'
+                lines[file_idx] = orig_line.rstrip('\n') + '\n'
+            if file_idx + 1 < len(lines):
+                lines[file_idx + 1] = trans_line.rstrip('\n') + '\n'
         
         # 写回文件
         with open(output_path, 'w', encoding='utf-8') as f:
             f.writelines(lines)
-        
+       
         self.logger.info(f"✅ 更新双语文件批次 {batch_start_idx+1}-{batch_end_idx}: {output_path}")
 
     def _translate_text_simple_bilingual(self, text_content: str) -> str:
@@ -673,7 +733,7 @@ class TranslationPipeline:
         batch_size = self.config.line_batch_size_lines
         context_size = self.config.context_lines
         
-        translated_lines = []
+        translations_map: Dict[int, str] = {}
         # 预处理：收集所有有内容的行及其索引
         content_lines = []
         content_indices = []
@@ -736,27 +796,37 @@ class TranslationPipeline:
             
             # 调用简化翻译
             chinese_lines, prompt, success, token_stats, current_io = self.translator.translate_lines_simple(
-                batch_content_lines, previous_io=previous_io, start_line_number=content_i + 1
+                batch_content_lines,
+                previous_io=previous_io,
+                start_line_number=content_i + 1,
+                context_lines=[line.strip('\n') for line in context_lines],
             )
             
             if success and len(chinese_lines) == len(batch_content_lines):
                 # 使用统一的bilingual工具函数拼接原文和译文
                 from ..utils.format import create_bilingual_output
                 
-                # 准备原文和译文行
+                # 准备原文和译文行，并记录到映射中
                 orig_lines = batch_content_lines
+                batch_pairs: List[Tuple[str, str]] = []
+                for idx_in_body, orig_line, trans_line in zip(batch_content_indices, orig_lines, chinese_lines):
+                    translations_map[idx_in_body] = trans_line
+                    batch_pairs.append((orig_line, trans_line))
+                
                 bilingual_result = create_bilingual_output(orig_lines, chinese_lines)
                 
                 # 记录对照版结果到日志
                 self.logger.debug(f"批次对照结果（有内容行 {content_i+1}-{content_end_idx}）:\n{bilingual_result}")
                 
-                # 将对照结果按行添加到翻译结果中
-                translated_lines.extend(bilingual_result.split('\n'))
-                
                 # 更新预创建的双语文件
-                current_output_path = self._get_output_path(self.current_file_path)
-                self._update_bilingual_file_batch(current_output_path, content_i, content_end_idx, 
-                                                bilingual_result.split('\n'))
+                if batch_pairs:
+                    current_output_path = self._get_output_path(self.current_file_path)
+                    self._update_bilingual_file_batch(
+                        current_output_path,
+                        content_i,
+                        content_end_idx,
+                        batch_pairs,
+                    )
                 
                 # 更新前一次的输入输出（用于下一批次的上下文）
                 # 使用翻译器返回的 current_io
@@ -805,89 +875,69 @@ class TranslationPipeline:
                         j += 1
                     
                     if fallback_content_lines:
-                        # 翻译有内容的行
-                        chinese_lines, _, success, _, current_io = self.translator.translate_lines_simple(fallback_content_lines, previous_io=previous_io)
+                        fallback_start_idx = content_i
+                        fallback_pairs: List[Tuple[str, str]] = []
+                        from ..utils.format import create_bilingual_output
+                        chinese_lines, _, success, _, current_io = self.translator.translate_lines_simple(
+                            fallback_content_lines,
+                            previous_io=previous_io,
+                        )
                         
                         if success and len(chinese_lines) == len(fallback_content_lines):
-                            # 使用统一的bilingual工具函数拼接
-                            from ..utils.format import create_bilingual_output
-                            
                             bilingual_result = create_bilingual_output(fallback_content_lines, chinese_lines)
-                            
-                            # 记录小批次对照结果到日志
-                            self.logger.debug(f"小批次对照结果（有内容行 {content_i+1}-{content_i+len(fallback_content_lines)}）:\n{bilingual_result}")
-                            
-                            # 将对照结果按行添加到翻译结果中
-                            translated_lines.extend(bilingual_result.split('\n'))
-                            
-                            # 更新前一次的输入输出（使用翻译器返回的 current_io）
+                            self.logger.debug(
+                                f"小批次对照结果（有内容行 {content_i+1}-{content_i+len(fallback_content_lines)}）:\n{bilingual_result}"
+                            )
+                            for idx, trans_line in enumerate(chinese_lines):
+                                target_body_idx = fallback_content_indices[idx]
+                                translations_map[target_body_idx] = trans_line
+                                fallback_pairs.append((fallback_content_lines[idx], trans_line))
                             previous_io = current_io
-                            
-                            # 跳过已处理的行
-                            content_i = content_i + len(fallback_content_lines)
-                            # fallback成功：保持当前较小批量，后续通过连续成功逐步回升
                             self.logger.info("fallback成功，保持当前较小批量，后续根据成功次数逐步回升")
                         else:
-                            # 小批次也失败，根据模式决定处理方式
                             if self.config.debug:
-                                # debug模式：逐行处理有内容的行
                                 self.logger.warning(f"小批次翻译失败，逐行处理有内容的行")
                                 for idx, orig_line in enumerate(fallback_content_lines):
                                     single_line = [orig_line]
-                                    chinese_lines, _, success, _, current_io = self.translator.translate_lines_simple(single_line, previous_io=previous_io)
-                                
-                                if success and len(chinese_lines) == 1:
-                                    # 使用统一的bilingual工具函数拼接单行
-                                    from ..utils.format import create_bilingual_output
-                                    
-                                    bilingual_result = create_bilingual_output([orig_line], chinese_lines)
-                                    
-                                    # 记录单行对照结果到日志
-                                    self.logger.debug(f"单行对照结果（第 {content_i+idx+1} 行）:\n{bilingual_result}")
-                                    
-                                    # 将对照结果按行添加到翻译结果中
-                                    translated_lines.extend(bilingual_result.split('\n'))
-                                    
-                                    # 更新前一次的输入输出
-                                    previous_io = current_io
-                                else:
-                                    # 完全失败，保留原文
-                                    self.logger.error(f"第 {content_i+idx+1} 行翻译完全失败，保留原文")
-                                    
-                                    # 使用统一的bilingual工具函数处理失败情况
-                                    from ..utils.format import create_bilingual_output
-                                    
-                                    # 非debug模式下，在译文部分标明"翻译失败"
-                                    if self.config.debug:
-                                        # debug模式：译文部分也是原文
-                                        bilingual_result = create_bilingual_output([orig_line], [orig_line])
+                                    single_trans, _, success, _, current_io = self.translator.translate_lines_simple(
+                                        single_line,
+                                        previous_io=previous_io,
+                                    )
+                                    target_body_idx = fallback_content_indices[idx]
+                                    if success and len(single_trans) == 1:
+                                        translation = single_trans[0]
+                                        self.logger.debug(
+                                            f"单行对照结果（第 {content_i+idx+1} 行）:\n"
+                                            f"{create_bilingual_output([orig_line], [translation])}"
+                                        )
+                                        previous_io = current_io
                                     else:
-                                        # 非debug模式：译文部分标明"翻译失败"
-                                        bilingual_result = create_bilingual_output([orig_line], ["[翻译失败]"])
-                                    
-                                    # 记录失败对照结果到日志
-                                    self.logger.debug(f"失败对照结果（第 {content_i+idx+1} 行）:\n{bilingual_result}")
-                                    
-                                    # 将对照结果按行添加到翻译结果中
-                                    translated_lines.extend(bilingual_result.split('\n'))
-                            
-                                # 跳过已处理的行
-                                content_i = content_i + len(fallback_content_lines)
-                                # 逐行处理完成：保持当前较小批量，后续逐步回升
-                                self.logger.info("逐行处理完成，保持当前较小批量，后续根据成功次数逐步回升")
+                                        translation = orig_line
+                                        self.logger.error(f"第 {content_i+idx+1} 行翻译完全失败，保留原文")
+                                        self.logger.debug(
+                                            f"失败对照结果（第 {content_i+idx+1} 行）:\n"
+                                            f"{create_bilingual_output([orig_line], [translation])}"
+                                        )
+                                    translations_map[target_body_idx] = translation
+                                    fallback_pairs.append((orig_line, translation))
                             else:
-                                # 非debug模式：直接标记所有行为"翻译失败"
                                 self.logger.warning(f"小批次翻译失败，非debug模式下标记所有行为翻译失败")
-                                from ..utils.format import create_bilingual_output
-                                
                                 for idx, orig_line in enumerate(fallback_content_lines):
-                                    bilingual_result = create_bilingual_output([orig_line], ["[翻译失败]"])
-                                    translated_lines.extend(bilingual_result.split('\n'))
-                                
-                                # 跳过已处理的行
-                                content_i = content_i + len(fallback_content_lines)
-                                # 非debug失败标记处理完成：保持当前较小批量，后续逐步回升
-                                self.logger.info("非debug模式失败处理完成，保持当前较小批量，后续根据成功次数逐步回升")
+                                    target_body_idx = fallback_content_indices[idx]
+                                    translation = "[翻译失败]"
+                                    translations_map[target_body_idx] = translation
+                                    fallback_pairs.append((orig_line, translation))
+                        
+                        if fallback_pairs:
+                            current_output_path = self._get_output_path(self.current_file_path)
+                            self._update_bilingual_file_batch(
+                                current_output_path,
+                                fallback_start_idx,
+                                fallback_start_idx + len(fallback_pairs),
+                                fallback_pairs,
+                            )
+                            content_i = fallback_start_idx + len(fallback_pairs)
+                        self.logger.info("逐行处理完成，保持当前较小批量，后续根据成功次数逐步回升")
                     else:
                         # 没有找到有内容的行，跳过空白行
                         self.logger.warning(f"从第 {content_i+1} 行开始没有找到有内容的行，跳过空白行")
@@ -901,30 +951,17 @@ class TranslationPipeline:
             result_lines.extend(lines[:start_idx])
         
         # 创建完整行映射：将翻译结果映射回原始文件结构
-        full_translated_lines = []
-        content_idx = 0
-        
-        for i, line in enumerate(body_lines):
+        for idx_body, line in enumerate(body_lines):
             if line.strip():  # 有内容的行
-                if content_idx < len(translated_lines):
-                    # 添加原文和译文
-                    full_translated_lines.append(translated_lines[content_idx])
-                    if content_idx + 1 < len(translated_lines):
-                        full_translated_lines.append(translated_lines[content_idx + 1])
-                    content_idx += 2
-                else:
-                    # 未翻译的行，按要求标记译文为[翻译失败]
-                    full_translated_lines.append(line.rstrip())
-                    full_translated_lines.append("[翻译失败]")
+                result_lines.append(line.rstrip())
+                translation = translations_map.get(idx_body, "[翻译失败]")
+                result_lines.append(translation)
             else:  # 空白行
-                full_translated_lines.append("")
-        
-        # 添加翻译后的正文
-        result_lines.extend(full_translated_lines)
+                result_lines.append("")
         
         # 统计翻译情况
         total_content_lines = len(content_lines)
-        translated_count = len(translated_lines) // 2  # 每行原文+译文
+        translated_count = len(translations_map)
         remaining_content_lines = total_content_lines - content_i  # 未处理的有内容行数
         
         if self.config.debug and content_i < total_content_lines:

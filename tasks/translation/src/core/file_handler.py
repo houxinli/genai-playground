@@ -12,6 +12,7 @@ from typing import List, Tuple, Optional, Dict
 from .config import TranslationConfig
 from .logger import UnifiedLogger
 from .quality_checker import QualityChecker
+from .task import TranslationTask
 from ..utils.file import parse_yaml_front_matter
 
 
@@ -46,6 +47,100 @@ class FileHandler:
             return len(content)
         except Exception:
             return 0
+
+    def _looks_like_bilingual_file(self, file_path: Path) -> bool:
+        """判断文件是否为双语产物（含 _bilingual/_bilingual_fixed 等）。"""
+        markers = ("_bilingual", "_bilingual_fixed", "_awq_bilingual", "_awq_bilingual_fixed")
+        name = file_path.name
+        if any(marker in name for marker in markers):
+            return True
+        for ancestor in file_path.parents:
+            if any(marker in ancestor.name for marker in ("_bilingual", "_bilingual_fixed")):
+                return True
+            # 不需要遍历到根目录
+            if ancestor.parent == ancestor:
+                break
+        return False
+
+    def _should_repair_source(self, file_path: Path) -> bool:
+        """修复模式下判断文件是否可作为原文输入。"""
+        if not file_path.is_file():
+            return False
+        disallowed_suffixes = (
+            "_zh.txt",
+            "_awq_zh.txt",
+            "_bilingual.txt",
+            "_awq_bilingual.txt",
+            "_bilingual_fixed.txt",
+            "_awq_bilingual_fixed.txt",
+        )
+        return not any(file_path.name.endswith(suffix) for suffix in disallowed_suffixes)
+
+    def _resolve_existing_bilingual_path(self, original_path: Path) -> Optional[Path]:
+        """根据原文推断已有的双语文件路径。"""
+        candidates = []
+        parent = original_path.parent
+        stem = original_path.stem
+        base_dir = parent.parent
+        base_name = parent.name
+        suffixes = [
+            "_bilingual",
+            "_bilingual_fixed",
+            "_awq_bilingual",
+            "_awq_bilingual_fixed",
+        ]
+        for suffix in suffixes:
+            candidates.append((base_dir / f"{base_name}{suffix}" / f"{stem}.txt"))
+        candidates.append(parent / f"{stem}_bilingual.txt")
+        candidates.append(parent / f"{stem}_bilingual_fixed.txt")
+        candidates.append(parent / f"{stem}_awq_bilingual.txt")
+        candidates.append(parent / f"{stem}_awq_bilingual_fixed.txt")
+        for candidate in candidates:
+            if candidate and candidate.exists():
+                return candidate
+        return None
+
+    def _resolve_original_for_bilingual(self, bilingual_path: Path) -> Optional[Path]:
+        """根据双语文件推断原文路径。"""
+        parent = bilingual_path.parent
+        stem = bilingual_path.stem
+        candidates = []
+        if parent.name.endswith("_bilingual_fixed"):
+            base_name = parent.name[: -len("_bilingual_fixed")]
+            candidates.append(parent.parent / base_name / f"{stem}.txt")
+        if parent.name.endswith("_bilingual"):
+            base_name = parent.name[: -len("_bilingual")]
+            candidates.append(parent.parent / base_name / f"{stem}.txt")
+        if stem.endswith("_bilingual_fixed"):
+            candidates.append(parent / f"{stem[: -len('_bilingual_fixed')]}.txt")
+        if stem.endswith("_bilingual"):
+            candidates.append(parent / f"{stem[: -len('_bilingual')]}.txt")
+        if stem.endswith("_awq_bilingual_fixed"):
+            candidates.append(parent / f"{stem[: -len('_awq_bilingual_fixed')]}.txt")
+        if stem.endswith("_awq_bilingual"):
+            candidates.append(parent / f"{stem[: -len('_awq_bilingual')]}.txt")
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _resolve_repair_output_path(
+        self,
+        reference_path: Path,
+        original_path: Optional[Path] = None,
+    ) -> Path:
+        """根据参考路径生成修复输出路径。"""
+        base = original_path or reference_path
+        parent = base.parent
+        stem = base.stem
+        if parent.name.endswith("_bilingual_fixed"):
+            output_dir = parent
+        elif parent.name.endswith("_bilingual"):
+            output_dir = parent.parent / f"{parent.name}_fixed"
+        else:
+            output_dir = parent.parent / f"{parent.name}_bilingual_fixed"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir / f"{stem}.txt"
     
     def process_file(self, file_path: Path) -> bool:
         """
@@ -159,7 +254,7 @@ class FileHandler:
                 return False
             
             # 检查是否包含错误模式
-            error_patterns = ["（以下省略）", "（省略）", "翻译失败", "无法翻译"]
+            error_patterns = ["（以下省略）", "（省略）", "无法翻译"]
             for pattern in error_patterns:
                 if pattern in content:
                     return False
@@ -210,31 +305,89 @@ class FileHandler:
     
     def find_files_to_process(self, inputs: List[str]) -> List[Path]:
         """查找需要处理的文件"""
-        files = []
-        
+        return [
+            task.original_path
+            for task in self.plan_tasks(inputs)
+            if task.original_path is not None
+        ]
+
+    def plan_tasks(self, inputs: List[str]) -> List[TranslationTask]:
+        """根据输入路径规划翻译/修复任务。"""
+        files: List[Path] = []
         for input_path in inputs:
             path = Path(input_path)
-            
             if path.is_file():
                 files.append(path)
             elif path.is_dir():
-                # 查找目录中的txt文件并按自然顺序排序
                 txt_files = sorted(path.glob("*.txt"), key=lambda x: self._natural_sort_key(x.name))
                 files.extend(txt_files)
             else:
-                # 尝试glob模式
                 glob_files = glob.glob(input_path)
                 files.extend([Path(f) for f in glob_files if Path(f).is_file()])
-        
-        # 过滤掉不需要处理的文件
-        filtered_files = []
+
+        filtered_items: List[Tuple[Path, str]] = []
         for file_path in files:
+            if not file_path.is_file():
+                continue
+            if self._looks_like_bilingual_file(file_path):
+                filtered_items.append((file_path, "repair_bilingual"))
+                continue
+            if self.config.repair_existing:
+                if self._should_repair_source(file_path):
+                    filtered_items.append((file_path, "repair_original"))
+                continue
             if self._should_process_file(file_path):
-                filtered_files.append(file_path)
-        
-        # 按长度排序（如果启用）
+                filtered_items.append((file_path, "translate"))
+
         if self.config.sort_by_length:
-            filtered_files.sort(key=lambda x: self._get_file_length(x), reverse=True)
-            self.logger.info(f"按文件长度排序（从长到短）")
-        
-        return filtered_files
+            filtered_items.sort(key=lambda item: self._get_file_length(item[0]), reverse=True)
+            self.logger.info("按文件长度排序（从长到短）")
+
+        tasks: List[TranslationTask] = []
+        for file_path, kind in filtered_items:
+            if kind == "translate":
+                output_path = self._get_output_path(file_path)
+                tasks.append(
+                    TranslationTask(
+                        original_path=file_path,
+                        existing_bilingual_path=None,
+                        output_path=output_path,
+                        mode="translate",
+                    )
+                )
+            elif kind == "repair_original":
+                task = self._build_repair_task_from_original(file_path)
+                if task:
+                    tasks.append(task)
+            elif kind == "repair_bilingual":
+                task = self._build_repair_task_from_bilingual(file_path)
+                if task:
+                    tasks.append(task)
+        return tasks
+
+    def _build_repair_task_from_original(self, file_path: Path) -> Optional[TranslationTask]:
+        existing = self._resolve_existing_bilingual_path(file_path)
+        if not existing:
+            self.logger.warning(
+                f"未找到 {file_path} 对应的双语文件，跳过修复任务。"
+            )
+            return None
+        output_path = self._resolve_repair_output_path(existing, file_path)
+        return TranslationTask(
+            original_path=file_path,
+            existing_bilingual_path=existing,
+            output_path=output_path,
+            mode="repair",
+        )
+
+    def _build_repair_task_from_bilingual(self, file_path: Path) -> Optional[TranslationTask]:
+        if not file_path.exists():
+            return None
+        original = self._resolve_original_for_bilingual(file_path)
+        output_path = self._resolve_repair_output_path(file_path, original)
+        return TranslationTask(
+            original_path=original,
+            existing_bilingual_path=file_path,
+            output_path=output_path,
+            mode="repair",
+        )

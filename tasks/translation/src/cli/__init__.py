@@ -20,12 +20,18 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-p", dest="top_p", type=float, default=0.9, help="nucleus sampling top_p")
     parser.add_argument("--max-tokens", type=int, default=0, help="最大生成token数，<=0 表示不限制")
     parser.add_argument("--max-context-length", type=int, default=None, help="模型的最大上下文长度")
+
+    # 提供商与连接配置
+    parser.add_argument("--llm-provider", dest="llm_provider", choices=["vllm", "ollama", "openai", "openrouter"], default=None, help="LLM 提供商类型；可用 env LLM_PROVIDER 覆盖")
+    parser.add_argument("--llm-base-url", dest="llm_base_url", default=None, help="OpenAI 兼容 Base URL；可用 env LLM_BASE_URL 覆盖")
+    parser.add_argument("--llm-api-key", dest="llm_api_key", default=None, help="API Key；可用 env OPENROUTER_API_KEY / OPENAI_API_KEY / LLM_API_KEY 覆盖")
+    parser.add_argument("--preset", help="使用 config/presets.json 中的预设（命令行参数可继续覆盖）")
+    parser.add_argument("--presets-file", type=Path, default=None, help="自定义预设文件路径（默认指向 config/presets.json）")
     
     # 翻译模式配置
     parser.add_argument("--bilingual-simple", dest="bilingual_simple", action="store_true", help="启用简化双语模式（小批量翻译+代码拼接）")
     parser.add_argument("--enhanced-mode", dest="enhanced_mode", action="store_true", help="启用增强模式（QC检测+重新翻译）")
     parser.add_argument("--enhanced-output", dest="enhanced_output", choices=["copy", "inplace"], default="copy", help="增强模式输出策略：copy=生成新文件（默认），inplace=原地改写")
-    parser.add_argument("--stream", action="store_true", help="启用流式输出")
     
     # bilingual-simple模式配置
     parser.add_argument("--line-batch-size-lines", dest="line_batch_size_lines", type=int, default=50, help="简化双语模式每批翻译的行数（基于token分析优化）")
@@ -45,16 +51,19 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fallback-on-context", action="store_true", help="上下文溢出时自动降级为分块")
     
     # 质量检测配置
-    parser.add_argument("--no-llm-check", action="store_true", help="禁用LLM质量检测")
+    parser.add_argument("--no-llm-check", action="store_true", help="禁用LLM质量检测（旧标志）")
+    parser.add_argument("--disable-llm-qc", action="store_true", help="等同于 --no-llm-check，用于显式关闭 LLM 质检")
     parser.add_argument("--strict-repetition-check", action="store_true", help="启用严格重复检测")
     
     # 文件配置
     parser.add_argument("--overwrite", action="store_true", help="覆盖已存在的输出文件")
     parser.add_argument("--log-dir", default="logs", help="日志目录")
     parser.add_argument("--profiles-file", type=Path, default=None, help="可选：分节超参配置 JSON 文件路径")
-    parser.add_argument("--terminology-file", type=Path, help="术语文件路径")
+    parser.add_argument("--enable-terminology", action="store_true", help="启用术语表提示")
+    parser.add_argument("--terminology-file", type=Path, help="术语文件路径（需配合 --enable-terminology）")
     parser.add_argument("--sample-file", type=Path, help="示例文件路径")
     parser.add_argument("--preface-file", type=Path, help="前言文件路径")
+    parser.add_argument("--prompt-style", choices=["default", "fanfic"], default="default", help="Prompt 模板样式（位于 prompt_styles/ 下）")
     # 独立 YAML/正文提示资产（可选）
     parser.add_argument("--preface-yaml-file", type=Path, default=None, help="YAML 专用前言提示文件路径")
     parser.add_argument("--sample-yaml-file", type=Path, default=None, help="YAML 专用示例文件路径")
@@ -65,11 +74,18 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stop", nargs="*", default=["（未完待续）", "[END]", "<|im_end|>", "</s>"], help="停止词")
     parser.add_argument("--frequency-penalty", type=float, default=0.3, help="频率惩罚")
     parser.add_argument("--presence-penalty", type=float, default=0.2, help="存在惩罚")
+    parser.add_argument(
+        "--token-estimator",
+        choices=["auto", "simple"],
+        default="auto",
+        help="Token 估算模式：auto=尽量使用模型tokenizer，simple=全部采用简易估算并跳过远端加载",
+    )
     
     # 日志配置
-    parser.add_argument("--realtime-log", action="store_true", help="启用实时日志")
+    parser.add_argument("--realtime-log", action="store_true", default=True, help="启用实时日志")
     parser.add_argument("--debug", action="store_true", help="调试模式：降低重试、增强日志（已弃用，请使用--debug-files和--log-level）")
     parser.add_argument("--debug-files", action="store_true", help="调试文件模式：创建debug文件而不是正式输出文件")
+    parser.add_argument("--repair-existing", action="store_true", help="对已有双语文件执行局部修复，仅翻译缺失或不合格的行")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], default="INFO", help="日志级别：DEBUG=详细日志，INFO=普通日志，WARNING=警告及以上，ERROR=错误及以上，CRITICAL=严重错误")
     
     # 处理限制
@@ -130,21 +146,63 @@ def validate_args(args: argparse.Namespace) -> List[str]:
 def setup_default_paths(args: argparse.Namespace) -> None:
     """设置默认文件路径"""
     base_dir = Path(__file__).parent.parent.parent  # 从 src/cli/ 回到 translation/
-    
-    if not args.terminology_file:
-        args.terminology_file = base_dir / "data" / "terminology.txt"
-    
-    if not args.sample_file:
-        args.sample_file = base_dir / "data" / "samples" / "sample.txt"
-    
-    if not args.preface_file:
-        args.preface_file = base_dir / "data" / "preface.txt"
+    prompt_styles_dir = base_dir / "data" / "prompt_styles"
+    style_name = getattr(args, "prompt_style", None) or "default"
+    style_dir = prompt_styles_dir / style_name
+    if not style_dir.exists():
+        style_dir = prompt_styles_dir / "default"
+        style_name = "default"
+    args.prompt_style = style_name
 
-    # 设置 YAML/正文专用前言与示例（可选默认）
-    if not getattr(args, 'preface_yaml_file', None):
-        args.preface_yaml_file = base_dir / "data" / "preface_yaml.txt"
-    if not getattr(args, 'preface_body_file', None):
-        args.preface_body_file = base_dir / "data" / "preface_body.txt"
-    if not getattr(args, 'sample_yaml_file', None):
-        args.sample_yaml_file = base_dir / "data" / "samples" / "sample_yaml.txt"
+    def pick_path(attr: str, paths: List[Path]) -> None:
+        if getattr(args, attr, None):
+            return
+        for path in paths:
+            if path and path.exists():
+                setattr(args, attr, path)
+                return
+
+    data_dir = base_dir / "data"
+    samples_dir = data_dir / "samples"
+
+    if style_name == "default":
+        if args.enable_terminology:
+            pick_path("terminology_file", [data_dir / "terminology.txt"])
+        pick_path("sample_file", [samples_dir / "sample.txt"])
+        pick_path("preface_file", [data_dir / "preface.txt"])
+        pick_path("preface_yaml_file", [data_dir / "preface_yaml.txt"])
+        pick_path("preface_body_file", [data_dir / "preface_body.txt"])
+        pick_path("sample_yaml_file", [samples_dir / "sample_yaml.txt"])
+    else:
+        if args.enable_terminology:
+            pick_path("terminology_file", [
+                style_dir / "terminology.txt",
+                data_dir / "terminology.txt",
+            ])
+        pick_path("sample_file", [
+            style_dir / "sample.txt",
+            samples_dir / "sample.txt",
+        ])
+        pick_path("preface_file", [
+            style_dir / "preface.txt",
+            data_dir / "preface.txt",
+        ])
+        pick_path("preface_yaml_file", [
+            style_dir / "preface_yaml.txt",
+            data_dir / "preface_yaml.txt",
+        ])
+        pick_path("preface_body_file", [
+            style_dir / "preface_body.txt",
+            data_dir / "preface_body.txt",
+        ])
+        pick_path("sample_yaml_file", [
+            style_dir / "sample_yaml.txt",
+            samples_dir / "sample_yaml.txt",
+        ])
+    if not getattr(args, "presets_file", None):
+        presets_path = base_dir / "config" / "presets.json"
+        if presets_path.exists():
+            args.presets_file = presets_path
+    if not args.enable_terminology:
+        args.terminology_file = None
     # 示例可选：不强制存在

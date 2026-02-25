@@ -130,11 +130,20 @@ make translate-stop
 # 使用简化双语模式
 ./translate input.txt --bilingual-simple --stream
 
+# 跳过昂贵模型的 LLM 质检
+./translate input.txt --bilingual-simple --disable-llm-qc --stream
+
 # 自定义批处理大小
 ./translate input.txt --bilingual-simple --line-batch-size-lines 30 --stream
 
 # 自定义上下文行数
 ./translate input.txt --bilingual-simple --context-lines 5 --stream
+
+# 离线/受限环境可追加 --token-estimator simple，避免尝试下载 HuggingFace tokenizer
+./translate input.txt --bilingual-simple --token-estimator simple --stream
+
+# 使用预设与 fanfic Prompt 样式（示例）
+./translate data/fanbox/momizi813/3819932.txt --preset fanbox_grok4 --stream --overwrite
 ```
 
 ## 模型选择

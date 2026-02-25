@@ -82,3 +82,4 @@ tasks/sunday-movies/data/
 # Commit messages (temporary files)
 COMMIT_MESSAGE_*.txt
 COMMIT_MESSAGE_*.md
+oauth.json

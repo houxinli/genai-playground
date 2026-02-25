@@ -11,7 +11,7 @@ Pixiv 小说按作者批量直连下载（路线B）：
 
 配置与参数：
 - refresh-token 读取优先级：CLI --refresh-token > data/config.json > 环境变量 PIXIV_REFRESH_TOKEN
-- 默认测试参数：--limit 3 --offset 0 --workers 2 --rate-limit 1 --retries 5
+- 示例测试参数：--limit 10 --offset 0 --workers 2 --rate-limit 1 --retries 5
 
 注意：
 - 本脚本不启动任何外部服务；下载速率受 --rate-limit 限制，失败指数退避重试
@@ -361,7 +361,7 @@ def main() -> None:
         required=True,
         help="输出根目录，例：tasks/translation/data",
     )
-    parser.add_argument("--limit", type=int, default=3)
+    parser.add_argument("--limit", type=int, default=0, help="下载数量；<=0 表示不限（默认）")
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--rate-limit", type=float, default=1.0, help="每秒请求数上限（近似）")
@@ -399,13 +399,15 @@ def main() -> None:
     rate_state: List[float] = []
     written, skipped, failed = 0, 0, 0
 
+    effective_limit = args.limit if args.limit and args.limit > 0 else None
+
     with args.log.open("a", encoding="utf-8") as logf:
         logf.write(f"[{iso_now()}] START user={args.user_id} limit={args.limit} offset={args.offset} dry_run={args.dry_run}\n")
 
         for idx, item in enumerate(iter_user_novels(api, args.user_id)):
             if idx < args.offset:
                 continue
-            if len(collected) >= args.limit:
+            if effective_limit is not None and len(collected) >= effective_limit:
                 break
             novel_id = int(item.get("id") or item.get("novel_id"))
             collected.append(novel_id)
@@ -460,5 +462,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

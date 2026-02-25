@@ -30,7 +30,33 @@ class QualityChecker:
         """
         self.config = config
         self.logger = logger
-        self.client = OpenAI(base_url="http://localhost:8000/v1", api_key="dummy")
+        # 初始化 OpenAI 兼容客户端（支持 vLLM/Ollama/OpenAI/OpenRouter）
+        base_url = self.config.llm_base_url
+        provider = (self.config.llm_provider or "vllm").lower()
+        api_key = self.config.llm_api_key or "dummy"
+        if not base_url:
+            if provider == "vllm":
+                base_url = "http://localhost:8000/v1"
+                if not self.config.llm_api_key:
+                    api_key = "dummy"
+            elif provider == "ollama":
+                base_url = "http://localhost:11434/v1"
+                if not self.config.llm_api_key:
+                    api_key = "ollama"
+            elif provider == "openrouter":
+                base_url = "https://openrouter.ai/api/v1"
+            elif provider == "openai":
+                base_url = None
+        
+        # OpenRouter 需要额外的 headers（根据官方文档：https://openrouter.ai/docs/quickstart）
+        if provider == "openrouter":
+            default_headers = {
+                "HTTP-Referer": "https://github.com/houxinli/genai-playground",  # 用于排名展示
+                "X-Title": "Translation Tool"  # 用于排名展示
+            }
+            self.client = OpenAI(base_url=base_url, api_key=api_key, default_headers=default_headers, timeout=60)
+        else:
+            self.client = OpenAI(base_url=base_url, api_key=api_key, timeout=60)
         self.profile_manager = ProfileManager(config.profiles_file)
         self.streaming_handler = StreamingHandler(self.client, logger, config, self.profile_manager)
     

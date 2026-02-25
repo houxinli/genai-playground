@@ -33,8 +33,16 @@ def clean_output_text(text: str) -> str:
     original_lines = text.split('\n')
     cleaned_lines = []
     line_number_removed = False
+    # 需要剔除的上下文/提示标记，避免被视为译文
+    context_markers = {
+        "【最近上下文】",
+        "【上一批原文片段】",
+        "【上一批译文片段】",
+    }
     
     for line in original_lines:
+        if line.strip() in context_markers:
+            continue
         # 匹配行首的数字+点号模式 (如 "1. 内容" 或 "123. 内容")
         if re.match(r'^\d+\.\s*', line):
             cleaned_line = re.sub(r'^\d+\.\s*', '', line)

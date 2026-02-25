@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, Optional
 
 
 @dataclass(slots=True)
@@ -17,6 +17,8 @@ class RatingResult:
     url: str
     summary: Optional[str] = None
     confidence: float = 0.5
+    local_title: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class RatingFetcher(abc.ABC):
@@ -30,4 +32,3 @@ class RatingFetcher(abc.ABC):
     @abc.abstractmethod
     def fetch(self, title: str, *, year: Optional[int] = None) -> Optional[RatingResult]:
         """Return the best rating result for the given title."""
-
