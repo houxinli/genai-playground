@@ -153,17 +153,57 @@ def iterate_creator_posts(
     sleep: float,
     logger: logging.Logger,
 ) -> Iterable[Dict]:
-    pagination_url = f"{API_BASE}/post.paginateCreator"
-    params: Optional[Dict[str, str]] = {"creatorId": creator_id}
     session.headers["Referer"] = f"https://{creator_id}.fanbox.cc/"
-    top = fetch_json(session, pagination_url, params=params, logger=logger)
-    page_urls = top.get("body") or []
     fetched = 0
+    seen_post_ids = set()
+
+    # 主路径：post.listCreator（支持 limit + nextUrl）
+    page_size = max(1, min(int(limit or 50), 100))
+    next_url: Optional[str] = f"{API_BASE}/post.listCreator"
+    params: Optional[Dict[str, str]] = {
+        "creatorId": creator_id,
+        "limit": str(page_size),
+        "withPinned": "true",
+    }
+    try:
+        while next_url:
+            data = fetch_json(session, next_url, params=params, logger=logger)
+            body = data.get("body") or {}
+            items = body.get("items") or []
+            for item in items:
+                post_id = str(item.get("id"))
+                if post_id in seen_post_ids:
+                    continue
+                seen_post_ids.add(post_id)
+                yield item
+                fetched += 1
+                if max_posts and fetched >= max_posts:
+                    logger.debug("Reached max_posts=%s, stop pagination", max_posts)
+                    return
+            next_raw = body.get("nextUrl")
+            next_url = ensure_http_scheme(next_raw) if next_raw else None
+            params = None
+            if next_url and sleep > 0:
+                time.sleep(sleep)
+        if fetched > 0:
+            return
+        logger.warning("post.listCreator 未返回有效结果，回退 post.paginateCreator。")
+    except Exception as exc:
+        logger.warning("post.listCreator 调用失败，回退 post.paginateCreator: %s", exc)
+
+    # 回退路径：post.paginateCreator
+    pagination_url = f"{API_BASE}/post.paginateCreator"
+    top = fetch_json(session, pagination_url, params={"creatorId": creator_id}, logger=logger)
+    page_urls = top.get("body") or []
     for url in page_urls:
         page_url = ensure_http_scheme(url)
         data = fetch_json(session, page_url, logger=logger)
         items = data.get("body") or []
         for item in items:
+            post_id = str(item.get("id"))
+            if post_id in seen_post_ids:
+                continue
+            seen_post_ids.add(post_id)
             yield item
             fetched += 1
             if max_posts and fetched >= max_posts:

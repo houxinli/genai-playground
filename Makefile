@@ -1,4 +1,4 @@
-SHELL := /usr/bin/bash
+SHELL := /bin/bash
 
 CONDA_ENV := llm
 # 使用无缓冲输出，确保流式内容实时打印
@@ -8,6 +8,8 @@ PY := conda run -n $(CONDA_ENV) python -u
 export DEBUG ?= 0
 export MODE ?= bg
 export MODEL ?= Qwen/Qwen3-32B-AWQ
+export USER_ID ?=
+export CREATOR_ID ?=
 
 .PHONY: vllm vllm-start vllm-stop vllm-status vllm-restart vllm-test vllm-start-32b vllm-start-bg vllm-start-32b-bg vllm-logs vllm-logs-requests vllm-start-debug vllm-start-bg-debug
 
@@ -63,8 +65,29 @@ vllm-logs-requests:
 	@echo "📝 查看 vLLM 请求日志..."
 	./scripts/manage_vllm.sh logs-requests
 
+# 下载任务管理
+.PHONY: pixiv-download fanbox-download fanbox-browser-script
+
+pixiv-download:
+	@echo "📥 下载 Pixiv 作者小说..."
+	@echo "示例: make pixiv-download USER_ID=50235390 ARGS='--limit 20 --offset 0 --rate-limit 1 --retries 5'"
+	@if [ -z "$(USER_ID)" ]; then echo "❌ 请设置 USER_ID 参数"; exit 1; fi
+	$(PY) tasks/translation/src/scripts/batch_download_v1.py --user-id $(USER_ID) --output-root tasks/translation/data $(ARGS)
+
+fanbox-download:
+	@echo "📥 下载 Fanbox 创作者文章（终端版）..."
+	@echo "示例: make fanbox-download CREATOR_ID=momizi813 ARGS='--max-posts 20 --sleep 0.5'"
+	@if [ -z "$(CREATOR_ID)" ]; then echo "❌ 请设置 CREATOR_ID 参数"; exit 1; fi
+	$(PY) tasks/translation/scripts/fanbox_download.py --creator-id $(CREATOR_ID) $(ARGS)
+
+fanbox-browser-script:
+	@echo "🌐 Chrome/Edge 控制台脚本:"
+	@echo "  - 批量下载: tasks/translation/scripts/fanbox_browser_downloader.js"
+	@echo "  - 单篇下载: tasks/translation/scripts/fanbox_browser_snippet.js"
+	@echo "用法: 打开已登录 Fanbox 页面 -> F12 Console -> 粘贴脚本 -> 执行对应函数"
+
 # 翻译任务管理
-.PHONY: translate translate-start translate-start-fg translate-start-bg translate-batch translate-batch-fg translate-batch-bg translate-stop translate-status translate-logs translate-logs-follow translate-attach
+.PHONY: translate translate-bg translate-start translate-start-fg translate-start-bg translate-batch translate-batch-smart translate-batch-bg translate-stop translate-status translate-logs translate-logs-follow translate-attach monitor-translation
 
 # 翻译任务（前台模式）
 translate:
@@ -79,12 +102,37 @@ translate-bg:
 # 批量翻译（前台模式）
 translate-batch:
 	@echo "📝 批量翻译（前台模式，自动跳过已翻译文件）..."
-	./scripts/manage_translation.sh batch-fg $(ARGS)
+	@if [ -z "$(INPUT_DIR)" ] && [ -z "$(ARGS)" ]; then \
+		echo "❌ 请设置 INPUT_DIR 或 ARGS"; \
+		echo "示例1: make translate-batch INPUT_DIR=tasks/translation/data/pixiv/50235390"; \
+		echo "示例2: make translate-batch ARGS='tasks/translation/data/pixiv/50235390 --bilingual-simple --stream'"; \
+		exit 1; \
+	fi
+	@if [ -n "$(INPUT_DIR)" ]; then \
+		./scripts/manage_translation.sh batch-fg "$(INPUT_DIR)" --bilingual-simple --stream --realtime-log $(ARGS); \
+	else \
+		./scripts/manage_translation.sh batch-fg $(ARGS); \
+	fi
 
 # 批量翻译（后台模式）
 translate-batch-bg:
 	@echo "📝 批量翻译（后台模式，自动跳过已翻译文件）..."
-	./scripts/manage_translation.sh batch-bg $(ARGS)
+	@if [ -z "$(INPUT_DIR)" ] && [ -z "$(ARGS)" ]; then \
+		echo "❌ 请设置 INPUT_DIR 或 ARGS"; \
+		echo "示例1: make translate-batch-bg INPUT_DIR=tasks/translation/data/pixiv/50235390"; \
+		echo "示例2: make translate-batch-bg ARGS='tasks/translation/data/pixiv/50235390 --bilingual-simple --stream'"; \
+		exit 1; \
+	fi
+	@if [ -n "$(INPUT_DIR)" ]; then \
+		./scripts/manage_translation.sh batch-bg "$(INPUT_DIR)" --bilingual-simple --stream --realtime-log $(ARGS); \
+	else \
+		./scripts/manage_translation.sh batch-bg $(ARGS); \
+	fi
+
+# 智能批量翻译（兼容旧目标名）
+translate-batch-smart:
+	@echo "📝 智能批量翻译（兼容目标，等价于 translate-batch）..."
+	@$(MAKE) translate-batch INPUT_DIR="$(INPUT_DIR)" ARGS="$(ARGS)"
 
 # 翻译任务（根据MODE参数）
 translate-start:
@@ -131,17 +179,3 @@ translate-attach:
 monitor-translation:
 	@echo "🔍 监听翻译进度..."
 	./scripts/monitor_translation.sh
-
-# 批量翻译（bilingual-simple模式）
-translate-batch:
-	@echo "📝 开始批量翻译（bilingual-simple模式）..."
-	@echo "请指定输入目录，例如：make translate-batch INPUT_DIR=tasks/translation/data/pixiv/50235390"
-	@if [ -z "$(INPUT_DIR)" ]; then echo "❌ 请设置 INPUT_DIR 参数"; exit 1; fi
-	PYTHONUNBUFFERED=1 stdbuf -oL -eL $(PY) tasks/translation/translate $(INPUT_DIR) --bilingual-simple --stream --realtime-log --overwrite
-
-# 批量翻译（智能跳过）
-translate-batch-smart:
-	@echo "📝 开始智能批量翻译（跳过质量良好的文件）..."
-	@echo "请指定输入目录，例如：make translate-batch-smart INPUT_DIR=tasks/translation/data/pixiv/50235390"
-	@if [ -z "$(INPUT_DIR)" ]; then echo "❌ 请设置 INPUT_DIR 参数"; exit 1; fi
-	PYTHONUNBUFFERED=1 stdbuf -oL -eL $(PY) tasks/translation/translate $(INPUT_DIR) --bilingual-simple --stream --realtime-log

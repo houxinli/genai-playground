@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""
-Pixiv小说翻译器 - 重构版本
-
-基于面向对象设计的模块化翻译系统
-"""
+"""翻译入口脚本（支持 Pixiv/Fanbox 文本与双语修复流程）。"""
 
 import argparse
 import sys
