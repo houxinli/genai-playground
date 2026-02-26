@@ -16,6 +16,7 @@ class PartialTranslationHelper:
     _japanese_pattern = re.compile(r"[\u3040-\u30ff]")
     _REPAIR_INSTRUCTION = (
         "【修复规范】仅输出地道的简体中文及必要标点；即使原句只有假名或拟声词，也要改写成中文拟声/语气表达，严禁出现任何假名或英文提示。"
+        "人名/称谓/专有名词必须严格沿用前文既有译法，不得改名或切换译法。"
     )
     _SHORT_SEGMENT_HINT = (
         "【短句提示】以下行多为感叹或拟声，请直接用中文拟声词表达（如「嗯嗯」「啧」「噗咕咕」等），不要保留“っ”“ん”“あぁ”等假名。"
