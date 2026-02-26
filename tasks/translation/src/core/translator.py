@@ -86,8 +86,6 @@ class Translator:
         if not style_dir.exists():
             style_dir = prompt_styles_dir / "default"
         prompt_config = create_config("translation", style_dir)
-        if self.config.bilingual_simple:
-            prompt_config.support_previous_io = False
         prompt_config.preface_file = "preface.txt"
         prompt_config.sample_file = "sample.txt"
         if self.config.terminology_file:

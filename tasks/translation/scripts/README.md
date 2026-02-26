@@ -66,6 +66,116 @@
     --dry-run
   ```
 
+### `apply_translation_replacements.py`
+- 作用：对双语文件“译文行”批量做确定性替换（常用于统一人名/称谓译法），不改原文行。
+- 默认输出：`<原目录>_replaced/同名文件.txt`。
+- 先 dry-run 观察命中数量：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/apply_translation_replacements.py \
+    tasks/translation/data/fanbox/momizi813_bilingual_v2/11386126.txt \
+    --replace 高雄=高尾 \
+    --replace 高男=高尾 \
+    --replace 高冈=高尾 \
+    --dry-run
+  ```
+- 批量目录输出到新目录：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/apply_translation_replacements.py \
+    tasks/translation/data/fanbox/momizi813_bilingual_v2 \
+    --rules-file tasks/translation/data/fanbox/name_rules.txt \
+    --output-dir tasks/translation/data/fanbox/momizi813_bilingual_v3
+  ```
+
+### `normalize_bilingual_names.py`
+- 作用：按“日文名 -> 中文标准名”统一双语正文中的人名；支持显式别名，适合长期复用到同作者新文。
+- 默认输出：`<原目录>_namefix/同名文件.txt`。
+- 推荐把“标准名 + 别名”合并成一个规则文件（`--rules-file`）：
+  - `日文=中文标准名`
+  - `日文=中文标准名|错译1,错译2`
+  - 建议“每个日文名一行”
+- 推荐工作流：
+  1. 先 `--dry-run --report-file` 看候选统计。
+  2. 把稳定的人名和错译都写进 `--rules-file`。
+  4. 已经维护好别名字典后，建议加 `--no-auto-alias`，避免自动推断带来的误替换。
+- 示例（单文件）：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/normalize_bilingual_names.py \
+    tasks/translation/data/fanbox/momizi813_bilingual/11386126.txt \
+    --rules-file tasks/translation/data/fanbox/name_maps/momizi813_rules.txt \
+    --global-alias \
+    --no-auto-alias \
+    --dry-run \
+    --report-file /tmp/namefix_report.json
+  ```
+- 示例（目录批量）：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/normalize_bilingual_names.py \
+    tasks/translation/data/fanbox/momizi813_bilingual \
+    --rules-file tasks/translation/data/fanbox/name_maps/momizi813_rules.txt \
+    --output-dir tasks/translation/data/fanbox/momizi813_bilingual_namefix
+  ```
+
+### `build_name_alias_draft.py`
+- 作用：从 `normalize_bilingual_names.py --dry-run --report-file` 的报告中，聚合“全库候选人名”和 alias 草案。
+- 输出：
+  - `--output-alias-file`：已有标准名的 alias 草案（可直接作为 `--alias-file`）。
+  - `--output-candidate-file`：新人名候选（含待确认项）。
+- 推荐流程：
+  1. 先跑全库 dry-run 报告：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/normalize_bilingual_names.py \
+    tasks/translation/data/fanbox/momizi813_bilingual \
+    --auto-canonical off \
+    --no-auto-alias \
+    --dry-run \
+    --report-file tasks/translation/logs/name_scan_momizi813_full.json
+  ```
+  2. 基于报告产出草案：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/build_name_alias_draft.py \
+    tasks/translation/logs/name_scan_momizi813_full.json \
+    --rules-file tasks/translation/data/fanbox/name_maps/momizi813_rules.txt \
+    --source-dir tasks/translation/data/fanbox/momizi813 \
+    --candidate-min-total 4 \
+    --candidate-min-top 2 \
+    --output-alias-file tasks/translation/data/fanbox/name_maps/momizi813_aliases_draft.txt \
+    --output-candidate-file tasks/translation/data/fanbox/name_maps/momizi813_names_candidates.txt
+  ```
+
+### `audit_name_consistency.py`
+- 作用：在已做过 namefix 的目录上审计“规则未覆盖的人名变体候选”，用于迭代补充 `rules`。
+- 输入：双语目录 + `--rules-file`
+- 输出：
+  - `--report-json`：机器可读明细
+  - `--draft-file`：人工复核草案
+- 示例：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/audit_name_consistency.py \
+    tasks/translation/data/fanbox/momizi813_bilingual_v2_namefix \
+    --rules-file tasks/translation/data/fanbox/name_maps/momizi813_rules.txt \
+    --min-count 2 \
+    --report-json tasks/translation/logs/name_consistency_audit_momizi813_v2_namefix.json \
+    --draft-file tasks/translation/data/fanbox/name_maps/momizi813_rules_candidates_v2_namefix.txt
+  ```
+
+### `discover_untracked_names.py`
+- 作用：发现 `rules` 尚未覆盖的“新角色候选”（基于原文敬称），并给出译文侧中文候选分布。
+- 适用场景：你已经有一版 `rules`，但怀疑还有很多角色没纳入。
+- 输出：
+  - `--report-json`：完整统计（含文件命中）
+  - `--draft-file`：待人工确认的规则草案
+- 示例：
+  ```bash
+  conda run -n llm python tasks/translation/scripts/discover_untracked_names.py \
+    tasks/translation/data/fanbox/momizi813 \
+    tasks/translation/data/fanbox/momizi813_bilingual_v2 \
+    --rules-file tasks/translation/data/fanbox/name_maps/momizi813_rules.txt \
+    --min-mentions 2 \
+    --min-mentions-hiragana 5 \
+    --report-json tasks/translation/logs/discover_untracked_names_momizi813_v2.json \
+    --draft-file tasks/translation/data/fanbox/name_maps/momizi813_untracked_names_candidates.txt
+  ```
+
 ### `convert_bilingual_to_simplified.py`
 - 作用：批量将双语文件中的“译文行”统一为简体中文（不改原文行）。
 - 默认输出：`<原目录>_simp/同名文件.txt`（例如 `momizi813_bilingual_simp/9807258.txt`）。
