@@ -16,3 +16,6 @@ class TranslationTask:
     existing_bilingual_path: Optional[Path]
     output_path: Path
     mode: Literal["translate", "repair"] = "translate"
+    output_status: Literal["missing", "partial", "complete", "failed", "running"] = "missing"
+    output_reason: str = ""
+    run_id: str = ""

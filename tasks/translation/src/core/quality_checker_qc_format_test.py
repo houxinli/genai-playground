@@ -11,8 +11,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 from tasks.translation.src.core.quality_checker import QualityChecker
 from tasks.translation.src.core.config import TranslationConfig
-import json
-import pprint
 
 
 class TestQCLLMBuildMessages(unittest.TestCase):
@@ -29,9 +27,9 @@ class TestQCLLMBuildMessages(unittest.TestCase):
         # 现实现仅包含 system + user 两段，验证关键文案
         self.assertEqual(len(messages), 2)
         sys_content = (messages[0].get("content") or "")
-        self.assertIn("你是专业的翻译质量评估专家", sys_content)
-        self.assertIn("为每一行给出0-1之间的分数", sys_content)
-        self.assertIn("中文译文出现日语假名", sys_content)
+        self.assertIn("你是翻译质检员", sys_content)
+        self.assertIn("仅输出一个词（GOOD 或 BAD）", sys_content)
+        self.assertIn("不要解释", sys_content)
         user_content = (messages[1].get("content") or "")
         self.assertIn("原文：", user_content)
         self.assertIn("译文：", user_content)
@@ -45,7 +43,9 @@ class TestQCLLMBuildMessages(unittest.TestCase):
         # 至少包含 system 与 user
         self.assertGreaterEqual(len(messages), 2)
         sys_content = (messages[0].get("content") or "")
-        self.assertIn("为每一行给出0-1之间的分数", sys_content)
+        self.assertIn("你是翻译质检员", sys_content)
+        self.assertIn("逐行判定每行是否为高质量翻译", sys_content)
+        self.assertIn("最后单独输出一行：[检查完成]。", sys_content)
         # 最后一个 user 段应包含原文/译文
         last_user = next((m for m in reversed(messages) if m.get("role") == "user"), None)
         user_content = (last_user.get("content") or "") if last_user else ""
@@ -55,5 +55,3 @@ class TestQCLLMBuildMessages(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-

@@ -50,8 +50,33 @@ class TestQualityCheckerLLM(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("BAD", reason)
 
+    def test_composite_quality_check_accepts_bilingual_argument(self):
+        qc = QualityChecker(self.config, logger=self.logger)
+
+        captured = {}
+
+        def fake_basic(original_text, translated_text, bilingual=None):
+            captured["basic_bilingual"] = bilingual
+            return True, "basic-ok"
+
+        def fake_llm(original_text, translated_text, bilingual=None):
+            captured["llm_bilingual"] = bilingual
+            return True, "llm-ok"
+
+        qc.check_translation_quality_basic = fake_basic  # type: ignore[method-assign]
+        qc.check_translation_quality_with_llm = fake_llm  # type: ignore[method-assign]
+
+        ok, reason = qc.check_translation_quality(
+            original_text="彼は走った。",
+            translated_text="他跑了。",
+            bilingual=True,
+        )
+
+        self.assertTrue(ok, msg=reason)
+        self.assertEqual("llm-ok", reason)
+        self.assertTrue(captured["basic_bilingual"])
+        self.assertTrue(captured["llm_bilingual"])
+
 
 if __name__ == "__main__":
     unittest.main()
-
-

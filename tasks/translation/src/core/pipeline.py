@@ -6,11 +6,12 @@
 import os
 import time
 from pathlib import Path
-from typing import List, Tuple, Dict, Optional
+from typing import Any, List, Tuple, Dict, Optional
 
 from .config import TranslationConfig
 from .logger import UnifiedLogger
 from .quality_checker import QualityChecker
+from .run_state import TranslationStateStore
 from .translator import Translator
 from .file_handler import FileHandler
 from .enhanced_mode import EnhancedModeHandler
@@ -44,14 +45,32 @@ class TranslationPipeline:
         self.logger = UnifiedLogger.create_console_only()
         self.quality_checker = QualityChecker(config, self.logger)
         self.translator = Translator(config, self.logger, self.quality_checker)
-        self.file_handler = FileHandler(config, self.logger, self.quality_checker)
+        self.state_store = TranslationStateStore(config.log_dir)
+        self.file_handler = FileHandler(config, self.logger, self.quality_checker, self.state_store)
+        self.current_run_id = ""
+        self.current_file_path: Optional[Path] = None
         
         # 初始化增强模式处理器
         if config.enhanced_mode:
             self.enhanced_handler = EnhancedModeHandler(config, self.logger)
         else:
             self.enhanced_handler = None
-    
+
+    def _build_run_snapshot(self) -> Dict[str, Any]:
+        """记录本次运行的关键配置快照。"""
+        return {
+            "model": self.config.model,
+            "bilingual_simple": self.config.bilingual_simple,
+            "enhanced_mode": self.config.enhanced_mode,
+            "overwrite": self.config.overwrite,
+            "debug": self.config.debug,
+            "debug_files": self.config.debug_files,
+            "metadata_only": self.config.metadata_only,
+            "line_batch_size_lines": self.config.line_batch_size_lines,
+            "context_lines": self.config.context_lines,
+            "prompt_style": self.config.prompt_style,
+        }
+
     def run(self, inputs: List[str]) -> int:
         """
         运行翻译流程
@@ -71,44 +90,81 @@ class TranslationPipeline:
         
         # 查找文件
         target_total = 0
-        if self.config.enhanced_mode:
-            files_to_process = self.file_handler.find_files_to_process(inputs)
-            if not files_to_process:
-                self.logger.warning("没有找到需要处理的文件")
-                return 0
-            if self.config.offset > 0:
-                files_to_process = files_to_process[self.config.offset:]
-                self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(files_to_process)} 个文件")
-            if self.config.limit > 0:
-                files_to_process = files_to_process[:self.config.limit]
-                self.logger.info(f"限制处理文件数量为: {len(files_to_process)} 个文件")
-            target_total = len(files_to_process)
-            self.logger.info(f"开始处理 {target_total} 个文件")
-            # 增强模式：处理双语文件
-            success_count = self._run_enhanced_mode(files_to_process)
-        else:
-            tasks_to_process = self.file_handler.plan_tasks(inputs)
-            if not tasks_to_process:
-                self.logger.warning("没有找到需要处理的文件")
-                return 0
-            if self.config.offset > 0:
-                tasks_to_process = tasks_to_process[self.config.offset:]
-                self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(tasks_to_process)} 个文件")
-            if self.config.limit > 0:
-                tasks_to_process = tasks_to_process[:self.config.limit]
-                self.logger.info(f"限制处理文件数量为: {len(tasks_to_process)} 个文件")
-            target_total = len(tasks_to_process)
-            self.logger.info(f"开始处理 {target_total} 个文件")
-            # 普通模式：处理原始文件
-            success_count = self._run_normal_mode(tasks_to_process)
-        
-        self.logger.info(f"处理完成: {success_count}/{target_total} 个文件成功")
-        return success_count
+        run_id = ""
+        success_count = 0
+        failure_count = 0
+        try:
+            if self.config.enhanced_mode:
+                files_to_process = self.file_handler.find_files_to_process(inputs)
+                if not files_to_process:
+                    self.logger.warning("没有找到需要处理的文件")
+                    return 0
+                if self.config.offset > 0:
+                    files_to_process = files_to_process[self.config.offset:]
+                    self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(files_to_process)} 个文件")
+                if self.config.limit > 0:
+                    files_to_process = files_to_process[:self.config.limit]
+                    self.logger.info(f"限制处理文件数量为: {len(files_to_process)} 个文件")
+                target_total = len(files_to_process)
+                self.logger.info(f"开始处理 {target_total} 个文件")
+                run_id = self.state_store.start_run(
+                    mode="enhanced",
+                    inputs=inputs,
+                    target_total=target_total,
+                    config_snapshot=self._build_run_snapshot(),
+                )
+                self.current_run_id = run_id
+                # 增强模式：处理双语文件
+                success_count, failure_count = self._run_enhanced_mode(files_to_process, run_id)
+            else:
+                tasks_to_process = self.file_handler.plan_tasks(inputs)
+                if not tasks_to_process:
+                    self.logger.warning("没有找到需要处理的文件")
+                    return 0
+                if self.config.offset > 0:
+                    tasks_to_process = tasks_to_process[self.config.offset:]
+                    self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(tasks_to_process)} 个文件")
+                if self.config.limit > 0:
+                    tasks_to_process = tasks_to_process[:self.config.limit]
+                    self.logger.info(f"限制处理文件数量为: {len(tasks_to_process)} 个文件")
+                target_total = len(tasks_to_process)
+                self.logger.info(f"开始处理 {target_total} 个文件")
+                run_id = self.state_store.start_run(
+                    mode="translate",
+                    inputs=inputs,
+                    target_total=target_total,
+                    config_snapshot=self._build_run_snapshot(),
+                )
+                self.current_run_id = run_id
+                # 普通模式：处理原始文件
+                success_count, failure_count = self._run_normal_mode(tasks_to_process, run_id)
+
+            run_status = "complete" if failure_count == 0 else ("partial" if success_count > 0 else "failed")
+            self.state_store.finish_run(
+                run_id,
+                status=run_status,
+                success_count=success_count,
+                failure_count=failure_count,
+            )
+            self.logger.info(f"处理完成: {success_count}/{target_total} 个文件成功")
+            return success_count
+        except Exception:
+            if run_id:
+                self.state_store.finish_run(
+                    run_id,
+                    status="failed",
+                    success_count=success_count,
+                    failure_count=max(failure_count, max(target_total - success_count, 1)),
+                )
+            raise
+        finally:
+            self.current_run_id = ""
     
-    def _run_enhanced_mode(self, files_to_process: List[Path]) -> int:
+    def _run_enhanced_mode(self, files_to_process: List[Path], run_id: str) -> Tuple[int, int]:
         """运行增强模式"""
         self.logger.info("启用增强模式：QC检测 + 重新翻译")
         success_count = 0
+        failure_count = 0
         
         for i, file_path in enumerate(files_to_process, 1):
             self.logger.info(f"处理文件 {i}/{len(files_to_process)}: {file_path}")
@@ -153,12 +209,19 @@ class TranslationPipeline:
                 success_count += 1
             else:
                 self.logger.error(f"增强模式处理失败: {file_path}")
+                failure_count += 1
+            self.state_store.update_run_progress(
+                run_id,
+                success_delta=1 if processed else 0,
+                failure_delta=0 if processed else 1,
+            )
         
-        return success_count
-    
-    def _run_normal_mode(self, tasks_to_process: List[TranslationTask]) -> int:
+        return success_count, failure_count
+
+    def _run_normal_mode(self, tasks_to_process: List[TranslationTask], run_id: str) -> Tuple[int, int]:
         """运行普通模式"""
         success_count = 0
+        failure_count = 0
         for i, task in enumerate(tasks_to_process, 1):
             display_path = task.original_path or task.output_path
             self.logger.info(f"处理文件 {i}/{len(tasks_to_process)}: {display_path}")
@@ -171,10 +234,13 @@ class TranslationPipeline:
 
             if self.process_task(task):
                 success_count += 1
+                self.state_store.update_run_progress(run_id, success_delta=1)
             else:
                 self.logger.error(f"文件处理失败: {display_path}")
+                failure_count += 1
+                self.state_store.update_run_progress(run_id, failure_delta=1)
         
-        return success_count
+        return success_count, failure_count
     
     def process_task(self, task: TranslationTask) -> bool:
         if task.mode == "repair":
@@ -186,14 +252,38 @@ class TranslationPipeline:
         if not task.original_path:
             self.logger.error("缺少原文路径，暂不支持此任务类型")
             return False
-        return self.process_file(task.original_path)
+        return self.process_file(task.original_path, task=task)
 
-    def process_file(self, path: Path) -> bool:
+    def _record_processing_state(
+        self,
+        *,
+        source_path: Optional[Path],
+        output_path: Path,
+        status: str,
+        stage: str,
+        reason: str = "",
+        progress: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.state_store:
+            return
+        self.state_store.record_file_state(
+            run_id=self.current_run_id,
+            source_path=source_path,
+            output_path=output_path,
+            mode="translate",
+            status=status,
+            stage=stage,
+            reason=reason,
+            progress=progress,
+        )
+
+    def process_file(self, path: Path, task: Optional[TranslationTask] = None) -> bool:
         """
         处理单个文件
         
         Args:
             path: 文件路径
+            task: 可选的任务对象，用于携带已有输出状态。
         
         Returns:
             是否处理成功
@@ -222,6 +312,22 @@ class TranslationPipeline:
         log_file_path = self.logger.get_log_file_path()
         self.logger.info(f"开始处理文件: {path}")
         self.logger.info(f"📝 日志文件路径: {log_file_path}")
+        if task and task.output_status:
+            self.logger.info(
+                f"任务状态: {task.output_status}"
+                + (f" ({task.output_reason})" if task.output_reason else "")
+            )
+
+        # 提前计算输出路径，便于在读取或解析失败时也能记录到目标文件
+        output_path = self._get_output_path(path)
+        self.current_file_path = path
+        self._record_processing_state(
+            source_path=path,
+            output_path=output_path,
+            status="running",
+            stage="start",
+            reason=task.output_reason if task else "开始处理",
+        )
         
         # 显示配置信息
         self._log_config_info()
@@ -232,6 +338,13 @@ class TranslationPipeline:
                 content = f.read()
         except Exception as e:
             self.logger.error(f"读取文件失败: {e}")
+            self._record_processing_state(
+                source_path=path,
+                output_path=output_path,
+                status="failed",
+                stage="read",
+                reason=f"读取文件失败: {e}",
+            )
             return False
         
         # 解析YAML front matter
@@ -240,35 +353,34 @@ class TranslationPipeline:
         # 显示文章信息
         self._log_article_info(yaml_data, len(text_content))
         
-        # 确定输出文件路径
-        output_path = self._get_output_path(path)
-        
-        # 设置当前文件路径（用于批次更新）
-        self.current_file_path = path
-        
         # 检查是否需要处理
         if not self.config.overwrite and output_path.exists():
-            # Debug模式下，每次都是新文件（带时间戳），不需要跳过
-            if self.config.debug:
-                self.logger.info(f"Debug模式：文件已存在但会重新处理: {output_path}")
+            if task and task.output_status in {"partial", "failed", "running"}:
+                self.logger.info(
+                    f"检测到{task.output_status}输出，将重新生成: {output_path}"
+                )
             else:
-                # 对于bilingual_simple模式，需要检查文件质量
-                if self.config.bilingual_simple:
-                    # 使用质量检查器检查现有文件质量
-                    if self.file_handler._check_existing_bilingual_quality(output_path):
-                        self.logger.info(f"高质量双语文件已存在，跳过: {output_path}")
-                        return True
-                    else:
-                        self.logger.info(f"低质量双语文件存在，将重新翻译: {output_path}")
-                        # 删除低质量文件
-                        try:
-                            output_path.unlink()
-                            self.logger.info(f"已删除低质量文件: {output_path}")
-                        except Exception as e:
-                            self.logger.warning(f"删除低质量文件失败: {e}")
+                if self.config.debug:
+                    self.logger.info(f"Debug模式：文件已存在但会重新处理: {output_path}")
                 else:
-                    self.logger.info(f"输出文件已存在，跳过: {output_path}")
-                    return True
+                    inspection = self.state_store.inspect_output(
+                        source_path=path,
+                        output_path=output_path,
+                        bilingual_simple=self.config.bilingual_simple,
+                    )
+                    if inspection.status == "complete":
+                        self.logger.info(f"输出文件已存在，跳过: {output_path}")
+                        self._record_processing_state(
+                            source_path=path,
+                            output_path=output_path,
+                            status="complete",
+                            stage="skip",
+                            reason=inspection.reason,
+                        )
+                        return True
+                    self.logger.info(
+                        f"检测到{inspection.status}输出，将重新生成: {output_path} ({inspection.reason})"
+                    )
         
         # 先分别处理 YAML 与 正文
         if yaml_data:
@@ -404,6 +516,13 @@ class TranslationPipeline:
                     yaml_translated, yaml_prompt, yaml_ok, _ = self.translator.translate_yaml_text(yaml_block_full)
             if not yaml_ok or not yaml_translated:
                 self.logger.error("YAML 段翻译失败")
+                self._record_processing_state(
+                    source_path=path,
+                    output_path=output_path,
+                    status="failed",
+                    stage="yaml",
+                    reason="YAML 段翻译失败",
+                )
                 return False
             # YAML 规则 QC（不中断版）：仅告警
             ok, reason = self.quality_checker.check_yaml_quality_rules(yaml_block_full, yaml_translated)
@@ -415,6 +534,17 @@ class TranslationPipeline:
                 self._create_prefilled_bilingual_file(content, output_path)
                 # YAML翻译完成后立即更新文件
                 self._update_bilingual_file_yaml(output_path, yaml_translated)
+                self._record_processing_state(
+                    source_path=path,
+                    output_path=output_path,
+                    status="partial",
+                    stage="yaml_prefill",
+                    reason="YAML 已写入，正文仍在处理中",
+                    progress={
+                        "phase": "yaml",
+                        "bilingual_simple": True,
+                    },
+                )
             
             # 若仅翻译元数据，则不处理正文
             if getattr(self.config, 'metadata_only', False):
@@ -424,12 +554,26 @@ class TranslationPipeline:
                 body_translated = self._translate_text(body_raw, use_body_prompt=True)
                 if not body_translated:
                     self.logger.error("正文翻译失败")
+                    self._record_processing_state(
+                        source_path=path,
+                        output_path=output_path,
+                        status="failed",
+                        stage="body",
+                        reason="正文翻译失败",
+                    )
                     return False
                 translated_content = f"{yaml_translated}\n{body_translated}"
         else:
             # 无 YAML，直接按正文处理
             if getattr(self.config, 'metadata_only', False):
                 self.logger.warning("启用了 --metadata-only 但输入不含 YAML，跳过文件")
+                self._record_processing_state(
+                    source_path=path,
+                    output_path=output_path,
+                    status="failed",
+                    stage="metadata_only",
+                    reason="输入不含 YAML，无法仅翻译元数据",
+                )
                 return False
             
             # 如果是bilingual_simple模式，先预创建文件
@@ -440,10 +584,38 @@ class TranslationPipeline:
         
         if not translated_content:
             self.logger.error("翻译失败")
+            self._record_processing_state(
+                source_path=path,
+                output_path=output_path,
+                status="failed",
+                stage="translate",
+                reason="翻译结果为空",
+            )
             return False
         
         # 保存结果
-        return self._save_result(output_path, translated_content, yaml_data)
+        final_status = "complete"
+        final_reason = "写入完成"
+        if "[翻译未完成]" in translated_content:
+            final_status = "partial"
+            final_reason = "输出中仍含未完成标记"
+        elif "[翻译失败]" in translated_content:
+            final_status = "failed"
+            final_reason = "输出中仍含失败标记"
+
+        saved = self._save_result(output_path, translated_content, yaml_data)
+        self._record_processing_state(
+            source_path=path,
+            output_path=output_path,
+            status=final_status if saved else "failed",
+            stage="save",
+            reason=final_reason if saved else "保存文件失败",
+            progress={
+                "bilingual_simple": self.config.bilingual_simple,
+                "metadata_only": getattr(self.config, "metadata_only", False),
+            },
+        )
+        return saved and final_status == "complete"
     
     def _log_config_info(self) -> None:
         """记录配置信息"""
@@ -827,6 +999,19 @@ class TranslationPipeline:
                         content_end_idx,
                         batch_pairs,
                     )
+                    self._record_processing_state(
+                        source_path=self.current_file_path,
+                        output_path=current_output_path,
+                        status="partial",
+                        stage="body_batch",
+                        reason=f"已完成批次 {content_i // content_batch_size + 1}",
+                        progress={
+                            "translated_content_lines": len(translations_map),
+                            "total_content_lines": len(content_lines),
+                            "completed_content_index": content_end_idx,
+                            "batch_size": len(batch_pairs),
+                        },
+                    )
                 
                 # 更新前一次的输入输出（用于下一批次的上下文）
                 # 使用翻译器返回的 current_io
@@ -927,7 +1112,7 @@ class TranslationPipeline:
                                     translation = "[翻译失败]"
                                     translations_map[target_body_idx] = translation
                                     fallback_pairs.append((orig_line, translation))
-                        
+
                         if fallback_pairs:
                             current_output_path = self._get_output_path(self.current_file_path)
                             self._update_bilingual_file_batch(
@@ -935,6 +1120,19 @@ class TranslationPipeline:
                                 fallback_start_idx,
                                 fallback_start_idx + len(fallback_pairs),
                                 fallback_pairs,
+                            )
+                            self._record_processing_state(
+                                source_path=self.current_file_path,
+                                output_path=current_output_path,
+                                status="partial",
+                                stage="body_fallback",
+                                reason="fallback 批次已写入",
+                                progress={
+                                    "translated_content_lines": len(translations_map),
+                                    "total_content_lines": len(content_lines),
+                                    "completed_content_index": fallback_start_idx + len(fallback_pairs),
+                                    "batch_size": len(fallback_pairs),
+                                },
                             )
                             content_i = fallback_start_idx + len(fallback_pairs)
                         self.logger.info("逐行处理完成，保持当前较小批量，后续根据成功次数逐步回升")
@@ -966,6 +1164,25 @@ class TranslationPipeline:
         
         if self.config.debug and content_i < total_content_lines:
             self.logger.warning(f"调试模式：翻译中断，剩余 {remaining_content_lines} 行有内容行未处理")
+        if self.current_file_path and total_content_lines > 0:
+            final_status = "complete" if content_i >= total_content_lines else "partial"
+            final_reason = (
+                "正文批次全部完成"
+                if final_status == "complete"
+                else f"仍有 {remaining_content_lines} 行有内容行未处理"
+            )
+            self._record_processing_state(
+                source_path=self.current_file_path,
+                output_path=self._get_output_path(self.current_file_path),
+                status=final_status,
+                stage="body_finish",
+                reason=final_reason,
+                progress={
+                    "translated_content_lines": translated_count,
+                    "total_content_lines": total_content_lines,
+                    "remaining_content_lines": remaining_content_lines,
+                },
+            )
         
         self.logger.info(f"翻译完成：总计 {total_content_lines} 行有内容行，已翻译 {translated_count} 行")
         
