@@ -60,7 +60,12 @@ class QualityChecker:
         self.profile_manager = ProfileManager(config.profiles_file)
         self.streaming_handler = StreamingHandler(self.client, logger, config, self.profile_manager)
     
-    def check_translation_quality_basic(self, original_text: str, translated_text: str) -> Tuple[bool, str]:
+    def check_translation_quality_basic(
+        self,
+        original_text: str,
+        translated_text: str,
+        bilingual: Optional[bool] = None,
+    ) -> Tuple[bool, str]:
         """
         基础质量检测（规则-based）
         
@@ -74,8 +79,9 @@ class QualityChecker:
         if not translated_text or not translated_text.strip():
             return False, "翻译结果为空"
         
-        # 获取bilingual模式
-        bilingual = self.config.bilingual_simple
+        # 兼容上层显式传入的 bilingual 参数；未传时回退到配置值
+        if bilingual is None:
+            bilingual = self.config.bilingual_simple
         
         # 使用逐行规则QC进行检测
         try:
@@ -257,7 +263,12 @@ class QualityChecker:
         except Exception as e:
             return False, f"行数对齐检查异常: {e}"
     
-    def check_translation_quality_with_llm(self, original_text: str, translated_text: str) -> Tuple[bool, str]:
+    def check_translation_quality_with_llm(
+        self,
+        original_text: str,
+        translated_text: str,
+        bilingual: Optional[bool] = None,
+    ) -> Tuple[bool, str]:
         """
         使用大模型进行质量检测（改进版：整块QC + 规则QC组合）。
         """
@@ -265,8 +276,9 @@ class QualityChecker:
             return True, "跳过LLM检测"
         
         try:
-            # 获取bilingual模式
-            bilingual = self.config.bilingual_simple
+            # 兼容上层显式传入的 bilingual 参数；未传时回退到配置值
+            if bilingual is None:
+                bilingual = self.config.bilingual_simple
             
             # 第一步：整块QC - 快速判断整体质量
             block_result = self._check_translation_quality_block(original_text, translated_text, bilingual)

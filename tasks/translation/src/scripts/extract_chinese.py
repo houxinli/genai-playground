@@ -2,11 +2,12 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import json
 import re
 import yaml
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Set, Iterable
+from typing import Any, Dict, List, Tuple, Optional, Set, Iterable
 
 
 def _extract_first_int(text: str) -> Optional[int]:
@@ -65,25 +66,247 @@ def _parse_timestamp(text: str) -> Optional[datetime]:
     return None
 
 
-def _extract_timestamp_from_yaml(yaml_content: str) -> Optional[datetime]:
-    """从 YAML 中提取 create_date/published_at 时间戳，优先后出现的中文译值。"""
+def _yaml_body_lines(yaml_content: str) -> List[str]:
+    """去掉首尾分隔线后的 YAML 行列表。"""
     if not yaml_content.strip():
-        return None
+        return []
     lines = yaml_content.strip().split('\n')
     if lines and lines[0].strip() == '---':
         lines = lines[1:]
     if lines and lines[-1].strip() == '---':
         lines = lines[:-1]
-    target_keys = ("create_date", "published_at")
-    for key in target_keys:
-        for line in reversed(lines):
-            if line.startswith(f"{key}:"):
+    return lines
+
+
+def _stringify_metadata_value(value: Any) -> str:
+    """将结构化元数据值规范化为可展示文本。"""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return _clean_metadata_text(value)
+    if isinstance(value, datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    if isinstance(value, list):
+        parts = [_stringify_metadata_value(item) for item in value]
+        return "、".join(part for part in parts if part)
+    return _clean_metadata_text(str(value))
+
+
+def _first_timestamp_value(values: Iterable[Any]) -> Optional[datetime]:
+    """按顺序从候选值中提取第一个可解析时间戳。"""
+    for value in values:
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        candidate = _parse_timestamp(_stringify_metadata_value(value))
+        if candidate:
+            return candidate
+    return None
+
+
+def _format_display_title(title: str) -> str:
+    """规范化标题展示文本并截断。"""
+    safe_title = _normalize_whitespace(title or "")
+    if not safe_title:
+        return "未知标题"
+    match = re.search(r"[，。、；：,.!?！？]", safe_title)
+    if match:
+        safe_title = safe_title[:match.start()]
+    safe_title = safe_title[:25]
+    return safe_title or "未知标题"
+
+
+def _candidate_source_directories(file_path: Path) -> List[Path]:
+    """推导与双语文件对应的源目录候选。"""
+    candidates: List[Path] = []
+    seen: Set[str] = set()
+
+    for ancestor in [file_path.parent, *file_path.parents]:
+        name = ancestor.name
+        if "_bilingual" not in name:
+            continue
+        source_name = name.replace("_bilingual", "")
+        if not source_name:
+            continue
+        candidate = ancestor.parent / source_name
+        key = str(candidate)
+        if key in seen:
+            continue
+        candidates.append(candidate)
+        seen.add(key)
+
+    parent = file_path.parent
+    key = str(parent)
+    if key not in seen:
+        candidates.append(parent)
+    return candidates
+
+
+def _load_json_file(path: Path) -> Optional[Any]:
+    """读取 JSON 文件，失败返回 None。"""
+    try:
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding='utf-8', errors='ignore'))
+    except Exception:
+        return None
+
+
+def _extract_structured_metadata_from_record(record: Any) -> Dict[str, Any]:
+    """从结构化记录中提取统一元数据字段。"""
+    if not isinstance(record, dict):
+        return {}
+
+    source_kind = "fanbox" if any(
+        key in record for key in ("publishedDatetime", "updatedDatetime", "feeRequired", "creatorId", "body")
+    ) else "pixiv"
+
+    raw_id = record.get("novel_id")
+    id_key = "novel_id"
+    if raw_id is None:
+        raw_id = record.get("post_id")
+        if raw_id is not None:
+            id_key = "post_id"
+    if raw_id is None:
+        raw_id = record.get("id")
+        if raw_id is not None:
+            id_key = "post_id" if source_kind == "fanbox" else "novel_id"
+
+    novel_id = _extract_first_int(str(raw_id)) if raw_id is not None else None
+
+    series = record.get("series")
+    series_id: Optional[int] = None
+    series_title = ""
+    if isinstance(series, dict):
+        series_id = _extract_first_int(_stringify_metadata_value(series.get("id")))
+        series_title = _stringify_metadata_value(series.get("title"))
+    elif isinstance(series, str):
+        series_title = _stringify_metadata_value(series)
+
+    created_timestamp = _first_timestamp_value(
+        [
+            record.get("create_date"),
+            record.get("published_at"),
+            record.get("publishedDatetime"),
+        ]
+    )
+    updated_timestamp = _first_timestamp_value(
+        [
+            record.get("update_date"),
+            record.get("updated_at"),
+            record.get("updatedDatetime"),
+        ]
+    )
+
+    return {
+        "id_key": id_key,
+        "novel_id": novel_id,
+        "title": _stringify_metadata_value(record.get("title")),
+        "caption": _stringify_metadata_value(record.get("caption")),
+        "excerpt": _stringify_metadata_value(record.get("excerpt")),
+        "series_id": series_id,
+        "series_title": series_title,
+        "tags": _stringify_metadata_value(record.get("tags")),
+        "fee_required": _stringify_metadata_value(record.get("feeRequired") or record.get("fee_required")),
+        "created_timestamp": created_timestamp,
+        "updated_timestamp": updated_timestamp,
+        "source_url": _stringify_metadata_value(record.get("source_url") or record.get("url")),
+    }
+
+
+def _lookup_index_record(index_data: Any, article_id: Optional[int]) -> Optional[Dict[str, Any]]:
+    """在 index.json 中查找指定文章记录。"""
+    if article_id is None:
+        return None
+
+    key = str(article_id)
+    if isinstance(index_data, dict):
+        record = index_data.get(key)
+        if isinstance(record, dict):
+            return record
+        for candidate_key, candidate_value in index_data.items():
+            if not isinstance(candidate_value, dict):
+                continue
+            if _extract_first_int(str(candidate_key)) == article_id:
+                return candidate_value
+            if _extract_first_int(_stringify_metadata_value(candidate_value.get("novel_id"))) == article_id:
+                return candidate_value
+            if _extract_first_int(_stringify_metadata_value(candidate_value.get("id"))) == article_id:
+                return candidate_value
+            if _extract_first_int(_stringify_metadata_value(candidate_value.get("post_id"))) == article_id:
+                return candidate_value
+
+    if isinstance(index_data, list):
+        for candidate_value in index_data:
+            if not isinstance(candidate_value, dict):
+                continue
+            if _extract_first_int(_stringify_metadata_value(candidate_value.get("novel_id"))) == article_id:
+                return candidate_value
+            if _extract_first_int(_stringify_metadata_value(candidate_value.get("id"))) == article_id:
+                return candidate_value
+            if _extract_first_int(_stringify_metadata_value(candidate_value.get("post_id"))) == article_id:
+                return candidate_value
+    return None
+
+
+def _resolve_structured_metadata(file_path: Path, yaml_novel_id: Optional[int] = None) -> Dict[str, Any]:
+    """从源目录的结构化文件中补齐标题、ID 和时间戳等字段。"""
+    resolved: Dict[str, Any] = {}
+    article_id = yaml_novel_id or _extract_first_int(file_path.stem)
+
+    for source_dir in _candidate_source_directories(file_path):
+        if not source_dir.exists():
+            continue
+        candidate_paths = [
+            source_dir / f"{file_path.stem}.meta.json",
+            source_dir / "index.json",
+        ]
+        for candidate_path in candidate_paths:
+            data = _load_json_file(candidate_path)
+            if data is None:
+                continue
+            record: Optional[Dict[str, Any]]
+            if candidate_path.name == "index.json":
+                record = _lookup_index_record(data, article_id)
+            else:
+                record = data if isinstance(data, dict) else None
+            if not record:
+                continue
+            structured = _extract_structured_metadata_from_record(record)
+            for key, value in structured.items():
+                if key not in resolved or not resolved[key]:
+                    resolved[key] = value
+
+    if resolved.get("timestamp") is None:
+        resolved["timestamp"] = resolved.get("created_timestamp") or resolved.get("updated_timestamp")
+    return resolved
+
+
+def _extract_timestamp_from_yaml(
+    yaml_content: str,
+    fallback_timestamp: Optional[datetime] = None,
+) -> Optional[datetime]:
+    """从 YAML 中提取时间戳，优先 create/published，再回退到 update。"""
+    lines = _yaml_body_lines(yaml_content)
+    if lines:
+        target_keys = (
+            "create_date",
+            "published_at",
+            "publishedDatetime",
+            "update_date",
+            "updated_at",
+            "updatedDatetime",
+        )
+        for key in target_keys:
+            for line in reversed(lines):
+                if not line.startswith(f"{key}:"):
+                    continue
                 _, raw = line.split(":", 1)
                 candidate = _parse_timestamp(raw.strip())
                 if candidate:
-                    if candidate.tzinfo is None:
-                        return candidate.replace(tzinfo=timezone.utc)
-                    return candidate
+                    return candidate if candidate.tzinfo else candidate.replace(tzinfo=timezone.utc)
+    if fallback_timestamp:
+        return fallback_timestamp if fallback_timestamp.tzinfo else fallback_timestamp.replace(tzinfo=timezone.utc)
     return None
 
 
@@ -171,18 +394,38 @@ def _should_skip_article(
     title_filters: Iterable[str],
     series_filters: Iterable[str],
     caption_filters: Iterable[str],
+    fallback_metadata: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, Optional[str]]:
     """根据标题关键字或系列 ID 判断是否跳过，返回 (skip, reason)。"""
-    if yaml_content:
+    haystack = yaml_content or ""
+    if fallback_metadata:
+        fallback_parts = [
+            fallback_metadata.get("title"),
+            fallback_metadata.get("caption"),
+            fallback_metadata.get("excerpt"),
+            fallback_metadata.get("series_title"),
+            fallback_metadata.get("tags"),
+            fallback_metadata.get("source_url"),
+        ]
+        haystack = "\n".join(
+            part for part in [haystack, *(_stringify_metadata_value(item) for item in fallback_parts)] if part
+        )
+    if haystack:
         for keyword in title_filters:
-            if keyword and keyword in yaml_content:
+            if keyword and keyword in haystack:
                 return True, f"标题包含关键字「{keyword}」"
         if series_filters:
             series_id = _extract_series_id(yaml_content)
+            if series_id is None and fallback_metadata:
+                series_id = _stringify_metadata_value(fallback_metadata.get("series_id"))
             if series_id and any(series_id == target for target in series_filters):
                 return True, f"series.id={series_id} 被过滤"
         if caption_filters:
             caption = _extract_caption(yaml_content)
+            if not caption and fallback_metadata:
+                caption = _stringify_metadata_value(fallback_metadata.get("caption")) or _stringify_metadata_value(
+                    fallback_metadata.get("excerpt")
+                )
             if caption:
                 for keyword in caption_filters:
                     if keyword and keyword in caption:
@@ -268,6 +511,7 @@ def _transform_yaml_to_localized(chinese_yaml: str) -> List[str]:
     series_title_value: Optional[str] = None
     tags_value: Optional[str] = None
     create_date_value: Optional[str] = None
+    update_date_value: Optional[str] = None
     fee_required_value: Optional[str] = None
 
     i = 0
@@ -275,7 +519,7 @@ def _transform_yaml_to_localized(chinese_yaml: str) -> List[str]:
         line = lines[i]
         # 规范空白
         raw = line.rstrip('\n')
-        if raw.startswith('novel_id:'):
+        if raw.startswith('novel_id:') or raw.startswith('post_id:') or raw.startswith('ID:'):
             id_value = _clean_metadata_text(raw.split(':', 1)[1])
         elif raw.startswith('title:'):
             title_value = _clean_metadata_text(raw.split(':', 1)[1])
@@ -285,8 +529,10 @@ def _transform_yaml_to_localized(chinese_yaml: str) -> List[str]:
             excerpt_value = _clean_metadata_text(raw.split(':', 1)[1])
         elif raw.startswith('tags:'):
             tags_value = _clean_metadata_text(raw.split(':', 1)[1])
-        elif raw.startswith('create_date:'):
+        elif raw.startswith('create_date:') or raw.startswith('published_at:'):
             create_date_value = _clean_metadata_text(raw.split(':', 1)[1])
+        elif raw.startswith('update_date:') or raw.startswith('updated_at:'):
+            update_date_value = _clean_metadata_text(raw.split(':', 1)[1])
         elif raw.startswith('fee_required:'):
             fee_required_value = _clean_metadata_text(raw.split(':', 1)[1])
         elif raw.startswith('series:'):
@@ -316,6 +562,8 @@ def _transform_yaml_to_localized(chinese_yaml: str) -> List[str]:
         localized.append(f"标签: {tags_value}")
     if create_date_value:
         localized.append(f"创建时间: {create_date_value}")
+    if update_date_value:
+        localized.append(f"更新时间: {update_date_value}")
     if fee_required_value:
         localized.append(f"付费等级: {fee_required_value}")
     return localized
@@ -397,185 +645,212 @@ def is_chinese_text(text: str) -> bool:
     return False
 
 
-def extract_title_from_yaml(yaml_content: str) -> str:
-    """从YAML内容中提取中文标题"""
+def extract_title_from_yaml(yaml_content: str, fallback_title: Optional[str] = None) -> str:
+    """从YAML内容中提取中文标题。"""
     try:
-        lines = yaml_content.strip().split('\n')
-        
-        # 跳过开头的 ---
-        if lines and lines[0].strip() == '---':
-            lines = lines[1:]
-        
-        # 跳过结尾的 ---
-        if lines and lines[-1].strip() == '---':
-            lines = lines[:-1]
-        
+        lines = _yaml_body_lines(yaml_content)
+
         i = 0
         while i < len(lines):
             line = lines[i]
-            
-            # 处理title字段
             if line.startswith('title:'):
-                # 检查下一行是否也是title
                 if i + 1 < len(lines) and lines[i + 1].startswith('title:'):
-                    # 返回第二个title（中文翻译）
-                    title_text = lines[i + 1].replace('title:', '').strip()
-                    title_text = _clean_metadata_text(title_text).strip()
-                    # 若含标点，只取第一个标点前的部分
-                    # 微信图书对标题行长度有限制, 建议不超过25字符
-                    m = re.search(r"[，。、；：,.!?！？]", title_text)
-                    if m:
-                        title_text = title_text[:m.start()]
-                    return title_text[:25]
-                else:
-                    # 只有一个title，检查是否包含中文
-                    if is_chinese_text(line):
-                        title_text = line.replace('title:', '').strip()
-                        title_text = _clean_metadata_text(title_text).strip()
-                        # 微信图书对标题行长度有限制, 建议不超过25字符
-                        m = re.search(r"[，。、；：,.!?！？]", title_text)
-                        if m:
-                            title_text = title_text[:m.start()]
-                        return title_text[:25]
-                i += 1
-            else:
-                i += 1
-        
+                    return _format_display_title(lines[i + 1].replace('title:', '').strip())
+                if is_chinese_text(line):
+                    return _format_display_title(line.replace('title:', '').strip())
+            i += 1
+
+        if fallback_title:
+            return _format_display_title(fallback_title)
         return "未知标题"
-    
-    except Exception as e:
+
+    except Exception:
+        if fallback_title:
+            return _format_display_title(fallback_title)
         return "未知标题"
 
 
-def extract_chinese_from_yaml(yaml_content: str) -> str:
-    """从YAML内容中提取中文翻译部分"""
+def extract_chinese_from_yaml(
+    yaml_content: str,
+    fallback_metadata: Optional[Dict[str, Any]] = None,
+) -> str:
+    """从YAML内容中提取中文翻译部分。"""
     try:
-        # 由于YAML中有重复字段名，我们需要手动解析
-        lines = yaml_content.strip().split('\n')
-        
-        # 跳过开头的 ---
-        if lines and lines[0].strip() == '---':
-            lines = lines[1:]
-        
-        # 跳过结尾的 ---
-        if lines and lines[-1].strip() == '---':
-            lines = lines[:-1]
-        
-        chinese_lines = []
-        
+        lines = _yaml_body_lines(yaml_content)
+        chinese_lines: List[str] = []
+        seen_keys: Set[str] = set()
+
         i = 0
         while i < len(lines):
             line = lines[i]
-            
-            # 处理novel_id字段
-            if line.startswith('novel_id:'):
+
+            if line.startswith('novel_id:') or line.startswith('post_id:'):
                 id_value = _clean_metadata_text(line.split(':', 1)[1])
                 chinese_lines.append(f"ID: {id_value}" if id_value else "ID:")
+                seen_keys.add("id")
                 i += 1
                 continue
-            
-            # 处理title字段，保留完整中文标题
+
             if line.startswith('title:'):
-                # 如果下一行也是title，保留第二个（中文翻译）
                 if i + 1 < len(lines) and lines[i + 1].startswith('title:'):
                     full_title = lines[i + 1].split(':', 1)[1]
                     full_title = _clean_metadata_text(full_title).strip()
                     chinese_lines.append(f"title: {full_title}")
+                    seen_keys.add("title")
                     i += 2
                 else:
-                    # 单一title且包含中文时保留
                     if is_chinese_text(line):
                         full_title = line.split(':', 1)[1]
                         full_title = _clean_metadata_text(full_title).strip()
                         chinese_lines.append(f"title: {full_title}")
+                        seen_keys.add("title")
                     i += 1
                 continue
-            
-            elif line.startswith('caption:'):
-                # 检查下一行是否也是caption
+
+            if line.startswith('caption:'):
                 if i + 1 < len(lines) and lines[i + 1].startswith('caption:'):
-                    # 保留第二个caption（中文翻译），并清理
                     cap_text = lines[i + 1].split(':', 1)[1]
                     cap_text = _clean_metadata_text(cap_text).strip()
                     chinese_lines.append(f"caption: {cap_text}")
+                    seen_keys.add("caption")
                     i += 2
                 else:
-                    # 只有一个caption，检查是否包含中文
                     if is_chinese_text(line):
                         cap_text = line.split(':', 1)[1]
                         cap_text = _clean_metadata_text(cap_text).strip()
                         chinese_lines.append(f"caption: {cap_text}")
+                        seen_keys.add("caption")
                     i += 1
                 continue
 
-            elif line.startswith('excerpt:'):
-                # 检查下一行是否也是excerpt
+            if line.startswith('excerpt:'):
                 if i + 1 < len(lines) and lines[i + 1].startswith('excerpt:'):
                     excerpt_text = lines[i + 1].split(':', 1)[1]
                     excerpt_text = _clean_metadata_text(excerpt_text).strip()
                     chinese_lines.append(f"excerpt: {excerpt_text}")
+                    seen_keys.add("excerpt")
                     i += 2
                 else:
                     if is_chinese_text(line):
                         excerpt_text = line.split(':', 1)[1]
                         excerpt_text = _clean_metadata_text(excerpt_text).strip()
                         chinese_lines.append(f"excerpt: {excerpt_text}")
+                        seen_keys.add("excerpt")
                     i += 1
                 continue
-            
-            elif line.startswith('create_date:'):
+
+            if line.startswith('create_date:') or line.startswith('published_at:'):
                 chinese_lines.append(line)
+                seen_keys.add("create_date")
                 i += 1
                 continue
-            
-            elif line.startswith('fee_required:'):
+
+            if line.startswith('update_date:') or line.startswith('updated_at:'):
                 chinese_lines.append(line)
+                seen_keys.add("update_date")
                 i += 1
                 continue
-            
-            elif line.startswith('tags:'):
-                # 检查下一行是否也是tags
+
+            if line.startswith('fee_required:'):
+                chinese_lines.append(line)
+                seen_keys.add("fee_required")
+                i += 1
+                continue
+
+            if line.startswith('tags:'):
                 if i + 1 < len(lines) and lines[i + 1].startswith('tags:'):
-                    # 保留第二个tags（中文翻译）
                     chinese_lines.append(lines[i + 1])
+                    seen_keys.add("tags")
                     i += 2
                 else:
-                    # 只有一个tags，检查是否包含中文
                     if is_chinese_text(line):
                         chinese_lines.append(line)
+                        seen_keys.add("tags")
                     i += 1
                 continue
-            
-            elif line.startswith('series:'):
+
+            if line.startswith('series:'):
                 chinese_lines.append(line)
                 i += 1
-                # 处理series的子字段
                 while i < len(lines) and lines[i].startswith('  '):
                     sub_line = lines[i]
-                    # 只处理title字段
                     if sub_line.strip().startswith('title:'):
-                        # 检查下一行是否也是title
                         if i + 1 < len(lines) and lines[i + 1].strip().startswith('title:'):
-                            # 保留第二个title（中文翻译）
                             chinese_lines.append(lines[i + 1])
+                            seen_keys.add("series.title")
                             i += 2
                         else:
-                            # 只有一个title，检查是否包含中文或为空
                             if is_chinese_text(sub_line) or sub_line.strip() == 'title:':
                                 chinese_lines.append(sub_line)
+                                seen_keys.add("series.title")
                             i += 1
                     else:
-                        # 跳过其他字段（id, order等）
                         i += 1
                 continue
-            
-            else:
-                # 跳过所有其他字段
-                i += 1
-                continue
-        
+
+            i += 1
+
+        if fallback_metadata:
+            fallback_id = fallback_metadata.get("novel_id")
+            fallback_id_key = _stringify_metadata_value(fallback_metadata.get("id_key")) or "novel_id"
+            if fallback_id is not None and "id" not in seen_keys:
+                chinese_lines.append(f"ID: {fallback_id}")
+                seen_keys.add("id")
+
+            fallback_title = _stringify_metadata_value(fallback_metadata.get("title"))
+            if fallback_title and "title" not in seen_keys:
+                chinese_lines.append(f"title: {fallback_title}")
+                seen_keys.add("title")
+
+            fallback_caption = _stringify_metadata_value(fallback_metadata.get("caption"))
+            if fallback_caption and "caption" not in seen_keys:
+                chinese_lines.append(f"caption: {fallback_caption}")
+                seen_keys.add("caption")
+
+            fallback_excerpt = _stringify_metadata_value(fallback_metadata.get("excerpt"))
+            if fallback_excerpt and "excerpt" not in seen_keys:
+                chinese_lines.append(f"excerpt: {fallback_excerpt}")
+                seen_keys.add("excerpt")
+
+            fallback_series_title = _stringify_metadata_value(fallback_metadata.get("series_title"))
+            if fallback_series_title and "series.title" not in seen_keys:
+                chinese_lines.append("series:")
+                fallback_series_id = fallback_metadata.get("series_id")
+                if fallback_series_id is not None:
+                    chinese_lines.append(f"  id: {fallback_series_id}")
+                chinese_lines.append(f"  title: {fallback_series_title}")
+                seen_keys.add("series.title")
+
+            fallback_tags = _stringify_metadata_value(fallback_metadata.get("tags"))
+            if fallback_tags and "tags" not in seen_keys:
+                chinese_lines.append(f"tags: {fallback_tags}")
+                seen_keys.add("tags")
+
+            created_timestamp = fallback_metadata.get("created_timestamp") or fallback_metadata.get("timestamp")
+            if created_timestamp and "create_date" not in seen_keys:
+                if isinstance(created_timestamp, datetime):
+                    created_text = created_timestamp.isoformat()
+                else:
+                    created_text = _stringify_metadata_value(created_timestamp)
+                chinese_lines.append(f"create_date: {created_text}")
+                seen_keys.add("create_date")
+
+            updated_timestamp = fallback_metadata.get("updated_timestamp")
+            if updated_timestamp and "update_date" not in seen_keys:
+                if isinstance(updated_timestamp, datetime):
+                    updated_text = updated_timestamp.isoformat()
+                else:
+                    updated_text = _stringify_metadata_value(updated_timestamp)
+                chinese_lines.append(f"update_date: {updated_text}")
+                seen_keys.add("update_date")
+
+            fallback_fee_required = _stringify_metadata_value(fallback_metadata.get("fee_required"))
+            if fallback_fee_required and "fee_required" not in seen_keys:
+                chinese_lines.append(f"fee_required: {fallback_fee_required}")
+                seen_keys.add("fee_required")
+
         return '\n'.join(chinese_lines)
-    
+
     except Exception as e:
         raise ValueError(f"YAML解析失败: {e}")
 
@@ -649,9 +924,12 @@ def process_bilingual_file(
         # 提取正文部分
         content_lines = lines[yaml_end_line + 1:]
 
-        title = extract_title_from_yaml(yaml_content)
-        novel_id = extract_novel_id_from_yaml(yaml_content)
-        timestamp_dt = _extract_timestamp_from_yaml(yaml_content)
+        yaml_novel_id = extract_novel_id_from_yaml(yaml_content)
+        structured_metadata = _resolve_structured_metadata(input_path, yaml_novel_id)
+
+        title = extract_title_from_yaml(yaml_content, structured_metadata.get("title"))
+        novel_id = extract_novel_id_from_yaml(yaml_content, structured_metadata.get("novel_id"))
+        timestamp_dt = _extract_timestamp_from_yaml(yaml_content, structured_metadata.get("timestamp"))
         timestamp_label = timestamp_dt.isoformat() if timestamp_dt else None
 
         skip, reason = _should_skip_article(
@@ -659,13 +937,14 @@ def process_bilingual_file(
             title_filters or [],
             series_filters or [],
             caption_filters or [],
+            structured_metadata,
         )
         if skip:
             _log_article_result("跳过文件", timestamp_label, title, novel_id, reason, input_path)
             return True
 
         # 处理YAML
-        chinese_yaml = extract_chinese_from_yaml(yaml_content)
+        chinese_yaml = extract_chinese_from_yaml(yaml_content, structured_metadata)
         
         # 处理正文
         chinese_content = extract_chinese_from_content(content_lines, include_original)
@@ -692,16 +971,14 @@ def process_bilingual_file(
         return False
 
 
-def extract_novel_id_from_yaml(yaml_content: str) -> Optional[int]:
+def extract_novel_id_from_yaml(
+    yaml_content: str,
+    fallback_id: Optional[int] = None,
+) -> Optional[int]:
     """从YAML内容中提取用于排序的整数ID。优先使用 novel_id，其次 post_id。"""
     try:
-        lines = yaml_content.strip().split('\n')
-        # 跳过开头/结尾分隔
-        if lines and lines[0].strip() == '---':
-            lines = lines[1:]
-        if lines and lines[-1].strip() == '---':
-            lines = lines[:-1]
-        target_keys = ("novel_id", "post_id")
+        lines = _yaml_body_lines(yaml_content)
+        target_keys = ("novel_id", "post_id", "ID")
         for line in lines:
             if not line or line[0].isspace():
                 continue
@@ -714,9 +991,9 @@ def extract_novel_id_from_yaml(yaml_content: str) -> Optional[int]:
             candidate = _extract_first_int(raw)
             if candidate is not None:
                 return candidate
-        return None
+        return fallback_id
     except Exception:
-        return None
+        return fallback_id
 
 
 def merge_chinese_files(
@@ -762,7 +1039,7 @@ def merge_chinese_files(
             print("未找到任何符合条件的双语文件")
             return False
 
-        file_infos: List[Tuple[float, int, Path, List[str], str, Optional[str]]] = []
+        file_infos: List[Tuple[float, int, Path, List[str], str, Optional[str], Dict[str, Any]]] = []
         failed_count = 0
         for file_path in candidate_files:
             try:
@@ -791,14 +1068,16 @@ def merge_chinese_files(
                 yaml_lines = lines[:yaml_end_line + 1]
                 yaml_content = '\n'.join(yaml_lines)
                 content_lines = lines[yaml_end_line + 1:]
-                novel_id = extract_novel_id_from_yaml(yaml_content)
+                yaml_novel_id = extract_novel_id_from_yaml(yaml_content)
+                structured_metadata = _resolve_structured_metadata(file_path, yaml_novel_id)
+                novel_id = extract_novel_id_from_yaml(yaml_content, structured_metadata.get("novel_id"))
                 if novel_id is None:
                     novel_id = _extract_first_int(file_path.stem) or 10**18
-                timestamp_dt = _extract_timestamp_from_yaml(yaml_content)
+                timestamp_dt = _extract_timestamp_from_yaml(yaml_content, structured_metadata.get("timestamp"))
                 timestamp_label = timestamp_dt.isoformat() if timestamp_dt else None
                 sort_value = _timestamp_sort_value(timestamp_dt)
                 file_infos.append(
-                    (sort_value, novel_id, file_path, content_lines, yaml_content, timestamp_label)
+                    (sort_value, novel_id, file_path, content_lines, yaml_content, timestamp_label, structured_metadata)
                 )
             except Exception as e:
                 approx_id = _extract_first_int(file_path.stem)
@@ -823,26 +1102,23 @@ def merge_chinese_files(
         chapter_count = 0
         skipped_short = 0
 
-        for _, novel_id, file_path, content_lines, yaml_content, timestamp_label in file_infos:
+        for _, novel_id, file_path, content_lines, yaml_content, timestamp_label, structured_metadata in file_infos:
             try:
-                title = extract_title_from_yaml(yaml_content)
+                title = extract_title_from_yaml(yaml_content, structured_metadata.get("title"))
                 skip, reason = _should_skip_article(
                     yaml_content,
                     title_filters or [],
                     series_filters or [],
                     caption_filters or [],
+                    structured_metadata,
                 )
                 if skip:
                     _log_article_result("跳过文件", timestamp_label, title, novel_id, reason, file_path)
                     continue
-                chinese_yaml = extract_chinese_from_yaml(yaml_content)
+                chinese_yaml = extract_chinese_from_yaml(yaml_content, structured_metadata)
                 chinese_content = extract_chinese_from_content(content_lines, include_original)
 
-                safe_title = _normalize_whitespace(title)
-                m = re.search(r"[，。、；：,.!?！？]", safe_title)
-                if m:
-                    safe_title = safe_title[:m.start()]
-                chapter_label = f"第{chapter_count + 1}章 {safe_title[:25]}"
+                chapter_label = f"第{chapter_count + 1}章 {_format_display_title(title)}"
 
                 article_block: List[str] = [chapter_label, ""]
                 if chinese_yaml.strip():

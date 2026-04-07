@@ -12,6 +12,7 @@ from typing import List, Tuple, Optional, Dict
 from .config import TranslationConfig
 from .logger import UnifiedLogger
 from .quality_checker import QualityChecker
+from .run_state import OutputInspection, TranslationStateStore
 from .task import TranslationTask
 from ..utils.file import parse_yaml_front_matter
 
@@ -19,7 +20,13 @@ from ..utils.file import parse_yaml_front_matter
 class FileHandler:
     """文件处理类"""
     
-    def __init__(self, config: TranslationConfig, logger: UnifiedLogger, quality_checker: QualityChecker):
+    def __init__(
+        self,
+        config: TranslationConfig,
+        logger: UnifiedLogger,
+        quality_checker: QualityChecker,
+        state_store: Optional[TranslationStateStore] = None,
+    ):
         """
         初始化文件处理器
         
@@ -31,6 +38,7 @@ class FileHandler:
         self.config = config
         self.logger = logger
         self.quality_checker = quality_checker
+        self.state_store = state_store
     
     def _natural_sort_key(self, filename: str) -> List:
         """自然排序键函数，正确处理数字"""
@@ -172,8 +180,8 @@ class FileHandler:
         # 显示文章信息
         self._log_article_info(yaml_data, len(text_content))
         
-        # 确定输出文件路径
-        output_path = self._get_output_path(file_path)
+        # 确定输出文件路径，统一走主流水线规则
+        output_path = self._resolve_translation_output_path(file_path)
         
         # 检查是否需要处理
         if not self.config.overwrite and output_path.exists():
@@ -193,14 +201,13 @@ class FileHandler:
     def _should_process_file(self, file_path: Path) -> bool:
         """判断文件是否需要处理"""
         name = file_path.name
-        stem = file_path.stem
-        
+
         # 1) 若是重复的 _bilingual_bilingual.txt，直接删除后返回
         if name.endswith("_bilingual_bilingual.txt"):
             self.logger.info(f"删除重复文件: {file_path}")
             file_path.unlink()
             return False
-        
+
         # 2) 若是单 _bilingual 后缀，检查质量（增强模式跳过此检查）
         if name.endswith("_bilingual.txt"):
             if self.config.enhanced_mode:
@@ -212,36 +219,95 @@ class FileHandler:
             else:
                 self.logger.info(f"现有bilingual文件质量不佳，删除: {file_path}")
                 file_path.unlink()
-        
+
         # 3) 若是 _zh 文件，跳过
         if name.endswith("_zh.txt"):
             self.logger.info(f"跳过已翻译文件: {file_path}")
             return False
-        
-        # 4) 若是无后缀原文，检查是否已有对应的bilingual文件（除非强制覆盖）
-        if not any(name.endswith(suffix) for suffix in ["_zh.txt", "_bilingual.txt", "_awq_zh.txt", "_awq_bilingual.txt"]):
-            # 检查bilingual-simple模式的输出路径
-            if self.config.bilingual_simple:
-                # bilingual_simple模式：检查 _bilingual 子目录
-                bilingual_dir = file_path.parent.parent / f"{file_path.parent.name}_bilingual"
-                bilingual_path = bilingual_dir / f"{stem}.txt"
-            else:
-                # 普通模式：检查同目录下的bilingual文件
-                bilingual_path = file_path.parent / f"{stem}_bilingual.txt"
-            
-            if bilingual_path.exists() and not self.config.overwrite:
-                # Debug模式下，每次都是新文件（带时间戳），不需要跳过
-                if self.config.debug:
-                    self.logger.info(f"Debug模式：跳过质量检查: {file_path}")
-                else:
-                    if self._check_existing_bilingual_quality(bilingual_path):
-                        self.logger.info(f"已有高质量bilingual文件，跳过: {file_path}")
-                        return False
-                    else:
-                        self.logger.info(f"删除低质量bilingual文件: {bilingual_path}")
-                        bilingual_path.unlink()
-        
+
         return True
+
+    def _resolve_translation_output_path(self, input_path: Path) -> Path:
+        """按主翻译流水线的规则计算输出路径。"""
+        stem = input_path.stem
+        suffix = self.config.get_output_suffix()
+
+        if self.config.debug:
+            from datetime import datetime
+
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            return input_path.parent / f"{stem}_{ts}{suffix}.txt"
+
+        if self.config.bilingual_simple:
+            output_dir = input_path.parent.parent / f"{input_path.parent.name}_bilingual"
+        else:
+            output_dir = input_path.parent.parent / f"{input_path.parent.name}_zh"
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir / f"{stem}.txt"
+
+    def _inspect_translation_output(
+        self,
+        source_path: Path,
+        output_path: Path,
+    ) -> OutputInspection:
+        """检查输出文件当前状态，优先使用持久化 state，其次回退到内容扫描。"""
+        if self.state_store:
+            return self.state_store.inspect_output(
+                source_path=source_path,
+                output_path=output_path,
+                bilingual_simple=self.config.bilingual_simple,
+            )
+
+        if not output_path.exists():
+            return OutputInspection(
+                status="missing",
+                reason="输出文件不存在",
+                source_path=source_path,
+                output_path=output_path,
+            )
+
+        try:
+            content = output_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            return OutputInspection(
+                status="failed",
+                reason=f"读取输出文件失败: {exc}",
+                source_path=source_path,
+                output_path=output_path,
+            )
+
+        placeholder_count = content.count("[翻译未完成]")
+        failure_count = sum(content.count(marker) for marker in ("[翻译失败]", "无法翻译", "（以下省略）", "（省略）"))
+        if placeholder_count > 0:
+            return OutputInspection(
+                status="partial",
+                reason=f"发现 {placeholder_count} 处未完成标记",
+                source_path=source_path,
+                output_path=output_path,
+                placeholder_count=placeholder_count,
+                failure_marker_count=failure_count,
+                content_length=len(content),
+            )
+        if failure_count > 0:
+            return OutputInspection(
+                status="failed",
+                reason=f"发现 {failure_count} 处失败标记",
+                source_path=source_path,
+                output_path=output_path,
+                placeholder_count=placeholder_count,
+                failure_marker_count=failure_count,
+                content_length=len(content),
+            )
+        return OutputInspection(
+            status="complete",
+            reason="输出文件已完成",
+            source_path=source_path,
+            output_path=output_path,
+            placeholder_count=placeholder_count,
+            failure_marker_count=failure_count,
+            content_length=len(content),
+        )
     
     def _check_existing_bilingual_quality(self, file_path: Path) -> bool:
         """检查现有bilingual文件的质量"""
@@ -254,7 +320,7 @@ class FileHandler:
                 return False
             
             # 检查是否包含错误模式
-            error_patterns = ["（以下省略）", "（省略）", "无法翻译"]
+            error_patterns = ["（以下省略）", "（省略）", "无法翻译", "[翻译未完成]", "[翻译失败]"]
             for pattern in error_patterns:
                 if pattern in content:
                     return False
@@ -280,10 +346,8 @@ class FileHandler:
         self.logger.info(f"   原文长度: {text_length} 字符")
     
     def _get_output_path(self, input_path: Path) -> Path:
-        """获取输出文件路径"""
-        stem = input_path.stem
-        suffix = self.config.get_output_suffix()
-        return input_path.parent / f"{stem}{suffix}.txt"
+        """兼容旧调用：统一委托到主输出路径计算逻辑。"""
+        return self._resolve_translation_output_path(input_path)
     
     def _translate_content(self, text_content: str, yaml_data: Optional[Dict]) -> str:
         """翻译内容"""
@@ -346,13 +410,23 @@ class FileHandler:
         tasks: List[TranslationTask] = []
         for file_path, kind in filtered_items:
             if kind == "translate":
-                output_path = self._get_output_path(file_path)
+                output_path = self._resolve_translation_output_path(file_path)
+                output_state = self._inspect_translation_output(file_path, output_path)
+                if output_state.status == "complete" and not self.config.overwrite:
+                    self.logger.info(f"已有完成输出，跳过: {output_path}")
+                    continue
+                if output_state.status in {"partial", "failed", "running"}:
+                    self.logger.info(
+                        f"检测到{output_state.status}输出，计划重跑: {output_path} ({output_state.reason})"
+                    )
                 tasks.append(
                     TranslationTask(
                         original_path=file_path,
                         existing_bilingual_path=None,
                         output_path=output_path,
                         mode="translate",
+                        output_status=output_state.status,
+                        output_reason=output_state.reason,
                     )
                 )
             elif kind == "repair_original":
