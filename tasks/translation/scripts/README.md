@@ -2,6 +2,12 @@
 
 本目录存放翻译流水线的辅助脚本。按场景分为 3 类：下载、修复、清理。
 
+进入脚本细节前建议先看：
+
+- [`../../../docs/PROJECT_STATUS.md`](../../../docs/PROJECT_STATUS.md)：当前状态、组件健康度、开发计划
+- [`../README.md`](../README.md)：翻译任务主操作手册
+- [`../../../docs/journal/README.md`](../../../docs/journal/README.md)：历史决策和排障记录
+
 ## 1) Fanbox 下载（浏览器版，推荐）
 
 ### `fanbox_browser_downloader.js`（批量下载）

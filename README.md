@@ -2,6 +2,12 @@
 
 本仓库包含多个任务子项目。当前最常用的是 `tasks/translation`（Pixiv/Fanbox 下载 + 日中翻译 + 修复清理）。
 
+新 agent / 新对话建议先读：
+
+- [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)：当前重点、组件状态、开发计划
+- [`docs/AGENT_CONTEXT.md`](docs/AGENT_CONTEXT.md)：稳定背景和操作约定
+- [`tasks/translation/README.md`](tasks/translation/README.md)：翻译子系统执行手册
+
 ## 关键目录
 
 ```
@@ -13,6 +19,7 @@ genai-playground/
 │   └── monitor_translation.sh
 ├── docs/
 │   ├── README.md
+│   ├── PROJECT_STATUS.md
 │   ├── AGENT_CONTEXT.md
 │   └── journal/
 └── tasks/
@@ -68,6 +75,8 @@ conda run -n llm python tasks/translation/src/scripts/cleanup_bilingual.py --hel
 
 ## 文档
 
+- 当前状态与计划：[`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
 - 总览：[`docs/README.md`](docs/README.md)
+- Agent 上下文：[`docs/AGENT_CONTEXT.md`](docs/AGENT_CONTEXT.md)
 - 翻译任务：[`tasks/translation/README.md`](tasks/translation/README.md)
 - Journal 索引：[`docs/journal/README.md`](docs/journal/README.md)

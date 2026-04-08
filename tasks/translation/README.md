@@ -2,6 +2,14 @@
 
 当前翻译流水线分为 3 段：`下载 -> 翻译 -> 修复/清理`，支持 Pixiv 和 Fanbox 两条下载链路。
 
+开始前建议先看：
+
+- [`../../docs/PROJECT_STATUS.md`](../../docs/PROJECT_STATUS.md)：当前状态、组件健康度、开发计划
+- [`../../docs/AGENT_CONTEXT.md`](../../docs/AGENT_CONTEXT.md)：稳定背景和常用约定
+- [`../../docs/journal/README.md`](../../docs/journal/README.md)：历史决策和问题记录
+
+这份 README 主要负责“怎么运行”，不是“当前优先级的真相源”。
+
 ## 环境
 
 建议先执行：
