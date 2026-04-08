@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-The Conda specs in `environment-llm.yml` and the root `Makefile` define how every tool is invoked through the `llm` environment. Product documentation sits in `docs/`, including `docs/AGENT_CONTEXT.md` for prompt contracts and `docs/JOURNAL.md` for operational notes. Translation logic is under `tasks/translation/src/` with `core/` for pipelines and QA, `cli/` for user entry points, and `utils/` for helpers; prompts, profiles, and configs live alongside. Runtime artifacts land in `logs/` or `tasks/translation/logs/`, while large datasets belong in `tasks/translation/data/` (git-ignored). Shell utilities are collected in `scripts/`, notably `manage_vllm.sh` for lifecycle commands.
+The Conda specs in `environment-llm.yml` and the root `Makefile` define how every tool is invoked through the `llm` environment. Product documentation sits in `docs/`, with `docs/PROJECT_STATUS.md` as the current source of truth for active priorities and component status, `docs/AGENT_CONTEXT.md` for stable project context, and `docs/journal/README.md` for historical decisions and operational notes. Translation logic is under `tasks/translation/src/` with `core/` for pipelines and QA, `cli/` for user entry points, and `utils/` for helpers; prompts, profiles, and configs live alongside. Runtime artifacts land in `logs/` or `tasks/translation/logs/`, while large datasets belong in `tasks/translation/data/` (git-ignored). Shell utilities are collected in `scripts/`, notably `manage_vllm.sh` for lifecycle commands.
 
 ## Build, Test, and Development Commands
 Key invocations (always `conda run -n llm ...` if not using `make`):
