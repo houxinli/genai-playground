@@ -12,6 +12,7 @@ export USER_ID ?=
 export CREATOR_ID ?=
 
 .PHONY: vllm vllm-start vllm-stop vllm-status vllm-restart vllm-test vllm-start-32b vllm-start-bg vllm-start-32b-bg vllm-logs vllm-logs-requests vllm-start-debug vllm-start-bg-debug
+.PHONY: mlx mlx-start mlx-start-bg mlx-stop mlx-status mlx-restart mlx-test mlx-logs
 
 # 统一入口：根据 MODE=fg/bg 与 MODEL 选择启动方式
 vllm:
@@ -64,6 +65,36 @@ vllm-logs:
 vllm-logs-requests:
 	@echo "📝 查看 vLLM 请求日志..."
 	./scripts/manage_vllm.sh logs-requests
+
+mlx:
+	@echo "🚀 启动 MLX 服务（MODE=$(MODE), MODEL=$(MODEL)）..."
+	MODEL=$(MODEL) MODE=$(MODE) ./scripts/manage_mlx.sh run
+
+mlx-start:
+	@$(MAKE) mlx MODE=fg MODEL=$(MODEL)
+
+mlx-start-bg:
+	@$(MAKE) mlx MODE=bg MODEL=$(MODEL)
+
+mlx-stop:
+	@echo "🛑 停止 MLX 服务..."
+	./scripts/manage_mlx.sh stop
+
+mlx-status:
+	@echo "📊 查看 MLX 服务状态..."
+	./scripts/manage_mlx.sh status
+
+mlx-restart:
+	@echo "🔄 重启 MLX 服务（MODE=$(MODE), MODEL=$(MODEL)）..."
+	MODEL=$(MODEL) MODE=$(MODE) ./scripts/manage_mlx.sh restart
+
+mlx-test:
+	@echo "🧪 测试 MLX 服务..."
+	$(PY) scripts/check_vllm.py http://127.0.0.1:8080/v1
+
+mlx-logs:
+	@echo "📝 查看 MLX 服务日志..."
+	./scripts/manage_mlx.sh logs
 
 # 下载任务管理
 .PHONY: pixiv-download fanbox-download fanbox-browser-script

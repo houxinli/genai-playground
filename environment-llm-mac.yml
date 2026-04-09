@@ -9,7 +9,7 @@ dependencies:
   - xz
   - zlib
   - pip:
-      # 仅客户端依赖（Mac 无 CUDA/vLLM 服务端）
+      # Mac 客户端 + Apple Silicon 本地 MLX 服务端
       - openai==1.102.0
       - httpx==0.28.1
       - requests==2.32.5
@@ -20,7 +20,9 @@ dependencies:
       # 文本与工具
       - regex==2025.7.34
       - tiktoken==0.11.0
-      - transformers>=4.55.0
+      - transformers==5.3.0
+      - sentencepiece==0.2.1
+      - mlx-lm==0.31.2
       # Pixiv 下载脚本依赖
       - pixivpy3
       - beautifulsoup4
@@ -29,6 +31,5 @@ dependencies:
       # 日志与测试（可选）
       - python-json-logger==3.3.0
       - pytest==8.3.3
-      # 兼容性：不安装任何 nvidia/cuda/xformers/vllm
+      # 兼容性：不安装任何 nvidia/cuda/xformers/vllm，Apple Silicon 走 MLX
 ## 提示：如需固定安装路径，可自行添加 prefix 字段；默认由 conda 管理
-

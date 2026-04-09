@@ -87,6 +87,15 @@ make vllm-status
 make vllm-logs
 ```
 
+### Apple Silicon：启动本地 MLX（Gemma 4 Heretic）
+
+```bash
+conda env update -n llm -f environment-llm-mac.yml
+make mlx-start-bg MODEL=deadbydawn101/gemma-4-E2B-Heretic-Uncensored-mlx-4bit
+make mlx-status
+make mlx-test
+```
+
 ### 批量翻译（推荐）
 
 ```bash
@@ -109,6 +118,12 @@ make translate-start-fg ARGS="tasks/translation/data/pixiv/50235390/25341719.txt
 ```
 
 说明：默认 provider 是 `openrouter`。如需切本地 vLLM，请显式传 `--llm-provider vllm --llm-base-url http://localhost:8000/v1`。
+
+在 Apple Silicon + MLX 场景下，可直接复用同一套 OpenAI 兼容接口：
+
+```bash
+make translate-start-fg ARGS="tasks/translation/data/pixiv/50235390/12430834.txt --preset pixiv_gemma4_heretic_mlx_local --stream"
+```
 
 ## 3. 修复与清理
 

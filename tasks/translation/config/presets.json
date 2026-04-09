@@ -16,5 +16,15 @@
     "prompt_style": "fanfic",
     "token_estimator": "simple",
     "disable_llm_qc": true
+  },
+  "pixiv_gemma4_heretic_mlx_local": {
+    "llm_provider": "vllm",
+    "llm_base_url": "http://127.0.0.1:8080/v1",
+    "model": "deadbydawn101/gemma-4-E2B-Heretic-Uncensored-mlx-4bit",
+    "bilingual_simple": true,
+    "token_estimator": "simple",
+    "disable_llm_qc": true,
+    "line_batch_size_lines": 40,
+    "context_lines": 3
   }
 }
