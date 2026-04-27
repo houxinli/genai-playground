@@ -26,5 +26,25 @@
     "disable_llm_qc": true,
     "line_batch_size_lines": 40,
     "context_lines": 3
+  },
+  "pixiv_qwen3_14b_mlx_local": {
+    "llm_provider": "vllm",
+    "llm_base_url": "http://127.0.0.1:8080/v1",
+    "model": "mlx-community/Qwen3-14B-4bit",
+    "bilingual_simple": true,
+    "token_estimator": "simple",
+    "disable_llm_qc": true,
+    "line_batch_size_lines": 40,
+    "context_lines": 3
+  },
+  "pixiv_qwen3_8b_mlx_local": {
+    "llm_provider": "vllm",
+    "llm_base_url": "http://127.0.0.1:8080/v1",
+    "model": "mlx-community/Qwen3-8B-4bit",
+    "bilingual_simple": true,
+    "token_estimator": "simple",
+    "disable_llm_qc": true,
+    "line_batch_size_lines": 40,
+    "context_lines": 3
   }
 }

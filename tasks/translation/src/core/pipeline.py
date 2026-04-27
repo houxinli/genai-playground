@@ -11,6 +11,7 @@ from typing import Any, List, Tuple, Dict, Optional
 from .config import TranslationConfig
 from .logger import UnifiedLogger
 from .quality_checker import QualityChecker
+from .repairer import BilingualRepairer
 from .run_state import TranslationStateStore
 from .translator import Translator
 from .file_handler import FileHandler
@@ -47,6 +48,7 @@ class TranslationPipeline:
         self.translator = Translator(config, self.logger, self.quality_checker)
         self.state_store = TranslationStateStore(config.log_dir)
         self.file_handler = FileHandler(config, self.logger, self.quality_checker, self.state_store)
+        self.repairer = BilingualRepairer(config, self.translator, self.logger, self.state_store)
         self.current_run_id = ""
         self.current_file_path: Optional[Path] = None
         
@@ -62,6 +64,7 @@ class TranslationPipeline:
             "model": self.config.model,
             "bilingual_simple": self.config.bilingual_simple,
             "enhanced_mode": self.config.enhanced_mode,
+            "repair_existing": self.config.repair_existing,
             "overwrite": self.config.overwrite,
             "debug": self.config.debug,
             "debug_files": self.config.debug_files,
@@ -129,8 +132,10 @@ class TranslationPipeline:
                     self.logger.info(f"限制处理文件数量为: {len(tasks_to_process)} 个文件")
                 target_total = len(tasks_to_process)
                 self.logger.info(f"开始处理 {target_total} 个文件")
+                task_modes = {task.mode for task in tasks_to_process}
+                run_mode = "repair" if task_modes == {"repair"} else "translate"
                 run_id = self.state_store.start_run(
-                    mode="translate",
+                    mode=run_mode,
                     inputs=inputs,
                     target_total=target_total,
                     config_snapshot=self._build_run_snapshot(),
@@ -244,15 +249,56 @@ class TranslationPipeline:
     
     def process_task(self, task: TranslationTask) -> bool:
         if task.mode == "repair":
-            target = task.existing_bilingual_path or task.output_path
-            self.logger.error(
-                f"暂未在 translate.py 中支持修复流程，请使用 scripts/repair_bilingual.py 处理: {target}"
-            )
-            return False
+            return self.process_repair_task(task)
         if not task.original_path:
             self.logger.error("缺少原文路径，暂不支持此任务类型")
             return False
         return self.process_file(task.original_path, task=task)
+
+    def _sync_component_loggers(self) -> None:
+        """同步当前 logger 到各个组件。"""
+        self.translator.logger = self.logger
+        self.file_handler.logger = self.logger
+        self.repairer.logger = self.logger
+        if hasattr(self.quality_checker, "logger"):
+            self.quality_checker.logger = self.logger
+        if hasattr(self.translator, "streaming_handler") and self.translator.streaming_handler:
+            self.translator.streaming_handler.logger = self.logger
+        if hasattr(self.quality_checker, "streaming_handler") and self.quality_checker.streaming_handler:
+            self.quality_checker.streaming_handler.logger = self.logger
+
+    def process_repair_task(self, task: TranslationTask) -> bool:
+        """处理 repair 任务。"""
+        log_target = task.original_path or task.existing_bilingual_path or task.output_path
+        UnifiedLogger._debug_files_mode = self.config.debug_files
+        UnifiedLogger._log_level = self.config.log_level
+        log_dir = log_target.parent if self.config.debug_files else self.config.log_dir
+        self.logger = UnifiedLogger.create_for_file(
+            log_target,
+            log_dir,
+            stream_output=bool(self.config.realtime_log),
+            custom_basename=f"{log_target.stem}_repair",
+        )
+        self._sync_component_loggers()
+
+        log_file_path = self.logger.get_log_file_path()
+        self.logger.info(f"开始修复文件: {log_target}")
+        self.logger.info(f"📝 日志文件路径: {log_file_path}")
+        self.logger.info(
+            f"修复任务输出: {task.output_path}"
+            + (
+                f"（来源双语: {task.existing_bilingual_path}）"
+                if task.existing_bilingual_path
+                else ""
+            )
+        )
+
+        result = self.repairer.repair_task(task, run_id=self.current_run_id)
+        if result.success:
+            self.logger.info(f"✅ 修复完成: {result.reason}")
+        else:
+            self.logger.warning(f"⚠️ 修复未完全完成: {result.reason}")
+        return result.success
 
     def _record_processing_state(
         self,
@@ -299,15 +345,7 @@ class TranslationPipeline:
             log_dir,
             stream_output=bool(self.config.realtime_log),
         )
-        self.translator.logger = self.logger
-        self.file_handler.logger = self.logger
-        # 同步更新质量检测与流式处理器上的logger，避免控制台重复调试输出
-        if hasattr(self.quality_checker, 'logger'):
-            self.quality_checker.logger = self.logger
-        if hasattr(self.translator, 'streaming_handler') and self.translator.streaming_handler:
-            self.translator.streaming_handler.logger = self.logger
-        if hasattr(self.quality_checker, 'streaming_handler') and self.quality_checker.streaming_handler:
-            self.quality_checker.streaming_handler.logger = self.logger
+        self._sync_component_loggers()
         # 获取日志文件路径
         log_file_path = self.logger.get_log_file_path()
         self.logger.info(f"开始处理文件: {path}")

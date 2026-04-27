@@ -87,14 +87,16 @@ make vllm-status
 make vllm-logs
 ```
 
-### Apple Silicon：启动本地 MLX（Gemma 4 Heretic）
+### Apple Silicon：启动本地 MLX（默认 Gemma 4 Heretic）
 
 ```bash
 conda env update -n llm -f environment-llm-mac.yml
-make mlx-start-bg MODEL=deadbydawn101/gemma-4-E2B-Heretic-Uncensored-mlx-4bit
+make mlx-start-bg
 make mlx-status
 make mlx-test
 ```
+
+如果需要临时切换模型，再显式传 `MODEL=...`。
 
 ### 批量翻译（推荐）
 
@@ -127,7 +129,19 @@ make translate-start-fg ARGS="tasks/translation/data/pixiv/50235390/12430834.txt
 
 ## 3. 修复与清理
 
-### 增量修复（只补坏行/缺失行）
+### 增量修复（主入口，推荐）
+
+```bash
+conda run -n llm python tasks/translation/src/translate.py \
+  tasks/translation/data/pixiv/50235390 \
+  --repair-existing \
+  --preset pixiv_gemma4_heretic_mlx_local \
+  --stream
+```
+
+这会自动读取同级 `*_bilingual/`，输出到 `*_bilingual_fixed/`。
+
+### 增量修复（高级覆盖参数）
 
 ```bash
 conda run -n llm python tasks/translation/scripts/repair_bilingual.py \
