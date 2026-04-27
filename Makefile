@@ -7,7 +7,9 @@ PY := conda run -n $(CONDA_ENV) python -u
 # 支持参数透传
 export DEBUG ?= 0
 export MODE ?= bg
-export MODEL ?= Qwen/Qwen3-32B-AWQ
+export MODEL ?=
+export VLLM_MODEL ?= Qwen/Qwen3-32B-AWQ
+export MLX_MODEL ?= deadbydawn101/gemma-4-E2B-Heretic-Uncensored-mlx-4bit
 export USER_ID ?=
 export CREATOR_ID ?=
 
@@ -16,18 +18,18 @@ export CREATOR_ID ?=
 
 # 统一入口：根据 MODE=fg/bg 与 MODEL 选择启动方式
 vllm:
-	@echo "🚀 启动 vLLM 服务（MODE=$(MODE), MODEL=$(MODEL), DEBUG=$(DEBUG)）..."
-	MODEL=$(MODEL) DEBUG=$(DEBUG) MODE=$(MODE) ./scripts/manage_vllm.sh run
+	@echo "🚀 启动 vLLM 服务（MODE=$(MODE), MODEL=$(if $(MODEL),$(MODEL),$(VLLM_MODEL)), DEBUG=$(DEBUG)）..."
+	MODEL=$(if $(MODEL),$(MODEL),$(VLLM_MODEL)) DEBUG=$(DEBUG) MODE=$(MODE) ./scripts/manage_vllm.sh run
 
 # 兼容别名
 vllm-start:
-	@$(MAKE) vllm MODE=fg MODEL=$(MODEL) DEBUG=$(DEBUG)
+	@$(MAKE) vllm MODE=fg MODEL=$(if $(MODEL),$(MODEL),$(VLLM_MODEL)) DEBUG=$(DEBUG)
 
 vllm-start-32b:
 	@$(MAKE) vllm MODE=fg MODEL=Qwen/Qwen3-32B DEBUG=$(DEBUG)
 
 vllm-start-bg:
-	@$(MAKE) vllm MODE=bg MODEL=$(MODEL) DEBUG=$(DEBUG)
+	@$(MAKE) vllm MODE=bg MODEL=$(if $(MODEL),$(MODEL),$(VLLM_MODEL)) DEBUG=$(DEBUG)
 
 vllm-start-32b-bg:
 	@$(MAKE) vllm MODE=bg MODEL=Qwen/Qwen3-32B DEBUG=$(DEBUG)
@@ -48,11 +50,11 @@ vllm-status:
 	./scripts/manage_vllm.sh status
 
 vllm-restart:
-	@echo "🔄 重启 vLLM 服务（MODE=$(MODE), MODEL=$(MODEL), DEBUG=$(DEBUG)）..."
+	@echo "🔄 重启 vLLM 服务（MODE=$(MODE), MODEL=$(if $(MODEL),$(MODEL),$(VLLM_MODEL)), DEBUG=$(DEBUG)）..."
 	./scripts/manage_vllm.sh stop
 	@echo "⏳ 等待服务完全停止..."
 	@sleep 3
-	MODEL=$(MODEL) DEBUG=$(DEBUG) MODE=$(MODE) ./scripts/manage_vllm.sh restart
+	MODEL=$(if $(MODEL),$(MODEL),$(VLLM_MODEL)) DEBUG=$(DEBUG) MODE=$(MODE) ./scripts/manage_vllm.sh restart
 
 vllm-test:
 	@echo "🧪 测试 vLLM 服务..."
@@ -67,14 +69,14 @@ vllm-logs-requests:
 	./scripts/manage_vllm.sh logs-requests
 
 mlx:
-	@echo "🚀 启动 MLX 服务（MODE=$(MODE), MODEL=$(MODEL)）..."
-	MODEL=$(MODEL) MODE=$(MODE) ./scripts/manage_mlx.sh run
+	@echo "🚀 启动 MLX 服务（MODE=$(MODE), MODEL=$(if $(MODEL),$(MODEL),$(MLX_MODEL))）..."
+	MODEL=$(if $(MODEL),$(MODEL),$(MLX_MODEL)) MODE=$(MODE) ./scripts/manage_mlx.sh run
 
 mlx-start:
-	@$(MAKE) mlx MODE=fg MODEL=$(MODEL)
+	@$(MAKE) mlx MODE=fg MODEL=$(if $(MODEL),$(MODEL),$(MLX_MODEL))
 
 mlx-start-bg:
-	@$(MAKE) mlx MODE=bg MODEL=$(MODEL)
+	@$(MAKE) mlx MODE=bg MODEL=$(if $(MODEL),$(MODEL),$(MLX_MODEL))
 
 mlx-stop:
 	@echo "🛑 停止 MLX 服务..."
@@ -85,8 +87,8 @@ mlx-status:
 	./scripts/manage_mlx.sh status
 
 mlx-restart:
-	@echo "🔄 重启 MLX 服务（MODE=$(MODE), MODEL=$(MODEL)）..."
-	MODEL=$(MODEL) MODE=$(MODE) ./scripts/manage_mlx.sh restart
+	@echo "🔄 重启 MLX 服务（MODE=$(MODE), MODEL=$(if $(MODEL),$(MODEL),$(MLX_MODEL))）..."
+	MODEL=$(if $(MODEL),$(MODEL),$(MLX_MODEL)) MODE=$(MODE) ./scripts/manage_mlx.sh restart
 
 mlx-test:
 	@echo "🧪 测试 MLX 服务..."

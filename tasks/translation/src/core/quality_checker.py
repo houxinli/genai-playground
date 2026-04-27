@@ -49,14 +49,20 @@ class QualityChecker:
                 base_url = None
         
         # OpenRouter 需要额外的 headers（根据官方文档：https://openrouter.ai/docs/quickstart）
+        client_timeout = getattr(self.config, "request_timeout_s", 60) or 60
         if provider == "openrouter":
             default_headers = {
                 "HTTP-Referer": "https://github.com/houxinli/genai-playground",  # 用于排名展示
                 "X-Title": "Translation Tool"  # 用于排名展示
             }
-            self.client = OpenAI(base_url=base_url, api_key=api_key, default_headers=default_headers, timeout=60)
+            self.client = OpenAI(
+                base_url=base_url,
+                api_key=api_key,
+                default_headers=default_headers,
+                timeout=client_timeout,
+            )
         else:
-            self.client = OpenAI(base_url=base_url, api_key=api_key, timeout=60)
+            self.client = OpenAI(base_url=base_url, api_key=api_key, timeout=client_timeout)
         self.profile_manager = ProfileManager(config.profiles_file)
         self.streaming_handler = StreamingHandler(self.client, logger, config, self.profile_manager)
     

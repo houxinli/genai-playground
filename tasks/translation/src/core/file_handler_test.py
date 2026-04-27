@@ -58,6 +58,37 @@ class TestFileHandlerPartialBilingualRegression(unittest.TestCase):
             self.assertEqual(original, task.original_path)
             self.assertEqual(output_path, task.output_path)
 
+    def test_plan_tasks_builds_repair_task_for_existing_bilingual(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            original_dir = base / "pixiv" / "50235390"
+            bilingual_dir = base / "pixiv" / "50235390_bilingual"
+            original_dir.mkdir(parents=True, exist_ok=True)
+            bilingual_dir.mkdir(parents=True, exist_ok=True)
+
+            original = original_dir / "12430834.txt"
+            bilingual = bilingual_dir / "12430834.txt"
+            original.write_text("---\nnovel_id: 1\n---\n原文A\n", encoding="utf-8")
+            bilingual.write_text("---\nnovel_id: 1\n---\n原文A\n[翻译未完成]\n", encoding="utf-8")
+
+            handler = FileHandler(
+                TranslationConfig(repair_existing=True),
+                UnifiedLogger.create_console_only(),
+                quality_checker=None,
+            )
+
+            tasks = handler.plan_tasks([str(original)])
+
+            self.assertEqual(1, len(tasks))
+            task = tasks[0]
+            self.assertEqual("repair", task.mode)
+            self.assertEqual(original, task.original_path)
+            self.assertEqual(bilingual, task.existing_bilingual_path)
+            self.assertEqual(
+                base / "pixiv" / "50235390_bilingual_fixed" / "12430834.txt",
+                task.output_path,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
