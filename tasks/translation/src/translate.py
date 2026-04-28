@@ -28,8 +28,6 @@ def main() -> None:
     presets_file = Path(preset_args.presets_file).expanduser() if preset_args.presets_file else None
     prepare_preset_defaults(parser, preset_args.preset, presets_file)
     args = parser.parse_args(raw_argv)
-    if args.llm_provider is None:
-        args.llm_provider = "openrouter"
     
     # 设置默认路径
     setup_default_paths(args)

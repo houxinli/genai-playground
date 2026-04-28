@@ -421,6 +421,16 @@ def infer_canonical(
     return out
 
 
+def is_safe_auto_alias(token: str, canonical: str) -> bool:
+    """Return whether an inferred alias is safe enough for automatic replacement."""
+    if not token or token == canonical:
+        return False
+    # Avoid deleting grammar by treating "高尾却" or "夏奈带" as aliases for "高尾"/"夏奈".
+    if canonical and canonical in token:
+        return False
+    return True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="按日文名映射统一双语文件中的中文人名")
     parser.add_argument("inputs", nargs="+", help="输入文件/目录/通配符")
@@ -437,7 +447,7 @@ def main() -> None:
     parser.add_argument(
         "--auto-canonical",
         choices=["off", "first", "most"],
-        default="first",
+        default="off",
         help="映射缺失时自动推断标准名：first=首次命中，most=最高频，off=不自动推断",
     )
     parser.add_argument("--min-support", type=int, default=1, help="候选别名最小命中次数（默认1）")
@@ -535,7 +545,7 @@ def main() -> None:
                 bucket = {
                     token
                     for token, c in cnt.items()
-                    if token != canonical
+                    if is_safe_auto_alias(token, canonical)
                     and c >= max(1, args.min_support)
                     and edit_distance(token, canonical) <= max(0, args.max_distance)
                 }

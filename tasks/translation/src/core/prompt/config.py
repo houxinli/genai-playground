@@ -32,6 +32,7 @@ class PromptConfig:
     
     # 其他配置
     max_context_lines: int = 5
+    extra_system_context: Optional[str] = None
 
 
 # 各模式的默认配置（不包含data_dir，需要在使用时设置）
@@ -155,7 +156,8 @@ def create_test_config(mode: str, data_dir: Path) -> PromptConfig:
         end_marker=base_config.end_marker,
         support_context=base_config.support_context,
         support_previous_io=base_config.support_previous_io,
-        max_context_lines=base_config.max_context_lines
+        max_context_lines=base_config.max_context_lines,
+        extra_system_context=base_config.extra_system_context,
     )
 
 
@@ -177,7 +179,8 @@ def create_config(mode: str, data_dir: Path) -> PromptConfig:
         end_marker=base_config.end_marker,
         support_context=base_config.support_context,
         support_previous_io=base_config.support_previous_io,
-        max_context_lines=base_config.max_context_lines
+        max_context_lines=base_config.max_context_lines,
+        extra_system_context=base_config.extra_system_context,
     )
 
 
