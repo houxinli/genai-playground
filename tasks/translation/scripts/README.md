@@ -102,6 +102,7 @@
 - 推荐工作流：
   1. 先 `--dry-run --report-file` 看候选统计。
   2. 把稳定的人名和错译都写进 `--rules-file`。
+  3. `--auto-canonical` 默认关闭；只有做候选发现时才临时开 `first` 或 `most`。
   4. 已经维护好别名字典后，建议加 `--no-auto-alias`，避免自动推断带来的误替换。
 - 示例（单文件）：
   ```bash

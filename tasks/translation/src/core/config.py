@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any
 import argparse
 import os
 import json
+from urllib.parse import urlparse
 
 
 @dataclass
@@ -97,6 +98,12 @@ class TranslationConfig:
     # 仅翻译 YAML front matter
     metadata_only: bool = False
 
+    # 人名一致性预读：翻译正文前先从全文抽取名称/昵称/译名表，再注入正文 prompt
+    enable_name_glossary: bool = False
+    name_glossary_file: Optional[Path] = None
+    name_glossary_output_dir: Optional[Path] = None
+    name_glossary_max_chars: int = 120000
+
     # 提供商与连接（可通过环境变量覆盖）
     # 支持 provider: vllm | ollama | openai | openrouter
     llm_provider: str = "openrouter"
@@ -150,6 +157,11 @@ class TranslationConfig:
             return None
 
         provider_via_cli = getattr(args, 'llm_provider', None) or env_provider or 'openrouter'
+        explicit_base_url = getattr(args, 'llm_base_url', None)
+        # 避免 LLM_BASE_URL 污染显式/默认 provider。例如 openrouter 不应误连 localhost:11434。
+        base_url = explicit_base_url
+        if not base_url and env_base_url and env_provider and env_provider.lower() == str(provider_via_cli).lower():
+            base_url = env_base_url
         env_api_key = pick_api_key(provider_via_cli)
         config_api_key = None
         if not env_api_key:
@@ -202,8 +214,12 @@ class TranslationConfig:
             max_retries=getattr(args, 'max_retries', 3),
             retry_delay_s=getattr(args, 'retry_delay_s', 2.0),
             metadata_only=getattr(args, 'metadata_only', False),
+            enable_name_glossary=getattr(args, 'enable_name_glossary', False),
+            name_glossary_file=getattr(args, 'name_glossary_file', None),
+            name_glossary_output_dir=getattr(args, 'name_glossary_output_dir', None),
+            name_glossary_max_chars=getattr(args, 'name_glossary_max_chars', 120000),
             llm_provider=provider_via_cli or 'openrouter',
-            llm_base_url=getattr(args, 'llm_base_url', None) or env_base_url,
+            llm_base_url=base_url,
             llm_api_key=getattr(args, 'llm_api_key', None) or env_api_key or config_api_key,
         )
     
@@ -238,5 +254,24 @@ class TranslationConfig:
         
         if self.retry_wait < 0:
             errors.append("retry_wait 不能为负数")
+
+        provider = (self.llm_provider or "").lower()
+        base_url = (self.llm_base_url or "").strip()
+        if base_url:
+            parsed = urlparse(base_url)
+            host = (parsed.hostname or "").lower()
+            if provider == "openrouter" and host and "openrouter.ai" not in host:
+                errors.append(
+                    "llm_provider=openrouter 时 llm_base_url 必须指向 openrouter.ai；"
+                    "如果要连本地服务，请改用 --llm-provider ollama 或 vllm"
+                )
+            if provider in {"ollama", "vllm"} and "openrouter.ai" in host:
+                errors.append(
+                    f"llm_provider={provider} 不能使用 OpenRouter base URL；"
+                    "请改用 --llm-provider openrouter"
+                )
+
+        if self.name_glossary_max_chars <= 0:
+            errors.append("name_glossary_max_chars 必须为正数")
         
         return errors

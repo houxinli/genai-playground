@@ -168,6 +168,9 @@ class PromptBuilder:
                 with open(terminology_path, 'r', encoding='utf-8') as f:
                     terminology = f.read().strip()
                     system_content += f"\n\n术语对照表：\n{terminology}"
+
+        if config.extra_system_context:
+            system_content += f"\n\n{config.extra_system_context.strip()}"
         
         return system_content
     

@@ -7,7 +7,12 @@ import argparse
 from pathlib import Path
 from typing import List
 
-from ..core.config import TranslationConfig
+try:
+    from ..core.config import TranslationConfig
+except ImportError as exc:  # unittest discover may import this package as top-level "cli".
+    if "attempted relative import" not in str(exc):
+        raise
+    from core.config import TranslationConfig
 
 
 def create_argument_parser() -> argparse.ArgumentParser:
@@ -69,6 +74,29 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sample-yaml-file", type=Path, default=None, help="YAML 专用示例文件路径")
     parser.add_argument("--preface-body-file", type=Path, default=None, help="正文专用前言提示文件路径")
     parser.add_argument("--sample-body-file", type=Path, default=None, help="正文专用示例文件路径")
+    parser.add_argument(
+        "--enable-name-glossary",
+        action="store_true",
+        help="翻译正文前先通读单篇全文抽取人名/昵称译名表，并注入正文 prompt",
+    )
+    parser.add_argument(
+        "--name-glossary-file",
+        type=Path,
+        default=None,
+        help="手动提供人名译名表；设置后会直接注入正文 prompt",
+    )
+    parser.add_argument(
+        "--name-glossary-output-dir",
+        type=Path,
+        default=None,
+        help="自动抽取人名译名表的保存目录，默认写到 log_dir/name_glossaries",
+    )
+    parser.add_argument(
+        "--name-glossary-max-chars",
+        type=int,
+        default=120000,
+        help="自动抽取时送入模型的正文最大字符数，默认120000",
+    )
     
     # 生成参数
     parser.add_argument("--stop", nargs="*", default=["（未完待续）", "[END]", "<|im_end|>", "</s>"], help="停止词")
@@ -140,6 +168,8 @@ def validate_args(args: argparse.Namespace) -> List[str]:
         errors.append(f"前言文件不存在: {args.preface_file}")
     if args.profiles_file and not args.profiles_file.exists():
         errors.append(f"profiles 文件不存在: {args.profiles_file}")
+    if args.name_glossary_file and not args.name_glossary_file.exists():
+        errors.append(f"人名译名表不存在: {args.name_glossary_file}")
     
     return errors
 

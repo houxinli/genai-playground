@@ -127,6 +127,16 @@ make translate-start-fg ARGS="tasks/translation/data/pixiv/50235390/25341719.txt
 make translate-start-fg ARGS="tasks/translation/data/pixiv/50235390/12430834.txt --preset pixiv_gemma4_heretic_mlx_local --stream"
 ```
 
+需要固定系列人名时，先维护一份规则文件，再启用全文预读。存在人工规则时，流水线会优先注入人工规则；自动预读结果会写入 `--name-glossary-output-dir`，用于后续补充规则。
+
+```bash
+make translate-start-fg ARGS="tasks/translation/data/fanbox/momizi813/11386126.txt \
+  --bilingual-simple --stream \
+  --name-glossary-file tasks/translation/data/fanbox/name_maps/momizi813_rules.txt \
+  --enable-name-glossary \
+  --name-glossary-output-dir tasks/translation/logs/name_glossaries"
+```
+
 ## 3. 修复与清理
 
 ### 增量修复（主入口，推荐）

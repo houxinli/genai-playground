@@ -72,6 +72,7 @@ class TranslationPipeline:
             "line_batch_size_lines": self.config.line_batch_size_lines,
             "context_lines": self.config.context_lines,
             "prompt_style": self.config.prompt_style,
+            "enable_name_glossary": self.config.enable_name_glossary,
         }
 
     def run(self, inputs: List[str]) -> int:
@@ -390,6 +391,7 @@ class TranslationPipeline:
         
         # 显示文章信息
         self._log_article_info(yaml_data, len(text_content))
+        self._prepare_name_glossary(path, content, yaml_data)
         
         # 检查是否需要处理
         if not self.config.overwrite and output_path.exists():
@@ -654,6 +656,80 @@ class TranslationPipeline:
             },
         )
         return saved and final_status == "complete"
+
+    def _prepare_name_glossary(self, path: Path, content: str, yaml_data: Optional[Dict]) -> None:
+        """按文件准备人名译名表，并注入 Translator。"""
+        self.translator.clear_name_glossary()
+        manual_glossary = ""
+        auto_glossary = ""
+
+        if self.config.name_glossary_file:
+            try:
+                manual_glossary = Path(self.config.name_glossary_file).read_text(encoding="utf-8").strip()
+                self.logger.info(f"加载人名译名表: {self.config.name_glossary_file}")
+            except Exception as e:
+                self.logger.warning(f"读取人名译名表失败: {e}")
+                manual_glossary = ""
+
+        if self.config.enable_name_glossary:
+            self.logger.info("启用人名预读：开始从全文抽取人名/昵称译名表")
+            auto_glossary, token_stats = self.translator.extract_name_glossary(content, yaml_data)
+            if manual_glossary and auto_glossary:
+                auto_glossary = self._filter_auto_name_glossary(auto_glossary, manual_glossary)
+            if auto_glossary:
+                out_dir = self.config.name_glossary_output_dir or (self.config.log_dir / "name_glossaries")
+                try:
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    out_path = out_dir / f"{path.stem}.names.md"
+                    out_path.write_text(auto_glossary + "\n", encoding="utf-8")
+                    self.logger.info(f"人名译名表已写入: {out_path}")
+                    self.logger.info(f"人名预读 Token 使用: {token_stats}")
+                except Exception as e:
+                    self.logger.warning(f"保存人名译名表失败: {e}")
+
+        glossary_parts = []
+        if manual_glossary:
+            glossary_parts.append(
+                "【人工/历史规则（优先级最高）】\n"
+                + manual_glossary
+            )
+            if auto_glossary:
+                self.logger.info("检测到人工人名规则：自动预读候选已保存，但不注入正文 prompt")
+        elif auto_glossary:
+            glossary_parts.append("【自动预读候选】\n" + auto_glossary)
+        glossary_text = "\n\n".join(glossary_parts).strip()
+
+        if glossary_text:
+            self.translator.set_name_glossary(glossary_text)
+            self.logger.info("人名译名表已注入正文翻译 prompt")
+        elif self.config.enable_name_glossary or self.config.name_glossary_file:
+            self.logger.warning("未获得可用人名译名表，本文件将不注入人名提示")
+
+    def _manual_name_keys(self, manual_glossary: str) -> set[str]:
+        keys: set[str] = set()
+        for raw in manual_glossary.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key = line.split("=", 1)[0].strip()
+            if key:
+                keys.add(key)
+        return keys
+
+    def _filter_auto_name_glossary(self, auto_glossary: str, manual_glossary: str) -> str:
+        """已有人工规则的日文名不再采信自动候选，避免同名冲突。"""
+        manual_keys = self._manual_name_keys(manual_glossary)
+        if not manual_keys:
+            return auto_glossary
+        kept: list[str] = []
+        for raw in auto_glossary.splitlines():
+            line = raw.strip()
+            if line.startswith("|"):
+                cells = [cell.strip() for cell in line.strip("|").split("|")]
+                if cells and cells[0] in manual_keys:
+                    continue
+            kept.append(raw)
+        return "\n".join(kept).strip()
     
     def _log_config_info(self) -> None:
         """记录配置信息"""

@@ -100,6 +100,144 @@ class Translator:
             prompt_config.terminology_file = None
         prompt_config.max_context_lines = getattr(self.config, "context_lines", prompt_config.max_context_lines)
         self.prompt_builder = PromptBuilder(prompt_config)
+        self.name_glossary_context = ""
+
+    def clear_name_glossary(self) -> None:
+        """清除当前文件的人名译名提示，避免跨文件串味。"""
+        self.name_glossary_context = ""
+        if hasattr(self.prompt_builder.config, "extra_system_context"):
+            self.prompt_builder.config.extra_system_context = None
+
+    def set_name_glossary(self, glossary_text: str) -> None:
+        """设置当前文件的人名译名提示，供正文翻译 prompt 使用。"""
+        block = self._format_name_glossary_block(glossary_text)
+        self.name_glossary_context = block
+        if hasattr(self.prompt_builder.config, "extra_system_context"):
+            self.prompt_builder.config.extra_system_context = block
+
+    def _format_name_glossary_block(self, glossary_text: str) -> str:
+        glossary_text = (glossary_text or "").strip()
+        if not glossary_text:
+            return ""
+        compact_lines = self._compact_name_glossary(glossary_text)
+        return (
+            "【人名译名硬约束】\n"
+            "本节只用于保持人名、昵称、称谓一致，严禁输出本节任何内容。"
+            "“=>”后的中文名是唯一标准译名；“禁止译为”后的名称不得使用。"
+            "若人工/历史规则与自动候选冲突，必须使用人工/历史规则。\n"
+            + "\n".join(compact_lines)
+        )
+
+    def _compact_name_glossary(self, glossary_text: str) -> List[str]:
+        """把规则文件或 Markdown 表格压成模型更不容易复读的短约束行。"""
+        compact: List[str] = []
+        for raw in glossary_text.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                continue
+            if line.startswith("|"):
+                cells = [cell.strip() for cell in line.strip("|").split("|")]
+                if len(cells) < 3:
+                    continue
+                if cells[0] in {"日文表記", "---"} or set(cells[0]) <= {"-"}:
+                    continue
+                jp = cells[0]
+                kana = cells[1] if len(cells) > 1 else ""
+                zh = cells[2] if len(cells) > 2 else ""
+                aliases = cells[3] if len(cells) > 3 else ""
+                note = cells[4] if len(cells) > 4 else ""
+                if jp and zh:
+                    detail = f"- {jp}"
+                    if kana and kana != jp:
+                        detail += f"（{kana}）"
+                    detail += f" => {zh}"
+                    if aliases:
+                        detail += f"；别名/称谓: {aliases}"
+                    if note:
+                        detail += f"；备注: {note}"
+                    compact.append(detail)
+                continue
+            if "=" in line:
+                source, target = line.split("=", 1)
+                source = source.strip()
+                target = target.strip()
+                preferred, forbidden = target, ""
+                if "|" in target:
+                    preferred, forbidden = [part.strip() for part in target.split("|", 1)]
+                if source and preferred:
+                    detail = f"- {source} => {preferred}"
+                    if forbidden:
+                        detail += f"；禁止译为: {forbidden}"
+                    compact.append(detail)
+            elif line.startswith("【") and line.endswith("】"):
+                compact.append(line)
+            elif len(line) <= 160:
+                compact.append(f"- {line}")
+        return compact[:120]
+
+    def _append_runtime_name_glossary(self, parts: List[str]) -> None:
+        if self.name_glossary_context:
+            parts.append(self.name_glossary_context)
+
+    def extract_name_glossary(self, source_text: str, metadata: Optional[Dict] = None) -> Tuple[str, Dict[str, int]]:
+        """通读单篇原文，抽取人名/读音/昵称/中文译名建议。"""
+        metadata = metadata or {}
+        max_chars = max(1, getattr(self.config, "name_glossary_max_chars", 120000))
+        source = source_text.strip()
+        truncated = False
+        if len(source) > max_chars:
+            source = source[:max_chars]
+            truncated = True
+
+        title = metadata.get("title") or metadata.get("post_id") or metadata.get("novel_id") or ""
+        system = (
+            "你是日中小说翻译流水线的人名术语整理器。"
+            "任务是从整篇日文原文中抽取角色名、姓氏、名字、假名/片假名写法、昵称、称谓、代称，"
+            "并给出稳定的简体中文译名。只整理名称，不翻译剧情。"
+            "必须特别注意：同一个假名可能对应不同汉字；同一角色可能有昵称或称谓；"
+            "不要把不同角色合并。不要抽取普通群体名词、泛称、职业称呼、地点、物品或剧情概念；"
+            "只有在它们是固定专有名词或具名角色称呼时才列入。"
+        )
+        user = (
+            "请只输出 Markdown 表格，列为：日文表记 | 假名/片假名 | 中文标准译名 | 别名/昵称/称谓 | 备注。\n"
+            "要求：\n"
+            "1. 只列有助于后续翻译一致性的人名/角色称呼/组织称呼。\n"
+            "2. 中文译名要自然；已有常见译名时优先常见译名。\n"
+            "3. 不确定的译名可在备注写“待确认”，但仍给出一个稳定译法。\n"
+            "4. 排除“同学”“老师”“男生们”“女生组”等普通称呼，除非原文把它当作专名。\n"
+            "5. 不输出解释段落，不输出剧情摘要。\n\n"
+            f"标题/ID: {title}\n"
+            f"全文是否截断: {'是' if truncated else '否'}\n\n"
+            "【原文】\n"
+            f"{source}"
+        )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        try:
+            allowed = self._calculate_max_tokens(messages, requested_max_tokens=1800, cap=1800)
+            params = self.profile_manager.get_generation_params(
+                "yaml",
+                max_tokens=allowed,
+                temperature=0.0,
+                top_p=1.0,
+                frequency_penalty=0.0,
+                presence_penalty=0.0,
+                stop=None,
+            )
+            result, token_stats = self.streaming_handler.stream_with_params(
+                model=self.config.model,
+                messages=messages,
+                params=params,
+            )
+            cleaned = clean_output_text(result or "").strip()
+            return cleaned, token_stats
+        except Exception as e:
+            self.logger.warning(f"人名译名表抽取失败: {e}")
+            return "", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     
     def translate_text(self, text: str, chunk_index: Optional[int] = None) -> Tuple[str, str, bool, Dict[str, int]]:
         """
@@ -298,6 +436,7 @@ class Translator:
         if self.config.terminology_file and self.config.terminology_file.exists():
             with open(self.config.terminology_file, 'r', encoding='utf-8') as f:
                 parts.append("术语对照表：\n" + f.read().strip())
+        self._append_runtime_name_glossary(parts)
         # samples (optional)
         if add_samples and sample_path and Path(sample_path).exists():
             with open(sample_path, 'r', encoding='utf-8') as f:
@@ -369,6 +508,7 @@ class Translator:
         if self.config.terminology_file and self.config.terminology_file.exists():
             with open(self.config.terminology_file, 'r', encoding='utf-8') as f:
                 parts.append("术语对照表：\n" + f.read().strip())
+        self._append_runtime_name_glossary(parts)
         # 构造用户段
         def render_tags(items: list[str]) -> str:
             return "[" + ", ".join([x for x in items]) + "]"
