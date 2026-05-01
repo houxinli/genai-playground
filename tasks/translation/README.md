@@ -148,6 +148,17 @@ conda run -n llm python tasks/translation/src/translate.py \
   --name-glossary-file tasks/translation/data/fanbox/name_maps/momizi813_rules.txt
 ```
 
+如果先对旧双语目录跑了 QA，可在修复时把 QA 报告目录喂回 repair，让拒绝模板、人名坏别名等 QA 标记的问题行也进入重译：
+
+```bash
+conda run -n llm python tasks/translation/src/translate.py \
+  tasks/translation/data/fanbox/momizi813 \
+  --repair-existing \
+  --preset fanbox_openrouter_local_names \
+  --repair-from-qa-report-dir tasks/translation/logs/qa_reports \
+  --qa-fail-on-error
+```
+
 ## 3. 修复与清理
 
 ### 增量修复（主入口，推荐）

@@ -40,6 +40,7 @@ class TranslationConfig:
     retry_wait: float = 2.0
     fallback_on_context: bool = True
     repair_existing: bool = False
+    repair_from_qa_report_dir: Optional[Path] = None
     
     # 质量检测配置
     no_llm_check: bool = False
@@ -192,6 +193,7 @@ class TranslationConfig:
             retry_wait=args.retry_wait,
             fallback_on_context=args.fallback_on_context,
             repair_existing=getattr(args, "repair_existing", False),
+            repair_from_qa_report_dir=getattr(args, "repair_from_qa_report_dir", None),
             no_llm_check=args.no_llm_check or getattr(args, "disable_llm_qc", False),
             strict_repetition_check=args.strict_repetition_check,
             qa_report=getattr(args, 'qa_report', False),
