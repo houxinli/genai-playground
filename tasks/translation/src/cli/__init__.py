@@ -59,6 +59,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-llm-check", action="store_true", help="禁用LLM质量检测（旧标志）")
     parser.add_argument("--disable-llm-qc", action="store_true", help="等同于 --no-llm-check，用于显式关闭 LLM 质检")
     parser.add_argument("--strict-repetition-check", action="store_true", help="启用严格重复检测")
+    parser.add_argument("--qa-report", action="store_true", help="翻译/修复完成后生成硬规则 QA 报告")
+    parser.add_argument("--qa-report-dir", type=Path, default=None, help="QA 报告输出目录，默认写到 log_dir/qa_reports")
+    parser.add_argument("--qa-fail-on-error", action="store_true", help="QA 报告存在 error 时让该文件处理失败")
+    parser.add_argument("--qa-only", action="store_true", help="仅对已有输出文件生成 QA 报告，不执行翻译")
     
     # 文件配置
     parser.add_argument("--overwrite", action="store_true", help="覆盖已存在的输出文件")

@@ -44,6 +44,9 @@ class TranslationConfig:
     # 质量检测配置
     no_llm_check: bool = False
     strict_repetition_check: bool = False
+    qa_report: bool = False
+    qa_report_dir: Optional[Path] = None
+    qa_fail_on_error: bool = False
     # 质量检测最大生成；<=0 表示不限制（交由模型/服务端按上下文决定）
     quality_max_tokens: int = 0
     
@@ -191,6 +194,9 @@ class TranslationConfig:
             repair_existing=getattr(args, "repair_existing", False),
             no_llm_check=args.no_llm_check or getattr(args, "disable_llm_qc", False),
             strict_repetition_check=args.strict_repetition_check,
+            qa_report=getattr(args, 'qa_report', False),
+            qa_report_dir=getattr(args, 'qa_report_dir', None),
+            qa_fail_on_error=getattr(args, 'qa_fail_on_error', False),
             overwrite=args.overwrite,
             log_dir=Path(args.log_dir),
             profiles_file=getattr(args, 'profiles_file', None),
