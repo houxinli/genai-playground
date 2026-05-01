@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -138,6 +139,42 @@ def format_line_spans(numbers: List[int]) -> str:
     return ", ".join(spans)
 
 
+REPAIRABLE_QA_CODES = {
+    "empty_translation",
+    "failure_marker",
+    "refusal_marker",
+    "same_as_source",
+    "kana_residue",
+    "name_alias_drift",
+}
+
+
+def load_repair_indices_from_qa_report(report_path: Optional[Path]) -> Dict[int, List[str]]:
+    """Load source-body line indices from a QA report for targeted repair."""
+    if not report_path:
+        return {}
+    path = Path(report_path)
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    collected: Dict[int, set[str]] = {}
+    for issue in data.get("issues", []):
+        if issue.get("severity", "error") != "error":
+            continue
+        code = str(issue.get("code", ""))
+        if code not in REPAIRABLE_QA_CODES:
+            continue
+        detail = issue.get("detail", {})
+        if not isinstance(detail, dict) or "source_body_index" not in detail:
+            continue
+        try:
+            idx = int(detail["source_body_index"])
+        except (TypeError, ValueError):
+            continue
+        collected.setdefault(idx, set()).add(code)
+    return {idx: sorted(codes) for idx, codes in collected.items()}
+
+
 @dataclass(frozen=True)
 class RepairResult:
     success: bool
@@ -237,6 +274,7 @@ class BilingualRepairer:
         *,
         run_id: str = "",
         max_lines: int = 0,
+        qa_report_path: Optional[Path] = None,
     ) -> RepairResult:
         existing_path = task.existing_bilingual_path
         if not existing_path:
@@ -279,6 +317,9 @@ class BilingualRepairer:
 
             base_yaml = existing_yaml if existing_yaml else original_yaml
             existing_trans, unmatched = align_existing_translations(original_body, existing_body)
+            qa_repair_indices = load_repair_indices_from_qa_report(qa_report_path)
+            if qa_repair_indices:
+                self.logger.info(f"从 QA 报告导入 {len(qa_repair_indices)} 行待修复: {qa_report_path}")
             if unmatched:
                 snippets = ", ".join(
                     f"{idx + 1}: {original_body[idx][:20].strip()}" for idx in unmatched[:5]
@@ -293,12 +334,18 @@ class BilingualRepairer:
                     missing_mask.append(False)
                     continue
                 needs, reason, details = analyze_translation(orig_line, trans_line)
+                if idx_line in qa_repair_indices:
+                    needs = True
+                    reason = "qa_report"
+                    details = qa_repair_indices[idx_line]
                 missing_mask.append(needs)
                 if needs and reason:
                     issues[idx_line] = (reason, details)
 
             for idx_line, (orig_line, is_missing) in enumerate(zip(original_body, missing_mask)):
                 if not is_missing:
+                    continue
+                if idx_line in qa_repair_indices:
                     continue
                 if has_japanese(orig_line):
                     continue
@@ -316,6 +363,8 @@ class BilingualRepairer:
                     self.logger.info(f"行 {idx_line + 1} 译文为空")
                 elif reason == "same_as_original":
                     self.logger.info(f"行 {idx_line + 1} 与原文完全相同")
+                elif reason == "qa_report" and details:
+                    self.logger.info(f"行 {idx_line + 1} 由 QA 报告要求修复 -> {'/'.join(details)}")
                 else:
                     self.logger.info(f"行 {idx_line + 1} 判定缺失: {reason}")
 

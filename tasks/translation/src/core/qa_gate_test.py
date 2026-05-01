@@ -52,6 +52,9 @@ class TranslationQAGateTest(unittest.TestCase):
             self.assertIn("failure_marker", codes)
             self.assertIn("refusal_marker", codes)
             self.assertIn("name_alias_drift", codes)
+            first_pair_issue = next(issue for issue in report.issues if issue.code == "name_alias_drift")
+            self.assertEqual(first_pair_issue.detail["source_body_index"], 0)
+            self.assertEqual(first_pair_issue.detail["translation_body_index"], 1)
 
     def test_writes_json_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

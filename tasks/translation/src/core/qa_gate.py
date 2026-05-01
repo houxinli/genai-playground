@@ -44,8 +44,10 @@ class QAIssue:
 
 @dataclass(frozen=True)
 class QAPair:
+    source_body_index: int
     source_line: int
     source: str
+    translation_body_index: int
     translation_line: int
     translation: str
 
@@ -110,14 +112,53 @@ def _parse_bilingual_body(body_lines: List[str], line_offset: int = 0) -> Tuple[
         translation = body_lines[idx + 1]
         pairs.append(
             QAPair(
+                source_body_index=idx,
                 source_line=source_line_no,
                 source=source,
+                translation_body_index=idx + 1,
                 translation_line=line_offset + idx + 2,
                 translation=translation,
             )
         )
         idx += 2
     return pairs, issues
+
+
+def _align_pairs_to_source_body(pairs: List[QAPair], source_text: str) -> List[QAPair]:
+    """Map bilingual source lines back to source-body indices when the source file is available."""
+    if not source_text:
+        return pairs
+    _, source_body = _split_front_matter(source_text.splitlines())
+    if not source_body:
+        return pairs
+    aligned: List[QAPair] = []
+    source_idx = 0
+    for pair in pairs:
+        normalized_source = pair.source.strip()
+        matched_idx: Optional[int] = None
+        while source_idx < len(source_body):
+            if not source_body[source_idx].strip():
+                source_idx += 1
+                continue
+            if source_body[source_idx].strip() == normalized_source:
+                matched_idx = source_idx
+                source_idx += 1
+                break
+            source_idx += 1
+        if matched_idx is None:
+            aligned.append(pair)
+            continue
+        aligned.append(
+            QAPair(
+                source_body_index=matched_idx,
+                source_line=pair.source_line,
+                source=pair.source,
+                translation_body_index=pair.translation_body_index,
+                translation_line=pair.translation_line,
+                translation=pair.translation,
+            )
+        )
+    return aligned
 
 
 def _load_name_aliases(path: Optional[Path]) -> Dict[str, List[str]]:
@@ -172,6 +213,25 @@ class TranslationQAGate:
         self.name_rules_file = Path(name_rules_file) if name_rules_file else None
         self.name_aliases = _load_name_aliases(self.name_rules_file)
 
+    @staticmethod
+    def _issue_for_pair(
+        *,
+        pair: QAPair,
+        code: str,
+        message: str,
+        severity: str = "error",
+        detail: Optional[Dict[str, object]] = None,
+    ) -> QAIssue:
+        payload: Dict[str, object] = {
+            "source_body_index": pair.source_body_index,
+            "translation_body_index": pair.translation_body_index,
+            "source_line": pair.source_line,
+            "translation_line": pair.translation_line,
+        }
+        if detail:
+            payload.update(detail)
+        return QAIssue(code=code, message=message, severity=severity, line=pair.translation_line, detail=payload)
+
     def run(self, output_path: Path, source_path: Optional[Path] = None) -> QAReport:
         output_path = Path(output_path)
         source_path = Path(source_path) if source_path else None
@@ -180,45 +240,52 @@ class TranslationQAGate:
         output_lines = output_text.splitlines()
         front_matter_lines, body_lines = _split_front_matter(output_lines)
         pairs, issues = _parse_bilingual_body(body_lines, line_offset=len(front_matter_lines))
+        pairs = _align_pairs_to_source_body(pairs, source_text)
         issues.extend(_metadata_issues(source_text, output_text))
 
         for pair in pairs:
             translation = pair.translation.strip()
             if not translation:
-                issues.append(QAIssue(code="empty_translation", message="译文行为空", line=pair.translation_line))
+                issues.append(
+                    self._issue_for_pair(pair=pair, code="empty_translation", message="译文行为空")
+                )
                 continue
             for marker in FAILURE_MARKERS:
                 if marker in translation:
                     issues.append(
-                        QAIssue(
+                        self._issue_for_pair(
+                            pair=pair,
                             code="failure_marker",
                             message=f"译文行包含失败标记: {marker}",
-                            line=pair.translation_line,
                             detail={"marker": marker},
                         )
                     )
             for marker in REFUSAL_MARKERS:
                 if marker in translation:
                     issues.append(
-                        QAIssue(
+                        self._issue_for_pair(
+                            pair=pair,
                             code="refusal_marker",
                             message=f"译文行疑似包含拒绝模板: {marker}",
-                            line=pair.translation_line,
                             detail={"marker": marker},
                         )
                     )
             if translation == pair.source.strip():
-                issues.append(QAIssue(code="same_as_source", message="译文行与原文完全相同", line=pair.translation_line))
+                issues.append(
+                    self._issue_for_pair(pair=pair, code="same_as_source", message="译文行与原文完全相同")
+                )
             if _contains_kana(translation):
-                issues.append(QAIssue(code="kana_residue", message="译文行残留假名", line=pair.translation_line))
+                issues.append(
+                    self._issue_for_pair(pair=pair, code="kana_residue", message="译文行残留假名")
+                )
             for jp_name, aliases in self.name_aliases.items():
                 for alias in aliases:
                     if alias in translation:
                         issues.append(
-                            QAIssue(
+                            self._issue_for_pair(
+                                pair=pair,
                                 code="name_alias_drift",
                                 message=f"译文行命中已知人名坏别名: {alias}",
-                                line=pair.translation_line,
                                 detail={"jp": jp_name, "alias": alias},
                             )
                         )

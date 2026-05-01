@@ -308,7 +308,11 @@ class TranslationPipeline:
         else:
             self.translator.clear_name_glossary()
 
-        result = self.repairer.repair_task(task, run_id=self.current_run_id)
+        result = self.repairer.repair_task(
+            task,
+            run_id=self.current_run_id,
+            qa_report_path=self._repair_input_qa_report_path(task),
+        )
         if result.success:
             self.logger.info(f"✅ 修复完成: {result.reason}")
             qa_ok = self._run_qa_report(task.output_path, task.original_path, mode="repair")
@@ -321,6 +325,16 @@ class TranslationPipeline:
     def _qa_report_path(self, output_path: Path) -> Path:
         out_dir = self.config.qa_report_dir or (self.config.log_dir / "qa_reports")
         return Path(out_dir) / f"{output_path.parent.name}_{output_path.stem}.qa.json"
+
+    def _qa_report_path_for_dir(self, output_path: Path, report_dir: Path) -> Path:
+        return Path(report_dir) / f"{output_path.parent.name}_{output_path.stem}.qa.json"
+
+    def _repair_input_qa_report_path(self, task: TranslationTask) -> Optional[Path]:
+        report_dir = self.config.repair_from_qa_report_dir
+        if not report_dir or not task.existing_bilingual_path:
+            return None
+        report_path = self._qa_report_path_for_dir(task.existing_bilingual_path, Path(report_dir))
+        return report_path if report_path.exists() else None
 
     def _run_qa_report(self, output_path: Path, source_path: Optional[Path], mode: str) -> bool:
         if not self.config.qa_report:
