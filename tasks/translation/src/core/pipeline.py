@@ -294,6 +294,17 @@ class TranslationPipeline:
             )
         )
 
+        if task.original_path and (self.config.enable_name_glossary or self.config.name_glossary_file):
+            try:
+                content = task.original_path.read_text(encoding="utf-8")
+                yaml_data, _ = parse_yaml_front_matter(content)
+                self._prepare_name_glossary(task.original_path, content, yaml_data)
+            except Exception as e:
+                self.translator.clear_name_glossary()
+                self.logger.warning(f"修复任务准备人名译名表失败: {e}")
+        else:
+            self.translator.clear_name_glossary()
+
         result = self.repairer.repair_task(task, run_id=self.current_run_id)
         if result.success:
             self.logger.info(f"✅ 修复完成: {result.reason}")

@@ -128,12 +128,17 @@ make translate-start-fg ARGS="tasks/translation/data/pixiv/50235390/12430834.txt
 ```
 
 需要固定系列人名时，先维护一份规则文件，再启用全文预读。存在人工规则时，流水线会优先注入人工规则；自动预读结果会写入 `--name-glossary-output-dir`，用于后续补充规则。
+正文翻译可以继续使用 OpenRouter，同时让人名预读单独走本地 OpenAI 兼容服务，避免本地模型参与正文翻译质量链路。
 
 ```bash
 make translate-start-fg ARGS="tasks/translation/data/fanbox/momizi813/11386126.txt \
   --bilingual-simple --stream \
+  --llm-provider openrouter \
   --name-glossary-file tasks/translation/data/fanbox/name_maps/momizi813_rules.txt \
   --enable-name-glossary \
+  --name-glossary-llm-provider vllm \
+  --name-glossary-llm-base-url http://127.0.0.1:8080/v1 \
+  --name-glossary-model deadbydawn101/gemma-4-E2B-Heretic-Uncensored-mlx-4bit \
   --name-glossary-output-dir tasks/translation/logs/name_glossaries"
 ```
 
@@ -148,6 +153,8 @@ conda run -n llm python tasks/translation/src/translate.py \
   --preset pixiv_gemma4_heretic_mlx_local \
   --stream
 ```
+
+修复人名敏感的译文时，同样传入 `--name-glossary-file`，修复 prompt 会注入相同的人名硬约束。
 
 这会自动读取同级 `*_bilingual/`，输出到 `*_bilingual_fixed/`。
 

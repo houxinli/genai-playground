@@ -97,6 +97,27 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=120000,
         help="自动抽取时送入模型的正文最大字符数，默认120000",
     )
+    parser.add_argument(
+        "--name-glossary-model",
+        default=None,
+        help="人名预读使用的模型；默认复用 --model",
+    )
+    parser.add_argument(
+        "--name-glossary-llm-provider",
+        choices=["vllm", "ollama", "openai", "openrouter"],
+        default=None,
+        help="人名预读使用的 LLM provider；默认复用 --llm-provider",
+    )
+    parser.add_argument(
+        "--name-glossary-llm-base-url",
+        default=None,
+        help="人名预读使用的 OpenAI 兼容 Base URL；默认复用 --llm-base-url",
+    )
+    parser.add_argument(
+        "--name-glossary-llm-api-key",
+        default=None,
+        help="人名预读使用的 API Key；默认复用主翻译 key 或 provider 默认值",
+    )
     
     # 生成参数
     parser.add_argument("--stop", nargs="*", default=["（未完待续）", "[END]", "<|im_end|>", "</s>"], help="停止词")

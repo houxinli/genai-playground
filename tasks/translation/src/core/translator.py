@@ -5,6 +5,7 @@
 
 import time
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 from openai import OpenAI
@@ -42,46 +43,12 @@ class Translator:
         if hasattr(self.quality_checker, 'streaming_handler'):
             self.quality_checker.streaming_handler.logger = logger
         # 初始化 OpenAI 兼容客户端（支持 vLLM/Ollama/OpenAI/OpenRouter）
-        base_url = self.config.llm_base_url
-        provider = (self.config.llm_provider or "vllm").lower()
-        api_key = self.config.llm_api_key or "dummy"
-        
-        # 调试：记录 API key 状态（不打印完整 key）
-        if provider == "openrouter" and api_key and api_key != "dummy":
-            self.logger.debug(f"OpenRouter API key 已读取: {api_key[:20]}...")
-            self.logger.info("OpenRouter: 将禁用流式并使用最小参数集调用")
-        elif provider == "openrouter":
-            self.logger.warning(f"⚠️ OpenRouter API key 未设置，provider={provider}, api_key={api_key}")
-        
-        if not base_url:
-            if provider == "vllm":
-                base_url = "http://localhost:8000/v1"
-                if not self.config.llm_api_key:
-                    api_key = "dummy"
-            elif provider == "ollama":
-                base_url = "http://localhost:11434/v1"
-                if not self.config.llm_api_key:
-                    api_key = "ollama"
-            elif provider == "openrouter":
-                base_url = "https://openrouter.ai/api/v1"
-            elif provider == "openai":
-                base_url = None  # 使用 SDK 默认 https://api.openai.com/v1
-        
-        # OpenRouter 需要额外的 headers（根据官方文档：https://openrouter.ai/docs/quickstart）
-        client_timeout = getattr(self.config, "request_timeout_s", 60) or 60
-        if provider == "openrouter":
-            default_headers = {
-                "HTTP-Referer": "https://github.com/houxinli/genai-playground",  # 用于排名展示
-                "X-Title": "Translation Tool"  # 用于排名展示
-            }
-            self.client = OpenAI(
-                base_url=base_url,
-                api_key=api_key,
-                default_headers=default_headers,
-                timeout=client_timeout,
-            )
-        else:
-            self.client = OpenAI(base_url=base_url, api_key=api_key, timeout=client_timeout)
+        self.client = self._create_client(
+            self.config.llm_provider,
+            self.config.llm_base_url,
+            self.config.llm_api_key,
+            log_openrouter=True,
+        )
         self.profile_manager = ProfileManager(config.profiles_file)
         self.streaming_handler = StreamingHandler(self.client, logger, config, self.profile_manager)
         
@@ -101,6 +68,89 @@ class Translator:
         prompt_config.max_context_lines = getattr(self.config, "context_lines", prompt_config.max_context_lines)
         self.prompt_builder = PromptBuilder(prompt_config)
         self.name_glossary_context = ""
+
+    def _resolve_connection(
+        self,
+        provider_value: Optional[str],
+        base_url_value: Optional[str],
+        api_key_value: Optional[str],
+    ) -> Tuple[str, Optional[str], str]:
+        provider = (provider_value or "vllm").lower()
+        base_url = base_url_value
+        api_key = api_key_value or "dummy"
+        if not base_url:
+            if provider == "vllm":
+                base_url = "http://localhost:8000/v1"
+                if not api_key_value:
+                    api_key = "dummy"
+            elif provider == "ollama":
+                base_url = "http://localhost:11434/v1"
+                if not api_key_value:
+                    api_key = "ollama"
+            elif provider == "openrouter":
+                base_url = "https://openrouter.ai/api/v1"
+            elif provider == "openai":
+                base_url = None
+        return provider, base_url, api_key
+
+    def _create_client(
+        self,
+        provider_value: Optional[str],
+        base_url_value: Optional[str],
+        api_key_value: Optional[str],
+        *,
+        log_openrouter: bool = False,
+    ) -> OpenAI:
+        provider, base_url, api_key = self._resolve_connection(provider_value, base_url_value, api_key_value)
+
+        if log_openrouter and provider == "openrouter" and api_key and api_key != "dummy":
+            self.logger.debug(f"OpenRouter API key 已读取: {api_key[:20]}...")
+            self.logger.info("OpenRouter: 将禁用流式并使用最小参数集调用")
+        elif log_openrouter and provider == "openrouter":
+            self.logger.warning(f"⚠️ OpenRouter API key 未设置，provider={provider}, api_key={api_key}")
+
+        client_timeout = getattr(self.config, "request_timeout_s", 60) or 60
+        if provider == "openrouter":
+            default_headers = {
+                "HTTP-Referer": "https://github.com/houxinli/genai-playground",
+                "X-Title": "Translation Tool",
+            }
+            return OpenAI(
+                base_url=base_url,
+                api_key=api_key,
+                default_headers=default_headers,
+                timeout=client_timeout,
+            )
+        return OpenAI(base_url=base_url, api_key=api_key, timeout=client_timeout)
+
+    def _name_glossary_runtime(self) -> Tuple[str, StreamingHandler, str]:
+        provider = self.config.name_glossary_llm_provider or self.config.llm_provider
+        model = self.config.name_glossary_model or self.config.model
+        base_url = self.config.name_glossary_llm_base_url
+        api_key = self.config.name_glossary_llm_api_key
+
+        if provider == self.config.llm_provider and not base_url:
+            base_url = self.config.llm_base_url
+        if provider == self.config.llm_provider and not api_key:
+            api_key = self.config.llm_api_key
+
+        if (
+            provider == self.config.llm_provider
+            and model == self.config.model
+            and base_url == self.config.llm_base_url
+            and (api_key or None) == (self.config.llm_api_key or None)
+        ):
+            return model, self.streaming_handler, (provider or "vllm")
+
+        client = self._create_client(provider, base_url, api_key)
+        runtime_config = replace(
+            self.config,
+            llm_provider=provider or self.config.llm_provider,
+            llm_base_url=base_url,
+            llm_api_key=api_key,
+            model=model,
+        )
+        return model, StreamingHandler(client, self.logger, runtime_config, self.profile_manager), (provider or "vllm")
 
     def clear_name_glossary(self) -> None:
         """清除当前文件的人名译名提示，避免跨文件串味。"""
@@ -228,8 +278,10 @@ class Translator:
                 presence_penalty=0.0,
                 stop=None,
             )
-            result, token_stats = self.streaming_handler.stream_with_params(
-                model=self.config.model,
+            model, handler, provider = self._name_glossary_runtime()
+            self.logger.info(f"人名预读模型: provider={provider}, model={model}")
+            result, token_stats = handler.stream_with_params(
+                model=model,
                 messages=messages,
                 params=params,
             )
