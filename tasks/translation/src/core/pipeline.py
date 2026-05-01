@@ -11,6 +11,7 @@ from typing import Any, List, Tuple, Dict, Optional
 from .config import TranslationConfig
 from .logger import UnifiedLogger
 from .quality_checker import QualityChecker
+from .qa_gate import TranslationQAGate
 from .repairer import BilingualRepairer
 from .run_state import TranslationStateStore
 from .translator import Translator
@@ -73,6 +74,8 @@ class TranslationPipeline:
             "context_lines": self.config.context_lines,
             "prompt_style": self.config.prompt_style,
             "enable_name_glossary": self.config.enable_name_glossary,
+            "qa_report": self.config.qa_report,
+            "qa_fail_on_error": self.config.qa_fail_on_error,
         }
 
     def run(self, inputs: List[str]) -> int:
@@ -308,9 +311,50 @@ class TranslationPipeline:
         result = self.repairer.repair_task(task, run_id=self.current_run_id)
         if result.success:
             self.logger.info(f"✅ 修复完成: {result.reason}")
+            qa_ok = self._run_qa_report(task.output_path, task.original_path, mode="repair")
+            if not qa_ok:
+                return False
         else:
             self.logger.warning(f"⚠️ 修复未完全完成: {result.reason}")
         return result.success
+
+    def _qa_report_path(self, output_path: Path) -> Path:
+        out_dir = self.config.qa_report_dir or (self.config.log_dir / "qa_reports")
+        return Path(out_dir) / f"{output_path.parent.name}_{output_path.stem}.qa.json"
+
+    def _run_qa_report(self, output_path: Path, source_path: Optional[Path], mode: str) -> bool:
+        if not self.config.qa_report:
+            return True
+        try:
+            gate = TranslationQAGate(self.config.name_glossary_file)
+            report = gate.run(output_path, source_path)
+            report_path = self._qa_report_path(output_path)
+            TranslationQAGate.write_report(report, report_path)
+            self.logger.info(
+                f"QA 报告: {report.status} errors={report.summary['errors']} "
+                f"warnings={report.summary['warnings']} -> {report_path}"
+            )
+            if report.has_errors and self.config.qa_fail_on_error:
+                if self.state_store:
+                    self.state_store.record_file_state(
+                        run_id=self.current_run_id,
+                        source_path=source_path,
+                        output_path=output_path,
+                        mode=mode,
+                        status="failed",
+                        stage="qa",
+                        reason=f"QA gate failed: {report.summary['errors']} errors",
+                        progress={
+                            "qa_report": str(report_path),
+                            "qa_errors": report.summary["errors"],
+                            "qa_warnings": report.summary["warnings"],
+                        },
+                    )
+                return False
+            return True
+        except Exception as e:
+            self.logger.warning(f"QA 报告生成失败: {e}")
+            return not self.config.qa_fail_on_error
 
     def _record_processing_state(
         self,
@@ -421,14 +465,15 @@ class TranslationPipeline:
                     )
                     if inspection.status == "complete":
                         self.logger.info(f"输出文件已存在，跳过: {output_path}")
+                        qa_ok = self._run_qa_report(output_path, path, mode="translate")
                         self._record_processing_state(
                             source_path=path,
                             output_path=output_path,
-                            status="complete",
-                            stage="skip",
-                            reason=inspection.reason,
+                            status="complete" if qa_ok else "failed",
+                            stage="skip" if qa_ok else "qa",
+                            reason=inspection.reason if qa_ok else "QA gate failed",
                         )
-                        return True
+                        return qa_ok
                     self.logger.info(
                         f"检测到{inspection.status}输出，将重新生成: {output_path} ({inspection.reason})"
                     )
@@ -655,6 +700,12 @@ class TranslationPipeline:
             final_reason = "输出中仍含失败标记"
 
         saved = self._save_result(output_path, translated_content, yaml_data)
+        qa_ok = True
+        if saved and final_status == "complete":
+            qa_ok = self._run_qa_report(output_path, path, mode="translate")
+            if not qa_ok:
+                final_status = "failed"
+                final_reason = "QA gate failed"
         self._record_processing_state(
             source_path=path,
             output_path=output_path,
@@ -666,7 +717,7 @@ class TranslationPipeline:
                 "metadata_only": getattr(self.config, "metadata_only", False),
             },
         )
-        return saved and final_status == "complete"
+        return saved and final_status == "complete" and qa_ok
 
     def _prepare_name_glossary(self, path: Path, content: str, yaml_data: Optional[Dict]) -> None:
         """按文件准备人名译名表，并注入 Translator。"""

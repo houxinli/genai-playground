@@ -17,6 +17,37 @@
     "token_estimator": "simple",
     "disable_llm_qc": true
   },
+  "fanbox_openrouter_local_names": {
+    "llm_provider": "openrouter",
+    "llm_base_url": "https://openrouter.ai/api/v1",
+    "model": "x-ai/grok-4.1-fast",
+    "bilingual_simple": true,
+    "prompt_style": "fanfic",
+    "token_estimator": "simple",
+    "disable_llm_qc": true,
+    "line_batch_size_lines": 40,
+    "context_lines": 3,
+    "enable_name_glossary": true,
+    "name_glossary_llm_provider": "vllm",
+    "name_glossary_llm_base_url": "http://127.0.0.1:8080/v1",
+    "name_glossary_model": "deadbydawn101/gemma-4-E2B-Heretic-Uncensored-mlx-4bit",
+    "qa_report": true
+  },
+  "pixiv_openrouter_local_names": {
+    "llm_provider": "openrouter",
+    "llm_base_url": "https://openrouter.ai/api/v1",
+    "model": "x-ai/grok-4.1-fast",
+    "bilingual_simple": true,
+    "token_estimator": "simple",
+    "disable_llm_qc": true,
+    "line_batch_size_lines": 40,
+    "context_lines": 3,
+    "enable_name_glossary": true,
+    "name_glossary_llm_provider": "vllm",
+    "name_glossary_llm_base_url": "http://127.0.0.1:8080/v1",
+    "name_glossary_model": "deadbydawn101/gemma-4-E2B-Heretic-Uncensored-mlx-4bit",
+    "qa_report": true
+  },
   "pixiv_gemma4_heretic_mlx_local": {
     "llm_provider": "vllm",
     "llm_base_url": "http://127.0.0.1:8080/v1",

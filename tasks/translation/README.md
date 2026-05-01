@@ -132,14 +132,20 @@ make translate-start-fg ARGS="tasks/translation/data/pixiv/50235390/12430834.txt
 
 ```bash
 make translate-start-fg ARGS="tasks/translation/data/fanbox/momizi813/11386126.txt \
-  --bilingual-simple --stream \
-  --llm-provider openrouter \
+  --preset fanbox_openrouter_local_names \
   --name-glossary-file tasks/translation/data/fanbox/name_maps/momizi813_rules.txt \
-  --enable-name-glossary \
-  --name-glossary-llm-provider vllm \
-  --name-glossary-llm-base-url http://127.0.0.1:8080/v1 \
-  --name-glossary-model deadbydawn101/gemma-4-E2B-Heretic-Uncensored-mlx-4bit \
-  --name-glossary-output-dir tasks/translation/logs/name_glossaries"
+  --stream"
+```
+
+`fanbox_openrouter_local_names` 默认使用 OpenRouter 做正文翻译、本地 vLLM/MLX 做人名预读，并在完成后写入硬规则 QA 报告。Pixiv 可使用 `pixiv_openrouter_local_names`。
+
+已有输出也可以单独跑 QA：
+
+```bash
+conda run -n llm python tasks/translation/src/translate.py \
+  tasks/translation/data/fanbox/momizi813_bilingual_fixed/11386126.txt \
+  --qa-only \
+  --name-glossary-file tasks/translation/data/fanbox/name_maps/momizi813_rules.txt
 ```
 
 ## 3. 修复与清理
@@ -150,7 +156,7 @@ make translate-start-fg ARGS="tasks/translation/data/fanbox/momizi813/11386126.t
 conda run -n llm python tasks/translation/src/translate.py \
   tasks/translation/data/pixiv/50235390 \
   --repair-existing \
-  --preset pixiv_gemma4_heretic_mlx_local \
+  --preset pixiv_openrouter_local_names \
   --stream
 ```
 
