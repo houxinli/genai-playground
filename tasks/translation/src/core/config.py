@@ -103,6 +103,10 @@ class TranslationConfig:
     name_glossary_file: Optional[Path] = None
     name_glossary_output_dir: Optional[Path] = None
     name_glossary_max_chars: int = 120000
+    name_glossary_model: Optional[str] = None
+    name_glossary_llm_provider: Optional[str] = None
+    name_glossary_llm_base_url: Optional[str] = None
+    name_glossary_llm_api_key: Optional[str] = None
 
     # 提供商与连接（可通过环境变量覆盖）
     # 支持 provider: vllm | ollama | openai | openrouter
@@ -218,6 +222,10 @@ class TranslationConfig:
             name_glossary_file=getattr(args, 'name_glossary_file', None),
             name_glossary_output_dir=getattr(args, 'name_glossary_output_dir', None),
             name_glossary_max_chars=getattr(args, 'name_glossary_max_chars', 120000),
+            name_glossary_model=getattr(args, 'name_glossary_model', None),
+            name_glossary_llm_provider=getattr(args, 'name_glossary_llm_provider', None),
+            name_glossary_llm_base_url=getattr(args, 'name_glossary_llm_base_url', None),
+            name_glossary_llm_api_key=getattr(args, 'name_glossary_llm_api_key', None),
             llm_provider=provider_via_cli or 'openrouter',
             llm_base_url=base_url,
             llm_api_key=getattr(args, 'llm_api_key', None) or env_api_key or config_api_key,
@@ -255,21 +263,30 @@ class TranslationConfig:
         if self.retry_wait < 0:
             errors.append("retry_wait 不能为负数")
 
-        provider = (self.llm_provider or "").lower()
-        base_url = (self.llm_base_url or "").strip()
-        if base_url:
+        def validate_provider_url(provider_value: Optional[str], base_url_value: Optional[str], label: str) -> None:
+            provider = (provider_value or "").lower()
+            base_url = (base_url_value or "").strip()
+            if not base_url:
+                return
             parsed = urlparse(base_url)
             host = (parsed.hostname or "").lower()
             if provider == "openrouter" and host and "openrouter.ai" not in host:
                 errors.append(
-                    "llm_provider=openrouter 时 llm_base_url 必须指向 openrouter.ai；"
+                    f"{label}=openrouter 时 base_url 必须指向 openrouter.ai；"
                     "如果要连本地服务，请改用 --llm-provider ollama 或 vllm"
                 )
             if provider in {"ollama", "vllm"} and "openrouter.ai" in host:
                 errors.append(
-                    f"llm_provider={provider} 不能使用 OpenRouter base URL；"
+                    f"{label}={provider} 不能使用 OpenRouter base URL；"
                     "请改用 --llm-provider openrouter"
                 )
+
+        validate_provider_url(self.llm_provider, self.llm_base_url, "llm_provider")
+        validate_provider_url(
+            self.name_glossary_llm_provider or self.llm_provider,
+            self.name_glossary_llm_base_url,
+            "name_glossary_llm_provider",
+        )
 
         if self.name_glossary_max_chars <= 0:
             errors.append("name_glossary_max_chars 必须为正数")

@@ -37,6 +37,44 @@ class TranslationConfigProviderTest(unittest.TestCase):
         config = TranslationConfig(llm_provider="vllm", llm_base_url="https://openrouter.ai/api/v1")
         self.assertTrue(any("OpenRouter" in error for error in config.validate()))
 
+    def test_name_glossary_runtime_can_use_separate_local_provider(self):
+        args = self.parse_args(
+            [
+                "--llm-provider",
+                "openrouter",
+                "--llm-base-url",
+                "https://openrouter.ai/api/v1",
+                "--name-glossary-llm-provider",
+                "vllm",
+                "--name-glossary-llm-base-url",
+                "http://127.0.0.1:8080/v1",
+                "--name-glossary-model",
+                "local-name-reader",
+            ]
+        )
+
+        config = TranslationConfig.from_args(args)
+
+        self.assertEqual(config.llm_provider, "openrouter")
+        self.assertEqual(config.name_glossary_llm_provider, "vllm")
+        self.assertEqual(config.name_glossary_llm_base_url, "http://127.0.0.1:8080/v1")
+        self.assertEqual(config.name_glossary_model, "local-name-reader")
+        self.assertEqual(config.validate(), [])
+
+    def test_validate_rejects_name_glossary_openrouter_with_local_url(self):
+        config = TranslationConfig(
+            name_glossary_llm_provider="openrouter",
+            name_glossary_llm_base_url="http://127.0.0.1:8080/v1",
+        )
+        self.assertTrue(any("name_glossary_llm_provider" in error for error in config.validate()))
+
+    def test_validate_uses_main_provider_for_name_glossary_url_when_provider_omitted(self):
+        config = TranslationConfig(
+            llm_provider="openrouter",
+            name_glossary_llm_base_url="http://127.0.0.1:8080/v1",
+        )
+        self.assertTrue(any("name_glossary_llm_provider" in error for error in config.validate()))
+
 
 if __name__ == "__main__":
     unittest.main()
