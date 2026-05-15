@@ -67,15 +67,10 @@ python file_manager.py cleanup --dir tasks/translation/data/pixiv/50235390 --dry
 - 确定性参数（temperature=0.0）
 - 支持流式输出
 
-### enhanced-mode
-- QC检测+重新翻译
-- 质量阈值可配置
-- 支持copy/inplace输出策略
-
 ## 使用建议
 
 1. **日常翻译**: 使用 `./translate` 命令配合 `--bilingual-simple` 参数
-2. **质量提升**: 使用 `--enhanced-mode` 参数对已有双语文件进行质量提升
+2. **质量提升**: 使用 `--repair-existing`（可选 `--repair-from-qa-report-dir`）对已有双语文件做局部修复
 3. **文件管理**: 使用 `file_manager.py` 进行文件重命名、列表查看、质量清理
 4. **数据获取**: 使用 `batch_download_v1.py` 从Pixiv下载小说
 5. **后处理**: 使用 `extract_chinese.py` 提取中文内容
