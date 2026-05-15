@@ -22,19 +22,11 @@ class TranslationConfig:
     
     # 翻译模式配置
     bilingual_simple: bool = False  # 简化bilingual模式
-    enhanced_mode: bool = False  # 增强模式：QC检测 + 重新翻译
-    enhanced_output: str = "copy"  # copy | inplace
-    
+
     # bilingual-simple模式配置
     line_batch_size_lines: int = 50  # 每批翻译的行数（基于token分析优化）
     context_lines: int = 3  # 上下文行数（前后各3行）
-    
-    # 增强模式配置
-    enhanced_qc_threshold: float = 0.7  # QC质量阈值，低于此值重新翻译
-    enhanced_retry_limit: int = 2  # 增强模式最大重试次数
-    enhanced_context_lines: int = 5  # 增强模式上下文行数
-    enhanced_batch_size: int = 10  # 增强模式批大小（逐行对照重译）
-    
+
     # 重试配置
     retries: int = 3
     retry_wait: float = 2.0
@@ -181,14 +173,8 @@ class TranslationConfig:
             max_tokens=args.max_tokens,
             max_context_length=args.max_context_length,
             bilingual_simple=getattr(args, 'bilingual_simple', False),
-            enhanced_mode=getattr(args, 'enhanced_mode', False),
-            enhanced_output=getattr(args, 'enhanced_output', 'copy'),
             line_batch_size_lines=getattr(args, 'line_batch_size_lines', 20),
             context_lines=getattr(args, 'context_lines', 3),
-            enhanced_qc_threshold=getattr(args, 'enhanced_qc_threshold', 0.7),
-            enhanced_retry_limit=getattr(args, 'enhanced_retry_limit', 2),
-            enhanced_context_lines=getattr(args, 'enhanced_context_lines', 5),
-            enhanced_batch_size=getattr(args, 'enhanced_batch_size', 10),
             retries=args.retries,
             retry_wait=args.retry_wait,
             fallback_on_context=args.fallback_on_context,

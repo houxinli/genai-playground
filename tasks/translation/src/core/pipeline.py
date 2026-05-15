@@ -16,7 +16,6 @@ from .repairer import BilingualRepairer
 from .run_state import TranslationStateStore
 from .translator import Translator
 from .file_handler import FileHandler
-from .enhanced_mode import EnhancedModeHandler
 from .task import TranslationTask
 from ..utils.file import parse_yaml_front_matter
 
@@ -52,19 +51,12 @@ class TranslationPipeline:
         self.repairer = BilingualRepairer(config, self.translator, self.logger, self.state_store)
         self.current_run_id = ""
         self.current_file_path: Optional[Path] = None
-        
-        # 初始化增强模式处理器
-        if config.enhanced_mode:
-            self.enhanced_handler = EnhancedModeHandler(config, self.logger)
-        else:
-            self.enhanced_handler = None
 
     def _build_run_snapshot(self) -> Dict[str, Any]:
         """记录本次运行的关键配置快照。"""
         return {
             "model": self.config.model,
             "bilingual_simple": self.config.bilingual_simple,
-            "enhanced_mode": self.config.enhanced_mode,
             "repair_existing": self.config.repair_existing,
             "overwrite": self.config.overwrite,
             "debug": self.config.debug,
@@ -101,52 +93,28 @@ class TranslationPipeline:
         success_count = 0
         failure_count = 0
         try:
-            if self.config.enhanced_mode:
-                files_to_process = self.file_handler.find_files_to_process(inputs)
-                if not files_to_process:
-                    self.logger.warning("没有找到需要处理的文件")
-                    return 0
-                if self.config.offset > 0:
-                    files_to_process = files_to_process[self.config.offset:]
-                    self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(files_to_process)} 个文件")
-                if self.config.limit > 0:
-                    files_to_process = files_to_process[:self.config.limit]
-                    self.logger.info(f"限制处理文件数量为: {len(files_to_process)} 个文件")
-                target_total = len(files_to_process)
-                self.logger.info(f"开始处理 {target_total} 个文件")
-                run_id = self.state_store.start_run(
-                    mode="enhanced",
-                    inputs=inputs,
-                    target_total=target_total,
-                    config_snapshot=self._build_run_snapshot(),
-                )
-                self.current_run_id = run_id
-                # 增强模式：处理双语文件
-                success_count, failure_count = self._run_enhanced_mode(files_to_process, run_id)
-            else:
-                tasks_to_process = self.file_handler.plan_tasks(inputs)
-                if not tasks_to_process:
-                    self.logger.warning("没有找到需要处理的文件")
-                    return 0
-                if self.config.offset > 0:
-                    tasks_to_process = tasks_to_process[self.config.offset:]
-                    self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(tasks_to_process)} 个文件")
-                if self.config.limit > 0:
-                    tasks_to_process = tasks_to_process[:self.config.limit]
-                    self.logger.info(f"限制处理文件数量为: {len(tasks_to_process)} 个文件")
-                target_total = len(tasks_to_process)
-                self.logger.info(f"开始处理 {target_total} 个文件")
-                task_modes = {task.mode for task in tasks_to_process}
-                run_mode = "repair" if task_modes == {"repair"} else "translate"
-                run_id = self.state_store.start_run(
-                    mode=run_mode,
-                    inputs=inputs,
-                    target_total=target_total,
-                    config_snapshot=self._build_run_snapshot(),
-                )
-                self.current_run_id = run_id
-                # 普通模式：处理原始文件
-                success_count, failure_count = self._run_normal_mode(tasks_to_process, run_id)
+            tasks_to_process = self.file_handler.plan_tasks(inputs)
+            if not tasks_to_process:
+                self.logger.warning("没有找到需要处理的文件")
+                return 0
+            if self.config.offset > 0:
+                tasks_to_process = tasks_to_process[self.config.offset:]
+                self.logger.info(f"跳过前 {self.config.offset} 个文件，剩余: {len(tasks_to_process)} 个文件")
+            if self.config.limit > 0:
+                tasks_to_process = tasks_to_process[:self.config.limit]
+                self.logger.info(f"限制处理文件数量为: {len(tasks_to_process)} 个文件")
+            target_total = len(tasks_to_process)
+            self.logger.info(f"开始处理 {target_total} 个文件")
+            task_modes = {task.mode for task in tasks_to_process}
+            run_mode = "repair" if task_modes == {"repair"} else "translate"
+            run_id = self.state_store.start_run(
+                mode=run_mode,
+                inputs=inputs,
+                target_total=target_total,
+                config_snapshot=self._build_run_snapshot(),
+            )
+            self.current_run_id = run_id
+            success_count, failure_count = self._run_normal_mode(tasks_to_process, run_id)
 
             run_status = "complete" if failure_count == 0 else ("partial" if success_count > 0 else "failed")
             self.state_store.finish_run(
@@ -169,64 +137,6 @@ class TranslationPipeline:
         finally:
             self.current_run_id = ""
     
-    def _run_enhanced_mode(self, files_to_process: List[Path], run_id: str) -> Tuple[int, int]:
-        """运行增强模式"""
-        self.logger.info("启用增强模式：QC检测 + 重新翻译")
-        success_count = 0
-        failure_count = 0
-        
-        for i, file_path in enumerate(files_to_process, 1):
-            self.logger.info(f"处理文件 {i}/{len(files_to_process)}: {file_path}")
-            # 预判是否跳过：若非覆盖且目标输出已存在，则跳过且不创建日志
-            try:
-                target_path = self.enhanced_handler._resolve_output_path(file_path)  # 使用增强处理器的路径规则
-            except Exception:
-                target_path = None
-            if (not self.config.overwrite) and target_path and target_path.exists():
-                self.logger.info(f"输出文件已存在，跳过: {target_path}")
-                continue
-
-            # 确认需要处理：先创建文件日志器并分发到组件，再开始处理，确保全过程有文件日志
-            UnifiedLogger._debug_files_mode = self.config.debug_files
-            UnifiedLogger._log_level = self.config.log_level
-            log_dir = file_path.parent if self.config.debug_files else self.config.log_dir
-            custom_basename = None
-            if self.config.enhanced_mode and getattr(self.config, 'enhanced_output', 'copy') == 'copy':
-                custom_basename = f"{file_path.stem}_enhanced"
-            self.logger = UnifiedLogger.create_for_file(
-                file_path,
-                log_dir,
-                stream_output=bool(self.config.realtime_log),
-                custom_basename=custom_basename,
-            )
-            # 将新日志器分发到组件
-            self.enhanced_handler.logger = self.logger
-            if hasattr(self.enhanced_handler, 'streaming_handler') and self.enhanced_handler.streaming_handler:
-                self.enhanced_handler.streaming_handler.logger = self.logger
-            if hasattr(self.file_handler, 'logger'):
-                self.file_handler.logger = self.logger
-            if hasattr(self.quality_checker, 'logger'):
-                self.quality_checker.logger = self.logger
-            # 打印日志文件路径
-            if hasattr(self.logger, 'get_log_file_path'):
-                log_file_path = self.logger.get_log_file_path()
-                if log_file_path:
-                    self.logger.info(f"📝 日志文件路径: {log_file_path}")
-
-            processed = self.enhanced_handler.process_bilingual_file(file_path)
-            if processed:
-                success_count += 1
-            else:
-                self.logger.error(f"增强模式处理失败: {file_path}")
-                failure_count += 1
-            self.state_store.update_run_progress(
-                run_id,
-                success_delta=1 if processed else 0,
-                failure_delta=0 if processed else 1,
-            )
-        
-        return success_count, failure_count
-
     def _run_normal_mode(self, tasks_to_process: List[TranslationTask], run_id: str) -> Tuple[int, int]:
         """运行普通模式"""
         success_count = 0
@@ -661,7 +571,7 @@ class TranslationPipeline:
                 translated_content = yaml_translated
             else:
                 # 翻译正文（保留现有分块逻辑）
-                body_translated = self._translate_text(body_raw, use_body_prompt=True)
+                body_translated = self._translate_text(body_raw)
                 if not body_translated:
                     self.logger.error("正文翻译失败")
                     self._record_processing_state(
@@ -812,7 +722,6 @@ class TranslationPipeline:
         self.logger.info("🔧 翻译配置:")
         self.logger.info(f"   模型: {self.config.model}")
         self.logger.info(f"   简化双语模式: {self.config.bilingual_simple}")
-        self.logger.info(f"   增强模式: {self.config.enhanced_mode}")
         self.logger.info(f"   实时日志: {self.config.realtime_log}")
         self.logger.info(f"   重试次数: {self.config.retries}")
         self.logger.info(f"   重试等待: {self.config.retry_wait} 秒")
@@ -867,21 +776,16 @@ class TranslationPipeline:
             
             return output_dir / f"{stem}.txt"
     
-    def _translate_text(self, text_content: str, use_body_prompt: bool = False) -> str:
+    def _translate_text(self, text_content: str) -> str:
         """翻译文本内容"""
-        
-        # 检查是否使用bilingual-simple模式
         if self.config.bilingual_simple:
             return self._translate_text_simple_bilingual(text_content)
-        
-        # 不需要分块，直接单块翻译
-        if use_body_prompt:
-            result, prompt, success, token_meta = self.translator.translate_body_text(text_content)
-        else:
-            result, prompt, success, token_meta = self.translator.translate_text(text_content)
+
+        # 非 bilingual_simple 路径：使用正文 prompt 走单块翻译
+        result, prompt, success, token_meta = self.translator.translate_body_text(text_content)
         if not success:
             self.logger.error("翻译失败，保留原文")
-            return text_content  # 保留原文而不是返回空字符串
+            return text_content
         self.logger.info(f"Token使用情况: {token_meta}")
         return result
     
