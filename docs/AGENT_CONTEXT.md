@@ -1,339 +1,122 @@
-# GenAI Playground - Agent 对话上下文
+# GenAI Playground — Agent 稳定背景
 
-> 这份文档保留“稳定背景”和“长期约定”。
-> 当前项目状态、组件开发状态和开发计划，请先看 [`PROJECT_STATUS.md`](PROJECT_STATUS.md)。
+> 这份文档只保留"长半衰期"的环境、约定与排障经验。
+>
+> - 开发规范：见仓库根 [`../AGENTS.md`](../AGENTS.md)
+> - 当前状态：见 [`PROJECT_STATUS.md`](PROJECT_STATUS.md)
+> - 历史决策：见 [`journal/README.md`](journal/README.md)
+> - 翻译执行手册：见 [`../tasks/translation/README.md`](../tasks/translation/README.md)
 
-## 🎯 项目概述
+## 项目概览
 
-这是一个多功能的 GenAI 实验平台，包含两个主要子项目：
+仓库包含两个子项目：
 
-1. **机器翻译服务**：在 4× RTX 6000 Ada 服务器上部署本地机器翻译服务，使用 vLLM + Qwen3-32B-AWQ 技术栈，实现了日语到中文的翻译功能，支持批量翻译和质量检测。
+1. **翻译流水线** (`tasks/translation/`) — 当前主战场。
+   日语 → 中文，下载 → 翻译 → 修复/清理 → 打包。
+   核心栈：vLLM / Apple MLX / OpenRouter，统一走 OpenAI 兼容接口。
 
-2. **Sunday Movies 系统**：电影档期和评分抓取系统，已完成 Fandango 影院场次抓取功能和多源评分系统（豆瓣、IMDb），支持智能评分聚合和电影推荐功能。
+2. **Sunday Movies** (`tasks/sunday-movies/`) — 维护模式。
+   影院档期与多源评分（Fandango / 豆瓣 / IMDb）。
 
-## 🏗️ 项目结构
+详细目录边界在 [`../AGENTS.md`](../AGENTS.md) §1。
 
-```
-genai-playground/
-├── Makefile                    # 主要构建文件
-├── README.md                   # 项目入口文档
-├── .gitignore                  # Git 忽略文件
-├── docs/                       # 项目文档目录
-│   ├── journal/                # 按日期组织的项目日志
-│   │   ├── README.md           # Journal 索引
-│   │   ├── 2024-08-28.md       # 项目启动
-│   │   ├── 2024-09-01.md       # 项目成果
-│   │   ├── 2025-09-02.md       # 翻译服务与脚本收敛
-│   │   ├── 2025-09-03.md       # vLLM 前台可观测+tmux后台
-│   │   ├── 2025-09-05.md       # 翻译脚本重构与重复检测
-│   │   ├── 2025-09-04.md       # 翻译脚本增强与配置优化
-│   │   └── technical-docs.md   # 技术文档补充
-│   ├── PROJECT_STATUS.md       # 当前状态、组件状态、开发计划
-│   └── AGENT_CONTEXT.md        # Agent 对话上下文（本文件）
-├── .cursor/                    # Cursor 配置目录
-│   └── rules/                  # Cursor 规则文件
-│       └── organize-progress.mdc # 工作流程规则
-├── scripts/                    # 通用脚本目录
-│   ├── manage_vllm.sh         # vLLM 服务管理脚本
-│   ├── serve_vllm.sh          # vLLM 服务启动脚本
-│   ├── check_vllm.py          # vLLM 健康检查脚本
-│   └── monitor_translation.sh  # 翻译进度监控脚本
-├── tasks/translation/          # 翻译任务目录
-│   ├── src/                   # 模块化翻译脚本源码
-│   │   ├── core/              # 核心功能模块
-│   │   │   ├── translator.py  # 翻译核心逻辑
-│   │   │   ├── quality_checker.py # 质量检测
-│   │   │   ├── streaming_handler.py # 流式处理
-│   │   │   └── pipeline.py    # 翻译流水线
-│   │   ├── cli/               # 命令行接口
-│   │   └── translate.py       # 主翻译脚本
-│   ├── translate              # 便捷调用器
-│   ├── data/                  # 数据目录
-│   │   ├── input/             # 输入文件
-│   │   ├── output/            # 输出文件
-│   │   ├── samples/           # 示例文件
-│   │   ├── pixiv/             # Pixiv 小说数据
-│   │   └── terminology.txt    # 术语对照表
-│   ├── docs/                  # 翻译任务文档
-│   │   └── repetition-detection.md # 重复检测功能说明
-│   └── logs/                  # 翻译任务日志
-├── tasks/sunday-movies/       # Sunday Movies 项目目录
-│   ├── src/                   # 源代码
-│   │   ├── collectors/        # 影院档期抓取器
-│   │   │   ├── amc.py         # AMC 影院抓取
-│   │   │   └── fandango.py    # Fandango 抓取
-│   │   ├── ratings/           # 评分抓取模块
-│   │   │   ├── aggregator.py  # 评分聚合器
-│   │   │   ├── base.py        # 基础接口
-│   │   │   ├── douban.py      # 豆瓣评分
-│   │   │   ├── imdb.py        # IMDb 评分
-│   │   │   ├── rottentomatoes.py # 烂番茄评分
-│   │   │   └── utils.py       # 工具函数
-│   │   ├── scripts/           # 脚本工具
-│   │   │   ├── fetch_fandango_showtimes.py # 档期抓取
-│   │   │   └── fetch_ratings.py # 评分抓取
-│   │   └── tests/             # 测试文件
-│   ├── data/                  # 数据目录（运行时生成）
-│   ├── cache/                 # 缓存目录
-│   └── logs/                  # 日志目录
-└── logs/                      # 主项目日志目录
-```
+## 运行环境
 
-## 🚀 快速开始
+### Conda
 
-### 1. 环境配置
 ```bash
-# 激活 conda 环境
 conda activate llm
+# 或
+conda run -n llm <command>
+```
 
-# 设置 CUDA 环境变量
+环境定义：`environment-llm.yml`（Linux + CUDA）、`environment-llm-mac.yml`（Apple Silicon + MLX）。
+
+### CUDA / vLLM（Linux 服务器）
+
+```bash
+# 解决 ld 找不到 libcuda 的链接错误
+mkdir -p ~/.local/lib
+ln -sf /usr/lib/x86_64-linux-gnu/libcuda.so ~/.local/lib/libcuda.so
+
 export LD_LIBRARY_PATH=~/.local/lib:$LD_LIBRARY_PATH
 export LIBRARY_PATH=~/.local/lib:${LIBRARY_PATH:-}
 export CUDA_HOME=/usr/local/cuda-12.4
 export PATH=$CUDA_HOME/bin:$PATH
 
-# 设置 HuggingFace 缓存
+# HuggingFace 缓存
 export HF_HOME=/path/to/your/hf_cache
 export HF_HUB_ENABLE_HF_TRANSFER=1
-export HUGGINGFACE_HUB_VERBOSITY=debug
-export HF_HUB_DISABLE_PROGRESS_BARS=0
 ```
 
-### 2. 启动服务
+vLLM 关键环境变量：
+
 ```bash
-# 前台启动（推荐首次使用）
-make vllm-start
-
-# 后台启动
-make vllm-start-bg
-
-# 启动 32B 完整模型
-make vllm-start-32b
-
-# 调试模式启动
-make vllm-start-debug
-```
-
-### 3. 测试翻译
-```bash
-# 基本翻译测试
-make vllm-test
-
-# 批量翻译（需要指定输入目录）
-make translate-batch INPUT_DIR=tasks/translation/data/pixiv/50235390
-
-# 智能批量翻译（跳过质量良好的文件）
-make translate-batch-smart INPUT_DIR=tasks/translation/data/pixiv/50235390
-```
-
-### 4. Sunday Movies 功能
-```bash
-# 获取多源评分数据（推荐）
-python tasks/sunday-movies/src/scripts/fetch_showtimes_with_all_ratings.py \
-  --theater-id AADYN --theater-name "AMC Mercado 20" --date 2025-10-19 --max-movies 10
-
-# 生成评分总结报告
-python tasks/sunday-movies/src/scripts/rating_summary.py --date 2025-10-19
-
-# 抓取单个影院场次（基础功能）
-python tasks/sunday-movies/src/scripts/fetch_fandango_showtimes.py \
-  --theater-id AADYN --theater-name "AMC Mercado 20" --date 2025-10-19
-
-# 批量抓取多个影院
-python tasks/sunday-movies/src/scripts/batch_fandango.py --date 2025-10-19
-
-# 限定评分来源
-python tasks/sunday-movies/src/scripts/fetch_ratings.py \
-  tasks/sunday-movies/data/fandango_live_response.json \
-  --provider douban --provider imdb
-```
-
-## 🔧 关键技术配置
-
-### CUDA 库链接解决方案
-```bash
-# 创建用户级符号链接
-mkdir -p ~/.local/lib
-ln -sf /usr/lib/x86_64-linux-gnu/libcuda.so ~/.local/lib/libcuda.so
-
-# 设置环境变量
-export LD_LIBRARY_PATH=~/.local/lib:$LD_LIBRARY_PATH
-export LIBRARY_PATH=~/.local/lib:${LIBRARY_PATH:-}
-export CUDA_HOME=/usr/local/cuda-12.4
-```
-
-### vLLM 配置
-```bash
-# 注意力后端
 export VLLM_ATTENTION_BACKEND=XFORMERS
-
-# 显存利用率
 export VLLM_WORKER_GPU_MEM_FRACTION=0.90
-
-# 允许长序列
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-
-# 日志配置
 export VLLM_LOGGING_LEVEL=INFO
-export VLLM_LOGGING_FORMAT=%(asctime)s - %(name)s - %(levelname)s - %(message)s
 ```
 
-### 服务配置
-- **默认模型**: Qwen/Qwen3-32B-AWQ
-- **完整模型**: Qwen/Qwen3-32B
-- **端口**: 8000
-- **AWQ 最大长度**: 40960
-- **32B 最大长度**: 32768
-- **TP 大小**: AWQ=2, 32B=4
-- **显存利用率**: 90%
+服务默认值：端口 `8000`；模型 `Qwen/Qwen3-32B-AWQ`（最大长度 40960，TP=2）/ `Qwen/Qwen3-32B`（32768，TP=4）；显存利用率 90%。
 
-## 🚨 常见问题及解决方案
+### Apple Silicon / MLX
 
-### 1. CUDA 库链接错误
+```bash
+conda env update -n llm -f environment-llm-mac.yml
+make mlx-start-bg
+make mlx-status
+make mlx-test
 ```
-/usr/bin/ld: cannot find -lcuda: No such file or directory
-```
-**解决**: 创建符号链接并设置环境变量（见上方配置）
 
-### 2. 服务状态误判
-```
-manage_vllm.sh status 显示未运行但实际运行中
-```
-**解决**: 使用 `python scripts/check_vllm.py` 进行权威检查
+默认模型来自 `environment-llm-mac.yml`；切模型用 `MODEL=...` 显式传。
 
-### 3. 模型 404 错误
-```
-404 The model Qwen/Qwen3-32B does not exist
-```
-**解决**: 确保服务端和客户端模型名一致，使用 `-m` 参数显式指定
+## 服务管理
 
-### 4. 输出内容不合规
-```
-译文输出夹带原文与 <think> 思考内容
-```
-**解决**: 使用通用翻译脚本，输出仅保留译文，完整内容写入日志
-
-### 5. 32B 显存不足
-```
-CUDA OOM: out of memory
-```
-**解决**: 使用 32B-AWQ 量化版本，或调整 TP_SIZE 和显存利用率
-
-### 6. 后台运行无进度条
-```
-tqdm 进度条不显示
-```
-**解决**: 使用前台模式 `make vllm-start` 或 tmux 后台模式 `make vllm-start-bg`
-
-## 📊 项目成果
-
-### 翻译服务功能
-- ✅ 本地机器翻译服务（日语→中文）
-- ✅ 完整的服务管理系统（前台/后台模式）
-- ✅ 批量翻译功能（Pixiv 小说）
-- ✅ 翻译质量检测和自动重试
-- ✅ 双语对照输出模式
-- ✅ 流式输出和实时日志
-- ✅ 时间戳日志系统
-- ✅ 问题解决记录
-
-### Sunday Movies 功能
-- ✅ 影院档期抓取（Fandango）
-- ✅ Fandango API 接口集成
-- ✅ 多端点支持（新旧 API）
-- ✅ 命令行工具和 JSON 输出
-- ✅ 模块化架构设计
-- ✅ 豆瓣评分抓取器（网页爬虫方式，成功率80%）
-- ✅ IMDb评分抓取器（API方式，成功率100%）
-- ✅ 多源评分聚合算法（基于置信度加权平均）
-- ✅ 智能电影标题匹配（标题相似度+年份匹配）
-- ✅ 评分总结报告生成器
-- ✅ 电影推荐和排序系统
-
-### 测试结果
-- ✅ `こんにちは、世界。` → `你好，世界。`
-- ✅ `今日は良い天気ですね。` → `今天天气真好。`
-- ✅ `私は日本語を勉強しています。` → `我正在学习日语。`
-- ✅ 长文本翻译（1000+字符）
-- ✅ 专业术语翻译
-- ✅ 语序处理优化
-
-## 🎯 当前状态入口
-
-- 当前真相源：[`PROJECT_STATUS.md`](PROJECT_STATUS.md)
-- 当前主要焦点：`tasks/translation`
-- 当前阶段：翻译流水线工程化，重点是可靠性、可恢复性、可验证性
-- 最近完成：翻译运行状态持久化、半成品识别、打包元数据回退、关键回归测试补齐
-- 下一阶段：内建并发调度、repair 一体化、token-aware batching、更强自动质量 gate
-
-## 🔗 相关文档
-
-- **[当前状态与路线图](PROJECT_STATUS.md)** - 当前重点、组件状态、开发计划
-- **[Journal 索引](journal/README.md)** - 按日期组织的项目日志
-- **[2026-04-07 状态固化与 P0 可靠性收敛](journal/2026-04-07.md)** - 最近一轮工程改动
-- **[2025-10-18 Sunday Movies Fandango 抓取](journal/2025-10-18.md)** - Sunday Movies 开发记录
-- **[2025-09-04 翻译脚本增强](journal/2025-09-04.md)** - 翻译功能更新
-- **[2025-09-03 vLLM 可观测性](journal/2025-09-03.md)** - 前台/后台运行方案
-- **[2025-09-02 服务收敛](journal/2025-09-02.md)** - 关键问题解决
-- **[技术文档](journal/technical-docs.md)** - 详细技术配置
-- **[项目成果](journal/2024-09-01.md)** - 项目成果总结
-
-## 💡 给新 Agent 的建议
-
-1. **先看当前状态文档**: 新对话不要直接信任历史任务清单，先读 `PROJECT_STATUS.md`
-2. **再看 Journal**: 项目采用按日期组织的 Journal 结构，用来补历史决策和排障背景
-3. **使用管理脚本**: 项目提供了便捷的 Makefile 和管理脚本，避免直接操作
-4. **检查环境变量**: CUDA 环境配置是关键，确保环境变量正确设置
-5. **查看日志**: 使用时间戳日志系统，便于调试和问题追踪
-6. **用户级解决方案**: 优先使用用户级解决方案，避免影响其他用户
-7. **模型选择**: 默认使用 AWQ 模型，32B 完整模型仅用于离线评估
-8. **前台 vs 后台**: 首次启动使用前台模式观察进度，稳定后使用后台模式
-9. **翻译质量**: 使用质量检测机制，自动重试失败的翻译
-
-## 🔧 常用命令
-
-### 服务管理
 ```bash
 make vllm-start          # 前台启动 AWQ
 make vllm-start-32b      # 前台启动 32B
-make vllm-start-bg       # 后台启动 AWQ
-make vllm-start-bg-debug # 后台调试启动
-make vllm-stop           # 停止服务
-make vllm-restart        # 重启服务
-make vllm-status         # 查看状态
-make vllm-logs           # 查看日志
+make vllm-start-bg       # tmux 后台启动 AWQ
+make vllm-status         # 状态
+make vllm-logs           # 日志（tail -f）
+make vllm-stop           # 停止
 ```
 
-### 翻译任务
-```bash
-make translate-batch INPUT_DIR=path/to/input
-make translate-batch-smart INPUT_DIR=path/to/input
-make translate-start-fg ARGS="path/to/input.txt --bilingual-simple --stream"
-```
+`tmux attach -t vllm` 进后台 session。
 
-### 监控和调试
-```bash
-python scripts/check_vllm.py
-tmux attach -t vllm
-gpustat
-nvidia-smi
-```
+权威健康检查：`python scripts/check_vllm.py`（比 `manage_vllm.sh status` 更可靠）。
 
-## 📋 工作流程规则
+## 常见排障
 
-当用户说"整理进展"时，请按照 `.cursor/rules/organize-progress.mdc` 中的详细流程执行：
+| 现象 | 应对 |
+| --- | --- |
+| `cannot find -lcuda` | 见上方"CUDA / vLLM"配置 |
+| `manage_vllm.sh status` 状态误判 | 用 `python scripts/check_vllm.py` |
+| `404 The model X does not exist` | 客户端模型名要与服务端一致；显式传 `--model` 或 `-m` |
+| 译文里夹带原文或 `<think>` 内容 | 用主翻译入口，不要直调底层 client；输出仅留译文，原文进日志 |
+| 32B CUDA OOM | 用 AWQ 量化版，或下调 `TP_SIZE` 与显存利用率 |
+| tqdm 进度条不显示 | 前台 `make vllm-start` 或后台 `tmux attach` |
+| 翻译卡 / 超时 | 检查 `tasks/translation/logs/latest_translation.log` 与 `translation_state.json` |
 
-1. **检查当前状态** - 查看 git 状态和变更
-2. **分析变更内容** - 识别主要变更类别
-3. **更新项目日志** - 在 `docs/journal/` 下创建/更新日志
-4. **更新相关文档** - 更新 AGENT_CONTEXT.md 等
-5. **清理敏感信息** - 移除机器路径、用户名等
-6. **准备 commit message** - 按模板格式准备
-7. **执行提交** - 完成 git commit
+## 状态与日志位置
 
-详细规则请参考：`.cursor/rules/organize-progress.mdc`
+- 主翻译日志：`tasks/translation/logs/translation-<ts>.log`，软链 `latest_translation.log`
+- 运行状态：`tasks/translation/logs/translation_state.json`（顶层 + 子目录都可能存在）
+- QA 报告：默认 `tasks/translation/logs/qa_reports/`
+- 人名预读：默认 `tasks/translation/logs/name_glossaries/`
+
+## 给新 Agent 的建议
+
+1. **不要先翻 journal 重建上下文**。按 [`../AGENTS.md`](../AGENTS.md) §11 的顺序读：开发规范 → PROJECT_STATUS → 翻译 README。
+2. **优先用 Make / 管理脚本**，不要直接绕过去调底层 Python。
+3. **CUDA / vLLM 环境变量是反复踩坑的来源**，复制本文件里的配置而不是自己拼。
+4. **状态机是真相**：排查"为什么没跑/跑成什么样"先看 `translation_state.json`，不要靠 ls 输出目录猜。
+5. **删代码时同步删 CLI flag、config 字段、文档段落** —— 这条在 [`../AGENTS.md`](../AGENTS.md) §8 有完整规则。
+
+## "整理进展" 工作流
+
+仓库里有 `.cursor/rules/organize-progress.mdc` 定义了"整理进展"指令的执行细则（git 状态分析、逐文件变更、日志写入、commit message 模板）。当用户说"整理进展"时按那份文档执行。
 
 ---
 
-**项目状态**: ✅ 运行中  
-**最后更新**: 2025-10-18
+**最后更新**：2026-05-14
