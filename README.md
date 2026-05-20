@@ -4,9 +4,10 @@
 
 新 agent / 新对话建议先读：
 
+- [`AGENTS.md`](AGENTS.md)：开发规范的真相源（编码、目录、配置分层、测试、commit/PR）
 - [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)：当前重点、组件状态、开发计划
-- [`docs/AGENT_CONTEXT.md`](docs/AGENT_CONTEXT.md)：稳定背景和操作约定
 - [`tasks/translation/README.md`](tasks/translation/README.md)：翻译子系统执行手册
+- [`docs/AGENT_CONTEXT.md`](docs/AGENT_CONTEXT.md)：稳定环境/排障背景，按需翻
 
 ## 关键目录
 

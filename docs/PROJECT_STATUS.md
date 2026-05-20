@@ -3,7 +3,7 @@
 > 当前项目状态、组件健康度和开发计划的真相源。
 > 新的 agent / 新的对话优先读这份文档，再进入具体子系统文档。
 
-**最后更新**: 2026-05-01
+**最后更新**: 2026-05-20
 
 ## Start Here
 
@@ -52,7 +52,15 @@
 
 ## Recent Engineering Changes
 
-这轮已经落地的关键改动：
+2026-05-20 死代码清理与开发规范收敛：
+
+- 删除 `enhanced_mode` 整条链路（`enhanced_mode.py`、`rule_detector.py`、CLI flag、config 字段、pipeline/file_handler 分支），生产路径一直走 `bilingual_simple`，该模式无 caller。
+- 删除 `Translator.translate_text` / `_translate_with_stream` / `_build_messages` 死分支（引用了不存在的 `config.bilingual`）；非 `bilingual_simple` 路径统一走 `translate_body_text`。
+- 删除 `utils/validation` 下孤儿校验器 `quality_validator` / `content_validator`。
+- 净删除约 1557 行；测试基线保持 44 全绿。
+- 开发规范收敛到 [`../AGENTS.md`](../AGENTS.md)；[`AGENT_CONTEXT.md`](AGENT_CONTEXT.md) 瘦身为稳定背景。
+
+历史轮次（状态固化与 QA gate）已落地的关键改动：
 
 - 新增 [`../tasks/translation/src/core/run_state.py`](../tasks/translation/src/core/run_state.py)，持久化 run/file 级状态。
 - [`../tasks/translation/src/core/file_handler.py`](../tasks/translation/src/core/file_handler.py) 和 [`../tasks/translation/src/core/pipeline.py`](../tasks/translation/src/core/pipeline.py) 已统一输出路径语义，并识别 `missing/partial/running/failed/complete`。
