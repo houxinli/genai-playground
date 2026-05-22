@@ -92,13 +92,36 @@
 - `monitor_translation.sh` 提供 `status / monitor / stats` 三个视角。
 - 引入新指标（耗时、token、成本）请扩展 `run_state` 的 `progress` 字段，不要再起新文件。
 
-## 10. Commit 与 PR
+## 10. 分支、checkpoint 与 PR
+
+### 分支模型
+
+- `main` 是唯一集成主干（trunk）。受 CI 守护，保持随时可发布。
+- **一事一支一 PR**：每个独立任务从最新的 `main` 切一条短生命周期 topic 分支，命名 `feat/...`、`fix/...`、`refactor/...`、`chore/...`、`docs/...`。合并后删除。
+- 切分支前先同步主干：`git fetch origin && git switch main && git pull --ff-only`。
+- 不要再用以机器命名的长期"大杂烩"分支把多个子项目的改动堆在一起——那会让 PR 不可评审、回滚粒度过粗。
+- 不同子项目（translation / sunday-movies / fitness / ytmusic）的改动应落在各自的 topic 分支与 PR 里，不要混提交。
+
+### checkpoint 纪律
+
+- **每完成一个独立子任务就提交**，不要一个会话攒成一个大提交。一个提交 = 一个能独立描述、能独立回滚的逻辑单元。
+- 提交前确保该单元自洽：测试通过、无半成品。失败的步骤不要混进提交。
+- 长任务用 TaskCreate/TaskList 跟踪会话内进度；跨会话的进展沉淀到 journal 与 `PROJECT_STATUS.md`。
+- **每个合并的 PR 配一条 journal**（`docs/journal/YYYY-MM-DD.md` + 索引），记录动机、改动、验证、后续。
+
+### Commit
 
 - 用 Conventional Commits + 子系统 scope：`feat(translation): ...`、`fix(vllm): ...`、`refactor(translation): drop dead code`。
 - 标题 ≤ 72 字符；body 写"为什么"。
+- 选择性 `git add` 具体文件，不要 `git add -A` 把无关 WIP（如他人未完成的子项目）一起带进来。
+
+### PR
+
 - PR 描述应包含：动机/issue 链接、影响的 Make 目标、验证命令（至少 `python -m unittest discover ...` + 必要的 `make translate*` 调用）、必要日志或样本输出。
-- 翻译流水线 PR 至少由一位熟悉该子系统的 owner 评审。Rebase 保持线性。
+- PR 必须等 CI（`.github/workflows/tests.yml`）通过再合并。
+- 翻译流水线 PR 至少由一位熟悉该子系统的 owner 评审。合并保持线性历史。
 - 除非用户明确要求，不要 `--no-verify`、`--amend`、`push --force`。
+- 本地可装 pre-push hook 在 push 前跑快测试：`bash scripts/install-git-hooks.sh`。
 
 ## 11. 给新 Agent 的最小阅读路径
 
