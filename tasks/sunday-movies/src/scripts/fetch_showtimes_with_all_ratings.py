@@ -20,7 +20,7 @@ from ratings.douban import DoubanFetcher
 from ratings.imdb import ImdbFetcher
 from ratings.rottentomatoes import RottenTomatoesFetcher
 from ratings.aggregator import RatingsAggregator
-from ratings.utils import normalize_title
+from ratings.utils import normalize_title, clean_search_title, extract_title_year
 
 RATING_COLUMNS = [
     ("douban", "豆瓣"),
@@ -88,14 +88,18 @@ def fetch_showtimes_with_all_ratings(
             continue
         
         print(f"\n🎭 Processing: {movie_title}")
-        cache_key = normalize_title(movie_title)
-        
+        search_title = clean_search_title(movie_title)
+        search_year = extract_title_year(movie_title)
+        cache_key = normalize_title(search_title)
+        if search_title != movie_title:
+            print(f"   🔎 Search title: {search_title}" + (f" (year {search_year})" if search_year else ""))
+
         # 获取多源评分
         try:
             if cache_key in cache:
                 ratings = cache[cache_key]
             else:
-                ratings = aggregator.fetch(movie_title, year=2025)
+                ratings = aggregator.fetch(search_title, year=search_year)
                 cache[cache_key] = ratings
             
             if ratings:
@@ -245,7 +249,7 @@ def format_markdown_table(results: List[Dict[str, Any]], theater_name: Optional[
         row = [english, chinese, f"{score:.1f}/10" if score is not None else "—"]
         for source, _ in RATING_COLUMNS:
             rating_data = movie["ratings"].get(source)
-            if rating_data and rating_data.get("score") is not None:
+            if rating_data and rating_data.get("score"):
                 row.append(f"{rating_data['score']:.1f}/10")
             else:
                 row.append("—")
