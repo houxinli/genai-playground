@@ -1,0 +1,12 @@
+# Minimal dependency set for running the unit-test suites in CI.
+# Deliberately excludes heavy runtime-only deps (torch, vllm, mlx): the tests
+# import transformers but never load a model, and translation token estimation
+# is forced to the simple estimator in CI (see .github/workflows/tests.yml).
+pyyaml
+requests
+openai
+transformers
+beautifulsoup4
+python-dateutil
+markdown2
+pytest
