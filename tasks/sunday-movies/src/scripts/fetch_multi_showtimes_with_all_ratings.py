@@ -236,7 +236,7 @@ def format_combined_markdown_table(theater_results: List[Tuple[str, List[Dict]]]
         row = [item["english"], item.get("chinese") or "—"]
         for source, _ in RATING_COLUMNS:
             rating_data = item["ratings"].get(source)
-            if rating_data and rating_data.get("score") is not None:
+            if rating_data and rating_data.get("score"):
                 row.append(f"{rating_data['score']:.1f}/10")
             else:
                 row.append("—")
