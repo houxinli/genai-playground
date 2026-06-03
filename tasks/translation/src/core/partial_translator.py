@@ -140,13 +140,15 @@ class PartialTranslationHelper:
                 context_lines=context_lines,
             )
             if not ok or not translated_lines:
+                # 重译失败/被拒：保留既有有效译文，绝不用占位符覆盖好译文。
                 segment_updates: Dict[int, str] = {}
                 for idx in range(start, end + 1):
                     if body_lines[idx].strip():
-                        translations[idx] = "[翻译未完成]"
-                        segment_updates[idx] = "[翻译未完成]"
+                        kept = self._fallback_for(reference_translations, idx)
+                        translations[idx] = kept
+                        segment_updates[idx] = kept
                         if reference_translations is not None:
-                            reference_translations[idx] = "[翻译未完成]"
+                            reference_translations[idx] = kept
                 if segment_updates and on_segment_complete:
                     on_segment_complete(segment_updates)
                 previous_io = None
@@ -163,7 +165,8 @@ class PartialTranslationHelper:
                     translated_idx += 1
                 else:
                     trans_line = ""
-                validated = self._validate_translation(body_lines[global_idx], trans_line)
+                fallback = self._fallback_for(reference_translations, global_idx)
+                validated = self._validate_translation(body_lines[global_idx], trans_line, fallback)
                 translations[global_idx] = validated
                 segment_updates[global_idx] = validated
                 if reference_translations is not None:
@@ -173,13 +176,21 @@ class PartialTranslationHelper:
 
         return translations
 
-    def _validate_translation(self, original: str, translation: str) -> str:
+    def _fallback_for(self, reference_translations: Optional[List[Optional[str]]], idx: int) -> str:
+        """重译不可用时的回退：优先沿用既有有效译文，否则才标占位符。"""
+        if reference_translations is not None and idx < len(reference_translations):
+            ref = reference_translations[idx]
+            if self._is_valid_reference(ref):
+                return ref.strip()
+        return "[翻译未完成]"
+
+    def _validate_translation(self, original: str, translation: str, fallback: str = "[翻译未完成]") -> str:
         stripped_orig = original.strip()
         stripped_trans = translation.strip()
         if not stripped_trans:
-            return "[翻译未完成]"
+            return fallback
         if stripped_trans == stripped_orig:
-            return "[翻译未完成]"
+            return fallback
         if not self._chinese_pattern.search(stripped_trans) and self._japanese_pattern.search(stripped_trans):
-            return "[翻译未完成]"
-        return translation or "[翻译未完成]"
+            return fallback
+        return translation or fallback
