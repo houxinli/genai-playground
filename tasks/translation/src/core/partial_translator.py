@@ -177,10 +177,14 @@ class PartialTranslationHelper:
         return translations
 
     def _fallback_for(self, reference_translations: Optional[List[Optional[str]]], idx: int) -> str:
-        """重译不可用时的回退：优先沿用既有有效译文，否则才标占位符。"""
+        """重译不可用时的回退：沿用既有的任何非空原译，绝不把已有内容降级成占位符。
+
+        只有当该行原本就没有任何译文（None/空，或本就是占位符）时，才返回占位符。
+        这样 repair 对任何一行都只会"改好或保持原样"，不会比修复前更差。
+        """
         if reference_translations is not None and idx < len(reference_translations):
             ref = reference_translations[idx]
-            if self._is_valid_reference(ref):
+            if ref and ref.strip():
                 return ref.strip()
         return "[翻译未完成]"
 

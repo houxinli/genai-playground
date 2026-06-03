@@ -60,9 +60,15 @@ class NonDestructiveRepairTest(unittest.TestCase):
         result, _ = self._run(ok=True, lines=["桃的乳交场面。"], reference=["モモ的乳交。"])
         self.assertEqual(result[0], "桃的乳交场面。")
 
-    def test_japanese_only_reference_is_not_preserved(self):
-        # A "same as source" line has no valid Chinese reference -> placeholder on refusal.
+    def test_existing_content_preserved_over_placeholder(self):
+        # Non-destructive: even a same-as-source (Japanese) line is kept rather than
+        # downgraded to a placeholder; QA still flags it as needing work.
         result, _ = self._run(ok=False, lines=[], reference=["モモのパイズリ。"])
+        self.assertEqual(result[0], "モモのパイズリ。")
+        self.assertNotEqual(result[0], PLACEHOLDER)
+
+    def test_empty_reference_yields_placeholder(self):
+        result, _ = self._run(ok=False, lines=[], reference=[""])
         self.assertEqual(result[0], PLACEHOLDER)
 
 
