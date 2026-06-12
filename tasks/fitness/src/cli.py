@@ -48,8 +48,9 @@ def cmd_parse(args):
     out = Path(args.out) if args.out else DERIVED / "sets.csv"
     report.to_csv(result, out)
     dates = [s.date for s in result.sets]
+    date_range = f"  ({min(dates)} → {max(dates)})" if dates else ""
     print(f"sessions: {result.sessions}")
-    print(f"sets:     {len(result.sets)}  ({min(dates)} → {max(dates)})")
+    print(f"sets:     {len(result.sets)}{date_range}")
     print(f"issues:   {len(result.issues)} lines could not be parsed into sets")
     print(f"csv:      {out}")
     if args.show_issues:
