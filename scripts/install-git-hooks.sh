@@ -6,7 +6,9 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SRC_DIR="$REPO_ROOT/scripts/git-hooks"
-# worktree/submodule 下 .git 是文件而非目录,让 Git 解析真实 hooks 路径
+# worktree/submodule 下 .git 是文件而非目录,让 Git 解析真实 hooks 路径。
+# --git-path 返回相对 CWD 的路径,必须先 cd 到仓库根再解析(review: PR #22)。
+cd "$REPO_ROOT"
 DEST_DIR="$(git rev-parse --git-path hooks)"
 case "$DEST_DIR" in
   /*) ;;
