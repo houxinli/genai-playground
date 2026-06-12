@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-17-inventory-qa-fixes",
+  "title": "盘点/QA 基线脚本修正与基线重跑",
+  "status": "active",
+  "branch": "fix/inventory-qa-baseline",
+  "objective": "修正 PR #13 review 的三处缺陷(顶层打包产物入基线、派生命名优先于 meta 信号、空文件 partial),全库重跑基线并同步文档数字(含 #16 的 missing_pair)。",
+  "github": {
+    "issue": 17,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/scripts/inventory_content.py / qa_baseline.py(+tests)",
+      "PROJECT_STATUS/journal 基线数字"
+    ],
+    "out": [
+      "qa_gate 本体(#16 已完成)",
+      "译文修复执行"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "三处脚本修正 + 测试",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "打包产物入基线、派生命名优先、空文件 partial 各有测试",
+        "全量 114 绿"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "全库重跑与文档数字同步",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "v2 报告生成",
+        "PROJECT_STATUS/journal 更新"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "PR 收尾",
+      "status": "in_progress",
+      "depends_on": [
+        "S1",
+        "S2"
+      ],
+      "acceptance": [
+        "review triage、CI 绿、合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR,triage review,CI 绿后合并。",
+    "acceptance": [
+      "PR 合并,issue #17 关闭"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "python tasks/translation/src/scripts/qa_baseline.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "114 passed",
+        "timestamp": "2026-06-12T22:35:33Z"
+      },
+      {
+        "command": "python tasks/translation/src/scripts/qa_baseline.py",
+        "status": "passed",
+        "summary": "v2:25 目录/735 文件/620 error;missing_pair=0",
+        "timestamp": "2026-06-12T22:35:33Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260612T223533Z-claude-code",
+    "timestamp": "2026-06-12T22:35:33Z",
+    "agent": "claude-code",
+    "summary": "S1-S2 完成,待 PR 收尾",
+    "observed_head": "cc84c58"
+  },
+  "next_task": null
+}
