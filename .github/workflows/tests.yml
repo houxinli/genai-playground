@@ -32,10 +32,12 @@ jobs:
           python scripts/validate_agent_tasks.py
 
       - name: Translation test suite
+        # pytest 统跑:unittest discover 不执行 parser/prompt 下的 pytest 风格用例
         run: |
-          python -m unittest discover -s tasks/translation/src -t . -p "*_test.py"
+          python -m pytest tasks/translation/src -q
 
       - name: Sunday Movies offline tests
         run: |
           cd tasks/sunday-movies/src
-          python -m unittest ratings.tests.utils_test ratings.tests.test_aggregator
+          python -m unittest ratings.tests.utils_test ratings.tests.test_aggregator \
+            collectors.amc_test collectors.fandango_test ratings.tests.rottentomatoes_fetcher_test

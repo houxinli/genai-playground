@@ -23,14 +23,16 @@ export TRANSLATION_FORCE_SIMPLE_ESTIMATOR=1
 export TRANSLATION_SKIP_REMOTE_TOKENIZER=1
 
 echo "pre-push: running translation test suite..."
-if ! "${PY[@]}" -m unittest discover -s tasks/translation/src -t . -p "*_test.py" >/tmp/prepush_translation.log 2>&1; then
+# 与 CI 保持一致:pytest 统跑(unittest discover 不执行 pytest 风格用例)
+if ! "${PY[@]}" -m pytest tasks/translation/src -q >/tmp/prepush_translation.log 2>&1; then
   echo "pre-push: translation tests FAILED (see /tmp/prepush_translation.log). Push aborted." >&2
   tail -20 /tmp/prepush_translation.log >&2
   exit 1
 fi
 
 echo "pre-push: running sunday-movies offline tests..."
-if ! ( cd tasks/sunday-movies/src && "${PY[@]}" -m unittest ratings.tests.utils_test ratings.tests.test_aggregator ) >/tmp/prepush_sunday.log 2>&1; then
+if ! ( cd tasks/sunday-movies/src && "${PY[@]}" -m unittest ratings.tests.utils_test ratings.tests.test_aggregator \
+    collectors.amc_test collectors.fandango_test ratings.tests.rottentomatoes_fetcher_test ) >/tmp/prepush_sunday.log 2>&1; then
   echo "pre-push: sunday-movies tests FAILED (see /tmp/prepush_sunday.log). Push aborted." >&2
   tail -20 /tmp/prepush_sunday.log >&2
   exit 1

@@ -37,9 +37,10 @@
 - 翻译批量：`make translate-batch INPUT_DIR=...`、`make translate-batch-bg`；细粒度调试见 `python tasks/translation/src/translate.py --help`。
 - 测试基线（必跑）：
   ```bash
-  conda run -n llm python -m unittest discover -s tasks/translation/src -t . -p "*_test.py"
+  conda run -n llm python -m pytest tasks/translation/src -q
   ```
-  当前 baseline 是 50 测试全绿，PR 合入前必须保持 ≥ 此基线。
+  当前 baseline 是 110 测试全绿，PR 合入前必须保持 ≥ 此基线。
+  （必须用 pytest 统跑：`unittest discover` 不执行 parser/prompt 下的 pytest 风格用例，会假绿。）
 
 ## 3. 编码风格
 
@@ -130,7 +131,7 @@
 
 ### PR
 
-- PR 描述应包含：动机/issue 链接、影响的 Make 目标、验证命令（至少 `python -m unittest discover ...` + 必要的 `make translate*` 调用）、必要日志或样本输出。
+- PR 描述应包含：动机/issue 链接、影响的 Make 目标、验证命令（至少 `python -m pytest tasks/translation/src` + 必要的 `make translate*` 调用）、必要日志或样本输出。
 - PR 必须等 CI（`.github/workflows/tests.yml`）通过再合并。
 - 翻译流水线 PR 至少由一位熟悉该子系统的 owner 评审。合并保持线性历史。
 - 除非用户明确要求，不要 `--no-verify`、`--amend`、`push --force`。

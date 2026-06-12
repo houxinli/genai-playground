@@ -70,10 +70,8 @@ def validate_enhancement_preface_content(content):
         '给定若干原文与当前译文',
         # 文案兼容：旧版为“请逐行改进质量”，新版为“逐行检查质量并优化翻译结果”
         '逐行检查质量并优化翻译结果',
-        '仅输出改进后的中文译文',
-        '不要任何解释',
-        '保持原文的语气和风格',
-        '使用更自然的中文表达',
+        # 旧版“仅输出改进后的中文译文/不要任何解释”已并入下面一条
+        '只输出翻译结果，不要添加任何解释',
         '保持专有名词的一致性',
         '引号使用原文的方引号「」',
         '拟声词和感叹词重复时，控制在5次以内',
@@ -712,11 +710,12 @@ class TestPromptBuilder:
         # 验证当前输入格式
         current_msg = messages[-1]
         assert current_msg["role"] == "user"
+        # 行号接续 few-shot(见 test_build_messages_with_start_no_previous_io),不在此锚定具体数字
         required_current_content = [
-            '1. 原文: 新しい文',
-            '1. 现译: 新句子',
-            '2. 原文: テスト文',
-            '2. 现译: 测试句子'
+            '原文: 新しい文',
+            '现译: 新句子',
+            '原文: テスト文',
+            '现译: 测试句子'
         ]
         for content in required_current_content:
             assert content in current_msg["content"], f'Missing enhancement current content: {content}'
