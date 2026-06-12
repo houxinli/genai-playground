@@ -383,7 +383,9 @@ class FileHandler:
             if not file_path.is_file():
                 continue
             if self._looks_like_bilingual_file(file_path):
-                filtered_items.append((file_path, "repair_bilingual"))
+                # 双语产物只在显式修复模式下进入 repair;普通翻译误指向时跳过而非静默改写
+                if self.config.repair_existing:
+                    filtered_items.append((file_path, "repair_bilingual"))
                 continue
             if self.config.repair_existing:
                 if self._should_repair_source(file_path):
