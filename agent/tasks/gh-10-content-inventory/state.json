@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-10-content-inventory",
+  "title": "存量内容库盘点、QA 基线与坏产物隔离",
+  "status": "active",
+  "branch": "feat/content-inventory",
+  "objective": "全库每个作品的来源/输出形态/完成度落入可重建报告;对全部存量 bilingual 输出形成 QA 基线;坏产物隔离并记录处置,为 legacy 导入提供干净输入。",
+  "github": {
+    "issue": 10,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/scripts/ 新增盘点/基线脚本及测试",
+      "tasks/translation/data/ 存量整理(隔离/删除坏产物,处置记录)",
+      "docs/PROJECT_STATUS.md 组件状态与 Known Gaps 同步"
+    ],
+    "out": [
+      "legacy candidate 导入(Phase 1)",
+      "重译/修复执行(只盘点,不改译文内容)",
+      "新 workspace/SQLite index 实现"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "P0.1 验收口径与组件状态",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "§20 Phase 0/1:盘点产物要为 legacy 导入服务",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/qa_gate.py",
+      "purpose": "S2 复用 --qa-only 的检查逻辑",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/file_handler.py",
+      "purpose": "S1 复用 missing/partial/complete 完成度语义",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "盘点脚本:全库作品清单报告",
+      "status": "in_progress",
+      "depends_on": [],
+      "acceptance": [
+        "脚本扫描 tasks/translation/data(pixiv/fanbox/顶层游离文件),每作品输出 来源/输出形态(bilingual/fixed/v2/namefix)/完成度",
+        "报告写入 git-ignored 路径,命令幂等可重跑",
+        "有单元测试(fixture 目录,不依赖真实数据)"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "QA 基线:全部存量 bilingual 的 --qa-only 汇总",
+      "status": "pending",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "对清单中全部 bilingual 输出跑 qa_gate,问题行数与类型分布进入报告",
+        "真实数据全库运行一次成功,结论记录进 checkpoint"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "坏产物隔离与处置记录",
+      "status": "pending",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "*_broken_bak 与重复游离文件移入隔离目录或删除,处置清单落盘",
+        "隔离后重跑盘点,报告不再含坏产物"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "文档同步",
+      "status": "pending",
+      "depends_on": [
+        "S2",
+        "S3"
+      ],
+      "acceptance": [
+        "PROJECT_STATUS Known Gaps 与组件状态更新(含 bootstrap 组件行改为已完成)",
+        "journal 记录盘点结论"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S1",
+    "instruction": "先只读勘察 tasks/translation/data 的实际目录形态,然后实现 tasks/translation/src/scripts/inventory_content.py:扫描 pixiv/fanbox/顶层,按作品聚合输出形态与完成度(复用 file_handler 语义),报告写入 tasks/translation/logs/inventory/(git-ignored),并配 fixture 单元测试。",
+    "acceptance": [
+      "make 或 python 入口对真实数据跑通并产出报告",
+      "单元测试全绿,翻译测试基线保持 50"
+    ]
+  },
+  "validation": {
+    "required_commands": [],
+    "last_results": []
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": null,
+  "next_task": null
+}
