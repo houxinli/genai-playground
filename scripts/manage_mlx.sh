@@ -48,7 +48,8 @@ _is_running() {
 _start_fg() {
     echo "📝 日志文件: $LOG_FILE"
     create_latest_link
-    script -q -f -c "./scripts/serve_mlx.sh" "$LOG_FILE"
+    # macOS BSD script(1):script -q -F <file> <command>(GNU 的 -f/-c 在 macOS 不存在)
+    script -q -F "$LOG_FILE" ./scripts/serve_mlx.sh
 }
 
 _start_bg() {
@@ -59,7 +60,7 @@ _start_bg() {
         tmux has-session -t "$SESSION" 2>/dev/null && tmux kill-session -t "$SESSION"
         export LOG_FILE
         tmux new-session -d -s "$SESSION" \
-            "bash -lc 'script -q -f -c ./scripts/serve_mlx.sh \"$LOG_FILE\"'"
+            "bash -lc 'script -q -F \"$LOG_FILE\" ./scripts/serve_mlx.sh'"
         echo "tmux:$SESSION" > "$PID_FILE"
         echo "✅ 服务已启动，tmux session: $SESSION"
         echo "💡 查看实时进度：tmux attach -t $SESSION  （退出按 Ctrl-b d）"
@@ -68,7 +69,7 @@ _start_bg() {
 
     echo "⚠️  未检测到 tmux，回退到 nohup 后台模式"
     if command -v script >/dev/null 2>&1; then
-        nohup bash -lc "script -q -f -c ./scripts/serve_mlx.sh \"$LOG_FILE\"" >/dev/null 2>&1 &
+        nohup bash -lc "script -q -F \"$LOG_FILE\" ./scripts/serve_mlx.sh" >/dev/null 2>&1 &
     else
         nohup bash -lc "./scripts/serve_mlx.sh >> \"$LOG_FILE\" 2>&1" >/dev/null 2>&1 &
     fi
