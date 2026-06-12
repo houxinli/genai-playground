@@ -251,11 +251,11 @@ def parse_log(text: str, today: Optional[date] = None, normalizer: Optional[Norm
         if header:
             month, day, split = header
             if prev_month is None:
-                # 首条记录的月日尚未到来 → 它属于上一年(review: PR #8)
+                # 首条记录的月日尚未到来 → 它属于上一年
                 if (month, day) > (today.month, today.day):
                     year -= 1
             elif month > prev_month:
-                # newest-first:月份由小变大即跨年回退,不依赖 +2 启发式(review: PR #8)
+                # newest-first:月份由小变大即跨年回退,不依赖 +2 启发式
                 year -= 1
             prev_month = month
             try:
