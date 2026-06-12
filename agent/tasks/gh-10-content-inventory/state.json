@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-10-content-inventory",
   "title": "存量内容库盘点、QA 基线与坏产物隔离",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/content-inventory",
   "objective": "全库每个作品的来源/输出形态/完成度落入可重建报告;对全部存量 bilingual 输出形成 QA 基线;坏产物隔离并记录处置,为 legacy 导入提供干净输入。",
   "github": {
     "issue": 10,
-    "pull_request": null
+    "pull_request": 13
   },
   "scope": {
     "in": [
@@ -85,7 +85,7 @@
     {
       "id": "S4",
       "title": "文档同步",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S2",
         "S3"
@@ -96,15 +96,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S4",
-    "instruction": "开 PR,确认 CI 绿后置 complete、追加最终 checkpoint 并合并;issue #10 随 PR 关闭。",
-    "acceptance": [
-      "PR CI 绿且已合并",
-      "issue #10 关闭",
-      "state=complete 且最终 checkpoint 与日志尾一致"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [],
     "last_results": [
@@ -124,11 +116,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260612T084509Z-claude-code",
-    "timestamp": "2026-06-12T08:45:09Z",
+    "checkpoint_id": "cp-20260612T084558Z-claude-code",
+    "timestamp": "2026-06-12T08:45:58Z",
     "agent": "claude-code",
-    "summary": "S3 隔离完成 + S4 文档就绪,待 PR 收尾",
-    "observed_head": "175211c"
+    "summary": "任务完成,PR #13 待合并",
+    "observed_head": "c72677a"
   },
   "next_task": null
 }
