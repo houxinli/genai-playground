@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-16-qa-gate-alignment",
+  "title": "qa_gate:对齐阶段漏检缺失配对",
+  "status": "active",
+  "branch": "fix/qa-gate-alignment",
+  "objective": "双语输出缺失某原文行的配对时,qa_gate 产生 error 级 missing_pair issue,截断输出不再通过硬 gate;修复后重跑全库基线由 #17 统一执行。",
+  "github": {
+    "issue": 16,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/qa_gate.py(+test)"
+    ],
+    "out": [
+      "基线重跑与文档数字(归 #17 统一执行)",
+      "盘点/qa_baseline 脚本(#17)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "对齐阶段报告 missing_pair",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "中间漏行与尾部截断均产生 error 级 missing_pair",
+        "2 个回归测试",
+        "全量 112 绿"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "PR 收尾",
+      "status": "in_progress",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "review triage 完成、CI 绿、合并,issue #16 关闭"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S2",
+    "instruction": "开 PR,triage review,CI 绿后合并。",
+    "acceptance": [
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "112 passed(110+2 新增)",
+        "timestamp": "2026-06-12T22:28:16Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260612T222816Z-claude-code",
+    "timestamp": "2026-06-12T22:28:16Z",
+    "agent": "claude-code",
+    "summary": "S1 完成,待 PR 收尾",
+    "observed_head": "ce4c29c"
+  },
+  "next_task": null
+}
