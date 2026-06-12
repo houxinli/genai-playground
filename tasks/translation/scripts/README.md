@@ -5,6 +5,7 @@
 进入脚本细节前建议先看：
 
 - [`../../../docs/PROJECT_STATUS.md`](../../../docs/PROJECT_STATUS.md)：当前状态、组件健康度、开发计划
+- [`../docs/system-design.md`](../docs/system-design.md)：目标系统设计与脚本迁移方向
 - [`../README.md`](../README.md)：翻译任务主操作手册
 - [`../../../docs/journal/README.md`](../../../docs/journal/README.md)：历史决策和排障记录
 
@@ -52,6 +53,7 @@
 ## 3) 修复与清理
 
 ### `repair_bilingual.py`
+- 状态：历史兼容入口；新调用优先走 `src/translate.py --repair-existing`。
 - 作用：对已有双语文件做增量修复，只重译缺失/异常行。
 - 示例（目录批量）：
   ```bash
@@ -61,6 +63,9 @@
     --output-dir tasks/translation/data/pixiv/50235390_bilingual_fixed \
     --repair-existing --bilingual-simple --stream
   ```
+
+目标架构中 repair 将创建新 candidate，不再直接以多个输出目录表达版本。该脚本在 candidate/version
+主路径落地后应薄化为兼容导入层或删除。
 
 ### `cleanup_bad_outputs.py`
 - 作用：删除 few-shot 泄漏或大段复制原文的双语文件。
@@ -205,7 +210,7 @@
     tasks/translation/data/fanbox/momizi813_bilingual \
     --output-dir tasks/translation/data/fanbox/momizi813_bilingual_simp \
     --backend llm \
-    --model x-ai/grok-4.1-fast
+    --model <available-model-slug>
   ```
 
 ## 4) 其他相关脚本位置
