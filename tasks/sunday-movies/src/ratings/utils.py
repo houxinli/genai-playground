@@ -11,14 +11,15 @@ from typing import Iterable, Optional
 _NON_WORD_RE = re.compile(r"[^a-z0-9]+")
 
 # Suffixes that appear on theater listings but hurt rating-source search.
-_SEARCH_NOISE_RE = re.compile(
-    r"""
+# 仅匹配标题尾部:未锚定时会破坏 "Prime Target"、"Encore!" 这类正经标题(review: PR #3)。
+_TRAILING_SEARCH_NOISE_RE = re.compile(
+    r"""(?:
     \(\d{4}\)                                   # trailing (2026)
     | \b\d+\s*(?:st|nd|rd|th)\s+anniversary\b   # 25th Anniversary
     | \b(?:re-?release|encore|fathom\ events?)\b
     | \b(?:real ?d\ ?3d|imax(?:\ 3d)?|3d|dolby\ (?:cinema|atmos)|prime|xd)\b
     | \b(?:live\ viewing|live\ in\ concert|the\ concert\ film)\b
-    """,
+    )[\s!.]*$""",
     re.IGNORECASE | re.VERBOSE,
 )
 
@@ -48,10 +49,19 @@ def clean_search_title(title: str) -> str:
     Keeps the original casing/words; only removes known noise tokens and a
     trailing 4-digit year. Falls back to the original title if cleaning would
     empty it out (e.g. a concert listing that is mostly noise tokens)."""
-    cleaned = _SEARCH_NOISE_RE.sub(" ", title)
-    cleaned = re.sub(r"[:\-–—]+\s*$", "", cleaned.strip())
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = title.strip()
+    prev = None
+    while prev != cleaned:  # 逐个剥掉尾部噪声(如 "IMAX 3D" 先 3D 后 IMAX)
+        prev = cleaned
+        cleaned = _TRAILING_SEARCH_NOISE_RE.sub("", cleaned).strip()
+        cleaned = re.sub(r"[:\-–—,]+\s*$", "", cleaned).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned or title.strip()
+
+
+def rating_cache_key(search_title: str, year: Optional[int]) -> str:
+    """同名不同年的影片(如 Nosferatu 1922/2024)不得共享缓存(review: PR #3)。"""
+    return f"{normalize_title(search_title)}|{year or ''}"
 
 
 def title_similarity(a: str, b: str) -> float:

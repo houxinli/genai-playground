@@ -20,7 +20,7 @@ from ratings.douban import DoubanFetcher
 from ratings.imdb import ImdbFetcher
 from ratings.rottentomatoes import RottenTomatoesFetcher
 from ratings.aggregator import RatingsAggregator
-from ratings.utils import normalize_title, clean_search_title, extract_title_year
+from ratings.utils import rating_cache_key, normalize_title, clean_search_title, extract_title_year
 
 RATING_COLUMNS = [
     ("douban", "豆瓣"),
@@ -90,7 +90,7 @@ def fetch_showtimes_with_all_ratings(
         print(f"\n🎭 Processing: {movie_title}")
         search_title = clean_search_title(movie_title)
         search_year = extract_title_year(movie_title)
-        cache_key = normalize_title(search_title)
+        cache_key = rating_cache_key(search_title, search_year)
         if search_title != movie_title:
             print(f"   🔎 Search title: {search_title}" + (f" (year {search_year})" if search_year else ""))
 
