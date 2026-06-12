@@ -11,7 +11,7 @@ from typing import Iterable, Optional
 _NON_WORD_RE = re.compile(r"[^a-z0-9]+")
 
 # Suffixes that appear on theater listings but hurt rating-source search.
-# 仅匹配标题尾部:未锚定时会破坏 "Prime Target"、"Encore!" 这类正经标题(review: PR #3)。
+# 仅匹配标题尾部:未锚定时会破坏 "Prime Target"、"Encore!" 这类正经标题。
 _TRAILING_SEARCH_NOISE_RE = re.compile(
     r"""(?:
     \(\d{4}\)                                   # trailing (2026)
@@ -60,7 +60,7 @@ def clean_search_title(title: str) -> str:
 
 
 def rating_cache_key(search_title: str, year: Optional[int]) -> str:
-    """同名不同年的影片(如 Nosferatu 1922/2024)不得共享缓存(review: PR #3)。"""
+    """同名不同年的影片(如 Nosferatu 1922/2024)不得共享缓存。"""
     return f"{normalize_title(search_title)}|{year or ''}"
 
 
