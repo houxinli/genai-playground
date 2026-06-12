@@ -58,6 +58,25 @@ class TestFileHandlerPartialBilingualRegression(unittest.TestCase):
             self.assertEqual(original, task.original_path)
             self.assertEqual(output_path, task.output_path)
 
+    def test_plan_tasks_skips_bilingual_input_without_repair_flag(self) -> None:
+        # 普通翻译误指向双语产物时必须跳过,不得未经 --repair-existing 静默转修复
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            bilingual_dir = base / "pixiv" / "50235390_bilingual"
+            bilingual_dir.mkdir(parents=True, exist_ok=True)
+            bilingual = bilingual_dir / "12430834.txt"
+            bilingual.write_text("---\nnovel_id: 1\n---\n原文A\n译文A\n", encoding="utf-8")
+
+            handler = FileHandler(
+                TranslationConfig(),
+                UnifiedLogger.create_console_only(),
+                quality_checker=None,
+            )
+
+            tasks = handler.plan_tasks([str(bilingual)])
+
+            self.assertEqual([], tasks)
+
     def test_plan_tasks_builds_repair_task_for_existing_bilingual(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
