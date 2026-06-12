@@ -224,3 +224,28 @@ agent-validator-test:
 	$(PY) -m unittest scripts.validate_agent_tasks_test
 
 
+# ============ 健身记录 (tasks/fitness) ============
+FITNESS_PY := conda run -n $(CONDA_ENV) python tasks/fitness/src/cli.py
+export EXERCISE ?=
+
+.PHONY: fitness-parse fitness-exercises fitness-progress fitness-chart fitness-charts
+
+# 解析自由文本日志 -> data/derived/sets.csv（含无法解析行的样例）
+fitness-parse:
+	$(FITNESS_PY) parse --show-issues 10
+
+# 列出归一化后的动作及训练次数
+fitness-exercises:
+	$(FITNESS_PY) exercises
+
+# 单个动作的力量进展（文本表）：make fitness-progress EXERCISE=坐姿杠铃推举
+fitness-progress:
+	$(FITNESS_PY) progress "$(EXERCISE)"
+
+# 单个动作的进展曲线 SVG：make fitness-chart EXERCISE=bench_press
+fitness-chart:
+	$(FITNESS_PY) chart "$(EXERCISE)"
+
+# 为所有动作（>=6 次）生成进展曲线 SVG 到 data/derived/charts/
+fitness-charts:
+	$(FITNESS_PY) chart-all --min-sessions 6

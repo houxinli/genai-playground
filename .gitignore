@@ -76,6 +76,10 @@ tasks/translation/logs/*
 # Sunday movies data (runtime artifacts)
 tasks/sunday-movies/data/
 
+# Fitness derived artifacts (parsed CSV + generated charts); keep the raw log
+tasks/fitness/data/derived/
+tasks/fitness/logs/*
+
 # Model cache
 ~/.cache/huggingface/
 
