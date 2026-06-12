@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "checkpoint_id": "cp-20260612T000000Z-codex",
+  "task_id": "gh-000-short-slug",
+  "timestamp": "2026-06-12T00:00:00Z",
+  "agent": "codex",
+  "branch": "feat/short-branch",
+  "observed_head": "0000000",
+  "step_id": "S1",
+  "summary": [
+    "Describe completed work and important reasoning."
+  ],
+  "files": [
+    "path/to/changed-file"
+  ],
+  "worktree": {
+    "clean": false,
+    "task_changes": [
+      "path/to/changed-file"
+    ],
+    "unrelated_changes": []
+  },
+  "validation": [
+    {
+      "command": "command that was actually run",
+      "status": "passed",
+      "summary": "Concise result"
+    }
+  ],
+  "blockers": [],
+  "next_action": {
+    "step_id": "S1",
+    "instruction": "Perform one concrete action, not 'continue development'.",
+    "acceptance": [
+      "State what must be true before checkpointing."
+    ]
+  }
+}

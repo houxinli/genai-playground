@@ -31,5 +31,6 @@ dependencies:
       # 日志与测试（可选）
       - python-json-logger==3.3.0
       - pytest==8.3.3
+      - jsonschema==4.25.1
       # 兼容性：不安装任何 nvidia/cuda/xformers/vllm，Apple Silicon 走 MLX
 ## 提示：如需固定安装路径，可自行添加 prefix 字段；默认由 conda 管理

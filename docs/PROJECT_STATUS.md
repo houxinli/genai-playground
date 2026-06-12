@@ -3,7 +3,7 @@
 > 当前项目状态、组件健康度和开发计划的真相源。
 > 新的 agent / 新的对话优先读这份文档，再进入具体子系统文档。
 
-**最后更新**: 2026-05-20
+**最后更新**: 2026-06-12
 
 ## Start Here
 
@@ -11,27 +11,38 @@
 
 1. [`../README.md`](../README.md)
 2. [`PROJECT_STATUS.md`](PROJECT_STATUS.md)
-3. [`AGENT_CONTEXT.md`](AGENT_CONTEXT.md)
-4. [`../tasks/translation/README.md`](../tasks/translation/README.md)
-5. [`journal/README.md`](journal/README.md)
+3. [`AGENT_WORKFLOW.md`](AGENT_WORKFLOW.md)（跨 Agent 继续/交接时）
+4. [`AGENT_CONTEXT.md`](AGENT_CONTEXT.md)
+5. [`../tasks/translation/docs/system-design.md`](../tasks/translation/docs/system-design.md)
+6. [`../tasks/translation/README.md`](../tasks/translation/README.md)
+7. [`journal/README.md`](journal/README.md)
 
 ## Repository Snapshot
 
 - 当前主战场是 `tasks/translation`。
 - `tasks/sunday-movies` 仍在仓库内，但当前处于维护模式，不是近期主要开发方向。
 - 常用运行环境是 `conda` 的 `llm` 环境。
-- 最近一轮工程改进聚焦“下载 -> 翻译 -> 修复/清理 -> 打包”的可靠性，而不是新功能扩张。
+- 当前生产路径仍是“下载 -> 翻译 -> 修复/清理 -> 打包”。
+- 下一阶段的架构目标已收敛为：JSON 规范工件 + 可重建 SQLite 索引、segment 多候选版本、
+  API/Agent 双执行路线、用户 annotation 与非破坏性 repair。
+- 开发侧已定义 Codex/Claude Code/Cursor 共用的 branch-level task state 与 append-only checkpoint 协议。
 
 ## Current Focus
 
-当前目标是把翻译流水线从“能跑完”提升到“可恢复、可验证、可维护”。
+当前目标是先建立新的文档/segment/candidate/version 基础，再在其上实现 QA 闭环、Agent harness、
+跨文本一致性、并发调度和用户 review。完整目标设计见
+[`tasks/translation/docs/system-design.md`](../tasks/translation/docs/system-design.md)。
 
-2026-04-07 完成的 P0 里程碑：
+开发任务本身的跨会话上下文由 [`AGENT_WORKFLOW.md`](AGENT_WORKFLOW.md) 和 `agent/tasks/` 管理；
+它与翻译业务的 Agent job/result 协议是两层不同系统，不能共用状态文件。
 
-- 为翻译阶段补上持久化运行状态和输出状态判断。
-- 让半成品输出不会再被误判为成品。
-- 为打包阶段补上结构化元数据回退，降低 `未知标题` 和标题漂移。
-- 为上述改动补回归测试，并清理了阻塞全量测试的旧 QC 断言。
+设计原则：
+
+- JSON 保存不可变、可移植、可审阅的业务工件。
+- SQLite/WAL 只承担可重建索引、review queue、worker lease 和运行指标。
+- API、本地模型、Codex、Claude Code、Cursor 和人工编辑统一生产 candidate，不直接覆盖发布物。
+- bilingual/zh 是由确定版本渲染的派生产物，不再兼任 checkpoint 和修复数据库。
+- repair 只生成新 candidate；只有 QA 与选择策略确认改善后才进入新版本。
 
 ## Component Status
 
@@ -46,18 +57,46 @@
 | 质量检测 | 可用 | 规则 QC + LLM QC 可工作；新增硬规则 QA gate，可检查双语配对、假名残留、拒绝模板、失败标记和人名坏别名 | `tasks/translation/src/core/qa_gate.py` |
 | 人名一致性 | 可用 | 支持人工规则优先、自动预读候选保存、正文 OpenRouter + 本地 vLLM/MLX 抽名的分离运行时 | `tasks/translation/src/core/translator.py` |
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
+| 目标系统设计 | 已完成设计 | 已定义 JSON/SQLite 边界、candidate/version、API/Agent 协议、用户 annotation、跨文本知识与迁移顺序；尚未实现 | `tasks/translation/docs/system-design.md` |
+| 开发 Agent 连续性 | 基础已落地 | 已定义 branch task state、checkpoint、继续/交接语义、JSON Schema、validator、CI 和 GitHub 模板；bootstrap 命令与 GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
+| 多候选与版本 | 未实现 | 当前仍以单份 bilingual/fixed 文件作为主要结果 | 目标见系统设计 |
+| 翻译 Agent harness | 未实现 | 尚无统一翻译 task/result job export/import 协议 | 目标见系统设计 |
+| 用户句级反馈 | 未实现 | 尚不能持久化“某句话有问题”并触发定向修复 | 目标见系统设计 |
+| 跨文本知识库 | 未实现 | 当前主要依赖人工规则文件和单篇自动预读 | 目标见系统设计 |
 | 并发调度 | 缺口明显 | 当前仍主要依赖手工并行，没有内建 worker 调度器 | `tasks/translation/src/core/pipeline.py` |
-| 测试 | 基线健康 | `unittest discover` 当前为 44 个测试全绿 | `tasks/translation/src/**/*_test.py` |
+| 测试 | 基线健康 | `unittest discover` 当前为 50 个测试全绿 | `tasks/translation/src/**/*_test.py` |
 | Sunday Movies | 维护模式 | 仓库中保留，但当前不作为近期规划重点 | `tasks/sunday-movies/` |
 
 ## Recent Engineering Changes
+
+2026-06-12 跨 Agent 开发连续性：
+
+- 增加 `agent/tasks/<task-id>/state.json` 与 append-only `checkpoints.jsonl` 的共享协议。
+- 固定“继续”“交接”的恢复、校准、执行、验证和 checkpoint 语义。
+- 为 task state 与 checkpoint 增加 JSON Schema 和模板。
+- 增加 schema/跨文件不变量 validator、单元测试、Make 目标与 CI gate。
+- 增加 Agent task Issue 和 PR handoff 模板。
+- Codex、Claude Code、Cursor 共用仓库内状态，不依赖各自聊天历史。
+
+2026-06-12 目标系统设计：
+
+- 确定 JSON canonical artifacts + SQLite operational index 的双层存储边界。
+- 确定 `DocumentRevision -> Segment -> Candidate -> Evaluation -> DocumentVersion -> Render` 数据链。
+- 确定 API 与 Agent harness 共用 task/result JSON 协议。
+- 确定单篇/跨文本实体一致性、用户 annotation 和非破坏性 repair 的目标模型。
+- 制定从当前 bilingual 文件流水线到目标系统的七阶段迁移路线。
+
+2026-06-02 非破坏性 repair：
+
+- repair 重译失败时不再用占位符覆盖已有非空译文。
+- 新增 6 个非破坏性 repair 测试，基线从 44 提升为 50。
 
 2026-05-20 死代码清理与开发规范收敛：
 
 - 删除 `enhanced_mode` 整条链路（`enhanced_mode.py`、`rule_detector.py`、CLI flag、config 字段、pipeline/file_handler 分支），生产路径一直走 `bilingual_simple`，该模式无 caller。
 - 删除 `Translator.translate_text` / `_translate_with_stream` / `_build_messages` 死分支（引用了不存在的 `config.bilingual`）；非 `bilingual_simple` 路径统一走 `translate_body_text`。
 - 删除 `utils/validation` 下孤儿校验器 `quality_validator` / `content_validator`。
-- 净删除约 1557 行；测试基线保持 44 全绿。
+- 净删除约 1557 行；当时测试基线保持 44 全绿。
 - 开发规范收敛到 [`../AGENTS.md`](../AGENTS.md)；[`AGENT_CONTEXT.md`](AGENT_CONTEXT.md) 瘦身为稳定背景。
 
 历史轮次（状态固化与 QA gate）已落地的关键改动：
@@ -81,6 +120,12 @@
 
 ## Known Gaps
 
+- 当前没有规范化 `Document/Segment`，候选、QA、repair 和用户反馈只能围绕双语 TXT 工作。
+- 当前没有 candidate/version 模型，实验结果依赖多个目录名保存，难以比较、回滚和审计。
+- 当前没有统一 API/Agent job 协议，Codex/Claude Code/Cursor 无法可靠参与批量 review。
+- 开发任务的跨 Agent 协议已有 validator/CI，但还没有任务 bootstrap 命令和 GitHub 状态同步。
+- 当前没有用户 annotation 生命周期和句级定向重译入口。
+- 人名规则尚未实体化、作用域化和版本化，同名跨系列冲突仍需人工避免。
 - 还没有内建的文件级并发调度器，批量任务提速仍依赖外部手动拆分。
 - metadata 翻译、preset 选择、来源差异目前仍然耦合得不够清晰。
 - 打包已经有元数据回退，但还没有完全摆脱对译后 YAML 的依赖。
@@ -89,27 +134,40 @@
 
 ## Development Plan
 
-### P1: 近期高优先级
+### P0: 协议与数据基础
 
-1. 做 QA -> repair -> QA 的自动闭环。
-   目标：翻译后自动定位问题行，修复后再次验收，最终状态区分 complete / failed_qa / repair_failed。
-2. 内建文件级并发调度。
-   目标：支持 `--workers N`、限速、失败重试和更稳定的吞吐控制。
-3. 做 token-aware batching。
-   目标：从“按行数”升级到“按 token 预算和时延目标”分批。
-4. 拆分来源相关 preset 和 metadata 流程。
-   目标：Pixiv / Fanbox 的 prompt、metadata、quality gate 能按来源配置。
+1. 为 `agent/tasks` 增加 bootstrap 命令和 GitHub 状态同步。
+2. 固定 revision、candidate、evaluation、annotation、version、task、result 的 JSON Schema。
+3. 建立 Pixiv/Fanbox 最小 fixture、golden bilingual/zh 和 ID/hash 稳定性测试。
+4. 建立 source adapter、`DocumentRevision/Segment` 和 renderer 的 shadow path。
+5. 支持把现有 bilingual/fixed 文件导入为 legacy candidate，确保迁移不丢历史。
 
-### P2: 质量与可维护性
+### P1: 多候选、版本与非破坏性闭环
 
-1. 为术语一致性和标题稳定性建立更系统的回归集。
-2. 让打包、修复、状态文件共享同一份元数据真相源。
-3. 补运行指标和成本统计。
-4. 继续拆薄 `pipeline.py`，把 plan / translate / qa / repair / package 逐步阶段化。
+1. 翻译结果按 segment 创建 candidate，不覆盖历史。
+2. 用 `DocumentVersion` 保存 selection manifest，并从版本渲染 bilingual/zh。
+3. QA finding 绑定 candidate + segment。
+4. repair 创建新 candidate，完成 QA -> compare -> select 闭环。
+5. 建立 CLI 级 candidate 比较、选择、回滚和用户 annotation。
+
+### P2: API/Agent 双执行路线与知识一致性
+
+1. 实现统一 task/result 协议和 `export-job` / `validate-result` / `import-result`。
+2. 为 Codex、Claude Code、Cursor 提供由同一 instruction pack 派生的薄适配。
+3. 建立 scoped entity store、knowledge snapshot、entity linking review 和规则影响分析。
+4. 将现有人工 name map 迁移为 locked entity translations，自动预读只进入 candidate。
+
+### P3: 调度、并发与体验
+
+1. 增加可重建 SQLite/WAL 索引、review queue、worker lease 和 heartbeat。
+2. 做文件级 `--workers N`、runtime 限速、失败重试和 token-aware batching。
+3. 监控改为查询结构化状态与指标，不再解析日志文案。
+4. candidate/version/annotation 稳定后，再实现 TUI 或 Web review 界面。
 
 ### 文档维护规则
 
 - 只要“当前重点、组件状态、近期计划”发生了实质变化，就更新本文件。
+- 稳定目标架构更新到 `tasks/translation/docs/system-design.md`，不要把完整设计复制回本文件。
 - 只要有值得回溯的阶段性决策或问题处理，就新增一篇 journal 条目并在索引登记。
 - `AGENT_CONTEXT.md` 保持偏稳定背景；不要再把短期任务清单长期堆在里面。
 

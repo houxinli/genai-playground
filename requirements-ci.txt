@@ -10,3 +10,4 @@ beautifulsoup4
 python-dateutil
 markdown2
 pytest
+jsonschema==4.25.1
