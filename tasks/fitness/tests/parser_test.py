@@ -74,6 +74,26 @@ class DatingTest(unittest.TestCase):
 
 
 class NormalizationAndCleaningTest(unittest.TestCase):
+    def test_first_header_in_future_starts_previous_year(self):
+        # ANCHOR=2026-05-21:首条 5.19 已过 → 2026;首条 5.23 未到 → 2025(review: PR #8)
+        past = parse_log("5.19 push\n卧推 60kg 5\n", today=ANCHOR)
+        self.assertEqual(past.sets[0].date, date(2026, 5, 19))
+        future = parse_log("5.23 push\n卧推 60kg 5\n", today=ANCHOR)
+        self.assertEqual(future.sets[0].date, date(2025, 5, 23))
+
+    def test_adjacent_month_increase_rolls_back_year(self):
+        # newest-first:1.15 之后出现 3.20,月份变大即上一年(review: PR #8)
+        result = parse_log(
+            "1.15 push\n卧推 60kg 5\n3.20 pull\n划船 50kg 5\n", today=date(2026, 1, 20)
+        )
+        self.assertEqual(result.sets[0].date, date(2026, 1, 15))
+        self.assertEqual(result.sets[1].date, date(2025, 3, 20))
+
+    def test_empty_log_parses_to_no_sets(self):
+        result = parse_log("", today=ANCHOR)
+        self.assertEqual([], result.sets)
+        self.assertEqual(0, result.sessions)
+
     def test_deadlift_is_not_mangled_by_ea_stripping(self):
         cleaned, _ = _clean_line("kettle bell half deadlift 25lbs")
         self.assertIn("deadlift", cleaned)
