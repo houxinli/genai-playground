@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -18,6 +20,57 @@ except ImportError:  # 直接以脚本运行时
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.qa_gate import TranslationQAGate
     from scripts.inventory_content import build_inventory
+
+
+CHAPTER_RE = re.compile(r"^第\d+章\b")
+META_PREFIX_RE = re.compile(r"^(标题|简介|系列|标签|创建时间|作者|链接|来源)[:：]")
+
+
+def _split_packaged_chapters(text: str) -> List[tuple]:
+    """把 merge_chinese_files 产物按 第N章 拆分,剔除章节头与本地化元数据行,返回 (title, body)。"""
+    chapters: List[tuple] = []
+    title, lines = None, []
+    for line in text.splitlines():
+        if CHAPTER_RE.match(line.strip()):
+            if title is not None:
+                chapters.append((title, lines))
+            title, lines = line.strip(), []
+            continue
+        if title is None:
+            continue
+        lines.append(line)
+    if title is not None:
+        chapters.append((title, lines))
+    return [
+        (t_, "\n".join(l for l in ls if not META_PREFIX_RE.match(l.strip())).strip() + "\n")
+        for t_, ls in chapters
+    ]
+
+
+def _qa_packaged_file(gate: TranslationQAGate, path: Path) -> Dict[str, Any]:
+    """打包文件不是严格交替双语,先按章提取正文再逐章过 gate(review: PR #25)。"""
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    chapters = _split_packaged_chapters(text)
+    if not chapters:
+        return {**_qa_files(gate, [(path, None)]), "chapters": 0}
+    issue_counts: Dict[str, int] = {}
+    chapters_with_errors = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, (_, body) in enumerate(chapters):
+            chapter_path = Path(tmp) / f"chapter_{i}.txt"
+            chapter_path.write_text(body, encoding="utf-8")
+            report = gate.run(chapter_path, None)
+            if report.has_errors:
+                chapters_with_errors += 1
+            for issue in report.issues:
+                key = f"{issue.code}:{issue.severity}"
+                issue_counts[key] = issue_counts.get(key, 0) + 1
+    return {
+        "files": len(chapters),
+        "files_with_errors": chapters_with_errors,
+        "issue_counts": dict(sorted(issue_counts.items())),
+        "chapters": len(chapters),
+    }
 
 
 def _qa_files(
@@ -77,7 +130,7 @@ def build_baseline(data_root: Path, collections: List[str]) -> Dict[str, Any]:
     for item in inventory["packaged_top_level"]:
         if item["kind"] != "bilingual":
             continue
-        entry = _qa_files(gate, [(data_root / item["file"], None)])
+        entry = _qa_packaged_file(gate, data_root / item["file"])
         entry["dir"] = item["file"]
         entry["collection"] = "(packaged)"
         entry["source"] = item["matched_source"] or item["base"]

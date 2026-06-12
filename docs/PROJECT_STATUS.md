@@ -59,7 +59,7 @@
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
 | 目标系统设计 | 已完成设计 | 已定义 JSON/SQLite 边界、candidate/version、API/Agent 协议、用户 annotation、跨文本知识与迁移顺序；尚未实现 | `tasks/translation/docs/system-design.md` |
 | 开发 Agent 连续性 | 基础已落地 | 协议、Schema、validator、CI、GitHub 模板与 `make agent-bootstrap` 已实现；GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
-| 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线（v2 含打包产物与截断检查）；735 文件中 620 个含 error，坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
+| 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线（v2 含打包产物与截断检查）；1048 单元中 894 个含 error（v2.1 打包按章拆分），坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
 | 多候选与版本 | 未实现 | 当前仍以单份 bilingual/fixed 文件作为主要结果 | 目标见系统设计 |
 | 翻译 Agent harness | 未实现 | 尚无统一翻译 task/result job export/import 协议 | 目标见系统设计 |
 | 用户句级反馈 | 未实现 | 尚不能持久化“某句话有问题”并触发定向修复 | 目标见系统设计 |
@@ -131,10 +131,10 @@
 - 当前没有 candidate/version 模型，实验结果依赖多个目录名保存，难以比较、回滚和审计。
 - 当前没有统一 API/Agent job 协议，Codex/Claude Code/Cursor 无法可靠参与批量 review。
 - 开发任务的跨 Agent 协议还没有 GitHub 状态同步（bootstrap 命令已完成，#9）。
-- 存量 QA 基线 v2（2026-06-12，含顶层打包产物与 missing_pair 检查）：735 文件中 620 个含
-  error 级问题（kana 8931、same_as_source 5596、refusal 749、failure 501、empty 440；
-  missing_pair 为 0——无结构性截断）。逐条修复依赖 P1 的 candidate/repair 闭环；
-  报告见 `logs/inventory/qa_baseline.json`。
+- 存量 QA 基线 v2.1（2026-06-12，含顶层打包产物按章拆分与 missing_pair 检查）：
+  1048 个单元（逐篇文件 + 打包章节）中 894 个含 error 级问题（kana 8757、
+  same_as_source 5596、refusal 738、failure 501、empty 112；missing_pair 为 0——无结构性截断）。
+  逐条修复依赖 P1 的 candidate/repair 闭环；报告见 `logs/inventory/qa_baseline.json`。
 - 当前没有用户 annotation 生命周期和句级定向重译入口。
 - 人名规则尚未实体化、作用域化和版本化，同名跨系列冲突仍需人工避免。
 - 还没有内建的文件级并发调度器，批量任务提速仍依赖外部手动拆分。

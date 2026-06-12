@@ -55,14 +55,25 @@ class QABaselineTest(unittest.TestCase):
         )
 
     def test_packaged_top_level_bilingual_included(self):
+        # merge_chinese_files 产物:章节头 + 元数据 + 空行分隔的双语对(review: PR #25)
         (self.data / "111_bilingual.txt").write_text(
-            "こんにちは\n你好\n", encoding="utf-8"
+            "第1章 标题甲\n\n标题: 标题甲\n标签: [x / y]\n创建时间: 2021-01-01\n\n\n"
+            "こんにちは\n你好\n\nさようなら\n再见\n\n"
+            "第2章 标题乙\n\n标题: 标题乙\n\n\n"
+            "おはよう\nおはよう早上好\n",
+            encoding="utf-8",
         )
         (self.data / "111_zh.txt").write_text("你好\n", encoding="utf-8")  # zh 不纳入
         baseline = build_baseline(self.data, ["pixiv"])
         packaged = [e for e in baseline["dirs"] if e["collection"] == "(packaged)"]
         self.assertEqual(["111_bilingual.txt"], [e["dir"] for e in packaged])
-        self.assertEqual(3, baseline["totals"]["files"])  # 2 目录内 + 1 打包
+        entry = packaged[0]
+        self.assertEqual(2, entry["chapters"])
+        # 章节头/元数据不得被误配成双语正文
+        self.assertNotIn("empty_translation:error", entry["issue_counts"])
+        # 第2章的真问题(译文残留假名)仍可检出
+        self.assertTrue(any(k.startswith("kana_residue") for k in entry["issue_counts"]))
+        self.assertEqual(4, baseline["totals"]["files"])  # 2 目录内 + 2 章
 
     def test_clean_dir_reports_zero_errors(self):
         baseline = build_baseline(self.data, ["pixiv"])
