@@ -15,6 +15,12 @@
 - 不存 secret、私有翻译语料、完整命令日志或聊天记录。
 - 不要直接复用模板中的 placeholder 值。
 
+创建新任务（详见协议 §9）：
+
+```bash
+make agent-bootstrap TASK_ID=gh-12-slug BRANCH=feat/x TITLE="..." OBJECTIVE="..." ISSUE=12
+```
+
 验证：
 
 ```bash

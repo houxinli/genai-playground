@@ -28,7 +28,7 @@ jobs:
 
       - name: Agent harness validation
         run: |
-          python -m unittest scripts.validate_agent_tasks_test
+          python -m unittest scripts.validate_agent_tasks_test scripts.bootstrap_agent_task_test
           python scripts/validate_agent_tasks.py
 
       - name: Translation test suite
