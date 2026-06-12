@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-9-agent-bootstrap",
+  "title": "agent task bootstrap 命令",
+  "status": "active",
+  "branch": "feat/agent-bootstrap-cli",
+  "objective": "一条命令生成合法的 agent/tasks/<task-id>/ 骨架(state.json + 空 checkpoints.jsonl),立即通过 agent-validate,且拒绝同 branch 重复活动任务。",
+  "github": {
+    "issue": 9,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "scripts/bootstrap_agent_task.py",
+      "scripts/bootstrap_agent_task_test.py",
+      "Makefile agent-bootstrap 目标",
+      "docs/AGENT_WORKFLOW.md §9 命令接入",
+      "agent/README.md 命令接入"
+    ],
+    "out": [
+      "GitHub 状态自动同步(issue comment / label 翻转)",
+      "task archive 工具",
+      "翻译业务 task/result 协议"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/AGENT_WORKFLOW.md",
+      "purpose": "协议 §3 目录结构与 §9 生命周期,bootstrap 必须与之一致",
+      "required": true
+    },
+    {
+      "path": "agent/schemas/task-state.schema.json",
+      "purpose": "生成的 state.json 必须满足的 schema",
+      "required": true
+    },
+    {
+      "path": "agent/templates/task-state.json",
+      "purpose": "bootstrap 的生成模板",
+      "required": true
+    },
+    {
+      "path": "scripts/validate_agent_tasks.py",
+      "purpose": "复用其加载/校验逻辑,bootstrap 产物必须通过它",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "实现 scripts/bootstrap_agent_task.py",
+      "status": "in_progress",
+      "depends_on": [],
+      "acceptance": [
+        "命令行参数 task-id/branch/title/objective(issue 可选)生成 agent/tasks/<task-id>/state.json + 空 checkpoints.jsonl",
+        "产物直接通过 scripts/validate_agent_tasks.py",
+        "同 branch 已有 planned/active/blocked 任务时退出非零且不写任何文件"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "单元测试覆盖成功与失败路径",
+      "status": "pending",
+      "depends_on": ["S1"],
+      "acceptance": [
+        "成功路径:生成文件存在且通过校验",
+        "失败路径:重复 branch 拒绝、非法 task-id 拒绝",
+        "unittest 全绿"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Makefile 与文档接入",
+      "status": "pending",
+      "depends_on": ["S2"],
+      "acceptance": [
+        "make agent-bootstrap 可用并在 CI 测试覆盖内",
+        "docs/AGENT_WORKFLOW.md §9 与 agent/README.md 指向该命令"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S1",
+    "instruction": "实现 scripts/bootstrap_agent_task.py:argparse 接收 --task-id --branch --title --objective [--issue],从 agent/templates/task-state.json 生成 state.json 并创建空 checkpoints.jsonl;写盘前先扫描 agent/tasks/*/state.json,若同 branch 已有 planned/active/blocked 任务则报错退出且不写文件;完成后用 scripts/validate_agent_tasks.py 自校验。",
+    "acceptance": [
+      "对一个全新 branch 运行命令后,make agent-validate 通过",
+      "对本任务自身 branch 重复运行命令时报错退出且 agent/tasks 无新增目录"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python scripts/validate_agent_tasks.py",
+      "conda run -n llm python -m unittest scripts.validate_agent_tasks_test",
+      "conda run -n llm python -m unittest scripts.bootstrap_agent_task_test"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "bootstrap 本 task state 后通过(含本任务自身)",
+        "timestamp": "2026-06-12T07:01:13Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260612T070113Z-claude-code",
+    "timestamp": "2026-06-12T07:01:13Z",
+    "agent": "claude-code",
+    "summary": "task bootstrap:创建 state 与空 checkpoint 日志,S1 置为 in_progress",
+    "observed_head": "471fa37"
+  },
+  "next_task": null
+}
