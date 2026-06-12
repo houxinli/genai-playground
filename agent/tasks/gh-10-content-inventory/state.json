@@ -73,7 +73,7 @@
     {
       "id": "S3",
       "title": "坏产物隔离与处置记录",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1"
       ],
@@ -85,7 +85,7 @@
     {
       "id": "S4",
       "title": "文档同步",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         "S2",
         "S3"
@@ -97,11 +97,12 @@
     }
   ],
   "next_action": {
-    "step_id": "S3",
-    "instruction": "把盘点出的 3 个隔离候选(pixiv/50235390_bilingual_repair_clean_tmp、pixiv/50235390_bilingual_repair_tmp、pixiv/53230930_bilingual_fixed_broken_bak)移入 tasks/translation/data/quarantine/,写处置 manifest;重跑盘点确认隔离候选清零。",
+    "step_id": "S4",
+    "instruction": "开 PR,确认 CI 绿后置 complete、追加最终 checkpoint 并合并;issue #10 随 PR 关闭。",
     "acceptance": [
-      "三个目录已隔离且 manifest 记录原路径/原因/时间",
-      "重跑 inventory 后 quarantine_candidates 为空"
+      "PR CI 绿且已合并",
+      "issue #10 关闭",
+      "state=complete 且最终 checkpoint 与日志尾一致"
     ]
   },
   "validation": {
@@ -123,11 +124,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260612T084305Z-claude-code",
-    "timestamp": "2026-06-12T08:43:05Z",
+    "checkpoint_id": "cp-20260612T084509Z-claude-code",
+    "timestamp": "2026-06-12T08:45:09Z",
     "agent": "claude-code",
-    "summary": "S2 完成,进入 S3 隔离",
-    "observed_head": "acdaa24"
+    "summary": "S3 隔离完成 + S4 文档就绪,待 PR 收尾",
+    "observed_head": "175211c"
   },
   "next_task": null
 }
