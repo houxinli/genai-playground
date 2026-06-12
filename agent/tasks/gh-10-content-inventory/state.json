@@ -50,7 +50,7 @@
     {
       "id": "S1",
       "title": "盘点脚本:全库作品清单报告",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "acceptance": [
         "脚本扫描 tasks/translation/data(pixiv/fanbox/顶层游离文件),每作品输出 来源/输出形态(bilingual/fixed/v2/namefix)/完成度",
@@ -61,7 +61,7 @@
     {
       "id": "S2",
       "title": "QA 基线:全部存量 bilingual 的 --qa-only 汇总",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         "S1"
       ],
@@ -97,18 +97,31 @@
     }
   ],
   "next_action": {
-    "step_id": "S1",
-    "instruction": "先只读勘察 tasks/translation/data 的实际目录形态,然后实现 tasks/translation/src/scripts/inventory_content.py:扫描 pixiv/fanbox/顶层,按作品聚合输出形态与完成度(复用 file_handler 语义),报告写入 tasks/translation/logs/inventory/(git-ignored),并配 fixture 单元测试。",
+    "step_id": "S2",
+    "instruction": "对盘点清单中的全部存量 bilingual 输出运行 qa_gate 硬规则检查(复用 --qa-only 路径),把问题行数与类型分布汇总进 inventory 报告或独立 QA 基线报告;真实数据全库跑一次,结论写入 checkpoint。",
     "acceptance": [
-      "make 或 python 入口对真实数据跑通并产出报告",
-      "单元测试全绿,翻译测试基线保持 50"
+      "全库 QA 基线报告生成,命令幂等",
+      "测试基线保持 57"
     ]
   },
   "validation": {
     "required_commands": [],
-    "last_results": []
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m unittest discover -s tasks/translation/src -t . -p '*_test.py'",
+        "status": "passed",
+        "summary": "57 全绿(基线 50→57:+6 盘点测试,+1 补回被 discovery 遗漏的 extract_chinese_test)",
+        "timestamp": "2026-06-12T08:40:46Z"
+      }
+    ]
   },
   "known_unrelated_changes": [],
-  "last_checkpoint": null,
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260612T084046Z-claude-code",
+    "timestamp": "2026-06-12T08:40:46Z",
+    "agent": "claude-code",
+    "summary": "S1 完成,进入 S2 QA 基线",
+    "observed_head": "e5244a1"
+  },
   "next_task": null
 }
