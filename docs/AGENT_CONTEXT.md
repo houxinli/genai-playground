@@ -4,12 +4,14 @@
 >
 > - 开发规范：见仓库根 [`../AGENTS.md`](../AGENTS.md)
 > - 当前状态：见 [`PROJECT_STATUS.md`](PROJECT_STATUS.md)
+> - 跨 Agent 继续/交接：见 [`AGENT_WORKFLOW.md`](AGENT_WORKFLOW.md)
+> - 翻译目标架构：见 [`../tasks/translation/docs/system-design.md`](../tasks/translation/docs/system-design.md)
 > - 历史决策：见 [`journal/README.md`](journal/README.md)
 > - 翻译执行手册：见 [`../tasks/translation/README.md`](../tasks/translation/README.md)
 
 ## 项目概览
 
-仓库包含两个子项目：
+仓库包含多个子项目，当前主战场仍是翻译：
 
 1. **翻译流水线** (`tasks/translation/`) — 当前主战场。
    日语 → 中文，下载 → 翻译 → 修复/清理 → 打包。
@@ -17,6 +19,10 @@
 
 2. **Sunday Movies** (`tasks/sunday-movies/`) — 维护模式。
    影院档期与多源评分（Fandango / 豆瓣 / IMDb）。
+
+3. **YouTube Music** (`tasks/ytmusic/`) — 独立工具。
+
+4. **Fitness** (`tasks/fitness/`) — 自由文本训练日志与进展图表。
 
 详细目录边界在 [`../AGENTS.md`](../AGENTS.md) §1。
 
@@ -105,18 +111,25 @@ make vllm-stop           # 停止
 - QA 报告：默认 `tasks/translation/logs/qa_reports/`
 - 人名预读：默认 `tasks/translation/logs/name_glossaries/`
 
+当前实现仍以这些路径排障。目标架构会把规范业务历史迁移到不可变 JSON workspace，
+并把 SQLite 限定为可重建索引；迁移阶段与兼容边界见系统设计。
+
 ## 给新 Agent 的建议
 
-1. **不要先翻 journal 重建上下文**。按 [`../AGENTS.md`](../AGENTS.md) §11 的顺序读：开发规范 → PROJECT_STATUS → 翻译 README。
+1. **不要先翻 journal 重建上下文**。按 [`../AGENTS.md`](../AGENTS.md) §12 的顺序读。
 2. **优先用 Make / 管理脚本**，不要直接绕过去调底层 Python。
 3. **CUDA / vLLM 环境变量是反复踩坑的来源**，复制本文件里的配置而不是自己拼。
-4. **状态机是真相**：排查"为什么没跑/跑成什么样"先看 `translation_state.json`，不要靠 ls 输出目录猜。
+4. **当前状态机是真相**：新 workspace 未切主路径前，排查仍先看 `translation_state.json`，不要靠 ls 输出目录猜。
 5. **删代码时同步删 CLI flag、config 字段、文档段落** —— 这条在 [`../AGENTS.md`](../AGENTS.md) §8 有完整规则。
 
-## "整理进展" 工作流
+## 跨 Agent 开发
 
-仓库里有 `.cursor/rules/organize-progress.mdc` 定义了"整理进展"指令的执行细则（git 状态分析、逐文件变更、日志写入、commit message 模板）。当用户说"整理进展"时按那份文档执行。
+Codex、Claude Code、Cursor 的开发执行游标保存在 `agent/tasks/<task-id>/state.json`，交接历史保存在
+`checkpoints.jsonl`。用户说“继续”或“交接”时按 [`AGENT_WORKFLOW.md`](AGENT_WORKFLOW.md) 执行。
+
+`docs/journal/` 只记录 PR/里程碑级决策，不保存每轮会话进度；`.cursor/rules/organize-progress.mdc`
+只是 Cursor 的薄入口，不拥有独立工作流，也不会自动暂存或提交。
 
 ---
 
-**最后更新**：2026-05-14
+**最后更新**：2026-06-12

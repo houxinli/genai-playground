@@ -212,3 +212,15 @@ translate-attach:
 monitor-translation:
 	@echo "🔍 监听翻译进度..."
 	./scripts/monitor_translation.sh
+
+
+# ============ Agent 任务状态 ============
+.PHONY: agent-validate agent-validator-test
+
+agent-validate:
+	$(PY) scripts/validate_agent_tasks.py
+
+agent-validator-test:
+	$(PY) -m unittest scripts.validate_agent_tasks_test
+
+

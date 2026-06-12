@@ -26,6 +26,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
 
+      - name: Agent harness validation
+        run: |
+          python -m unittest scripts.validate_agent_tasks_test
+          python scripts/validate_agent_tasks.py
+
       - name: Translation test suite
         run: |
           python -m unittest discover -s tasks/translation/src -t . -p "*_test.py"

@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-000-short-slug",
+  "title": "Short task title",
+  "status": "planned",
+  "branch": "feat/short-branch",
+  "objective": "Describe the concrete terminal outcome.",
+  "github": {
+    "issue": null,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "path/owned/by/task"
+    ],
+    "out": [
+      "unrelated subsystem"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "First independently verifiable step",
+      "status": "in_progress",
+      "depends_on": [],
+      "acceptance": [
+        "State the observable acceptance condition."
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S1",
+    "instruction": "Perform one concrete action, not 'continue development'.",
+    "acceptance": [
+      "State what must be true before checkpointing."
+    ]
+  },
+  "validation": {
+    "required_commands": [],
+    "last_results": []
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": null,
+  "next_task": null
+}

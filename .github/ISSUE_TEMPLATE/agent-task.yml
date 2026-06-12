@@ -1,0 +1,83 @@
+name: Agent development task
+description: Define a branch-sized task that Codex, Claude Code, or Cursor can continue.
+title: "[Task] "
+labels:
+  - agent-ready
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep this issue at the goal and acceptance level. Fine-grained execution state belongs in
+        `agent/tasks/<task-id>/state.json`.
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: Describe one concrete terminal outcome.
+      placeholder: The repository can...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable conditions that must be true before the issue closes.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope_in
+    attributes:
+      label: In scope
+      description: Name owned subsystems, paths, or behaviors.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope_out
+    attributes:
+      label: Out of scope
+      description: State nearby work that must not be pulled into this branch.
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and blockers
+      description: Link prerequisite issues, decisions, external input, or write "None".
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Required context
+      description: Link the smallest set of design documents or source files needed to begin.
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: List commands and manual checks required before merge.
+      placeholder: |
+        - `conda run -n llm python -m unittest ...`
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: Readiness
+      options:
+        - label: The task is small enough for one branch and one pull request.
+          required: true
+        - label: The objective and acceptance criteria do not depend on chat history.
+          required: true

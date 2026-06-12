@@ -1,6 +1,12 @@
 # Repository Guidelines
 
-这份文档是本仓库开发规范的真相源。当前状态、近期工作另见 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)；稳定背景与排障见 [`docs/AGENT_CONTEXT.md`](docs/AGENT_CONTEXT.md)。
+这份文档是本仓库开发规范的真相源。当前状态、近期工作另见
+[`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)；翻译目标架构见
+[`tasks/translation/docs/system-design.md`](tasks/translation/docs/system-design.md)；稳定背景与排障见
+[`docs/AGENT_CONTEXT.md`](docs/AGENT_CONTEXT.md)；跨 Codex/Claude Code/Cursor 的继续与交接协议见
+[`docs/AGENT_WORKFLOW.md`](docs/AGENT_WORKFLOW.md)。
+
+所有 Agent 与用户交流默认使用中文；代码、标识符与 commit message 遵循 §3 与 §10 的既有约定。
 
 ## 1. 项目结构与边界
 
@@ -8,6 +14,8 @@
 - 所有可执行入口走 `Makefile` 与 `scripts/` 下的管理脚本（`manage_vllm.sh`、`manage_translation.sh`、`monitor_translation.sh`），不要直接调底层 Python。
 - 文档真相源：
   - `docs/PROJECT_STATUS.md` — 当前重点、组件状态、计划（短半衰期）
+  - `tasks/translation/docs/system-design.md` — 翻译目标架构、数据模型、Agent 协议与迁移路线
+  - `docs/AGENT_WORKFLOW.md` — 跨开发 Agent 的任务状态、继续、交接和 context management
   - `docs/AGENT_CONTEXT.md` — 稳定背景与运行环境（长半衰期）
   - `docs/journal/README.md` — 历史决策与排障日志（只增不改）
 - 翻译子系统目录约定（`tasks/translation/`）：
@@ -31,7 +39,7 @@
   ```bash
   conda run -n llm python -m unittest discover -s tasks/translation/src -t . -p "*_test.py"
   ```
-  当前 baseline 是 44 测试全绿，PR 合入前必须保持 ≥ 此基线。
+  当前 baseline 是 50 测试全绿，PR 合入前必须保持 ≥ 此基线。
 
 ## 3. 编码风格
 
@@ -64,6 +72,9 @@
 - 修复入口统一走 `--repair-existing`（主流水线 + `BilingualRepairer`）。`scripts/repair_bilingual.py` 是历史入口，未来要薄化。
 - 名字一致性：人工规则文件优先（`--name-glossary-file`），自动预读保存到 `--name-glossary-output-dir`，正文翻译与人名预读可以走不同 provider（见 `*_openrouter_local_names` preset）。
 - Prompt / parser 已经独立成包（`src/core/prompt/`、`src/core/parser/`）；新逻辑放对应包内，不要塞回 `translator.py` 或 `pipeline.py`。
+- 上述是当前实现约束。新架构按 `system-design.md` 渐进迁移，不能在现有 TXT/JSON state 之外另起一套未接入主流程的平行状态。
+- 目标架构中，JSON 是规范业务工件，SQLite 是可重建索引和调度层；Agent/API 只能创建 candidate/result，不能直接覆盖发布版本。
+- 新增 candidate/version/annotation/task schema 时必须带 `schema_version`，并同时补 schema validation、round-trip 和 stale-result 测试。
 
 ## 6. 质量检测分工
 
@@ -91,6 +102,7 @@
 - 单次运行的状态写入 `translation_state.json`（顶层目录 + 子目录都有）。排障从这里入手。
 - `monitor_translation.sh` 提供 `status / monitor / stats` 三个视角。
 - 引入新指标（耗时、token、成本）请扩展 `run_state` 的 `progress` 字段，不要再起新文件。
+- 在新 workspace/index 落地前继续遵守上一条；迁移后指标进入统一 events/index，不允许同时维护两个互不一致的指标真相源。
 
 ## 10. 分支、checkpoint 与 PR
 
@@ -106,7 +118,8 @@
 
 - **每完成一个独立子任务就提交**，不要一个会话攒成一个大提交。一个提交 = 一个能独立描述、能独立回滚的逻辑单元。
 - 提交前确保该单元自洽：测试通过、无半成品。失败的步骤不要混进提交。
-- 长任务用 TaskCreate/TaskList 跟踪会话内进度；跨会话的进展沉淀到 journal 与 `PROJECT_STATUS.md`。
+- 长任务和跨会话进度用 `agent/tasks/<task-id>/state.json` 与 append-only `checkpoints.jsonl`
+  跟踪；不要用聊天记忆、journal 或 `PROJECT_STATUS.md` 代替执行游标。
 - **每个合并的 PR 配一条 journal**（`docs/journal/YYYY-MM-DD.md` + 索引），记录动机、改动、验证、后续。
 
 ### Commit
@@ -123,12 +136,29 @@
 - 除非用户明确要求，不要 `--no-verify`、`--amend`、`push --force`。
 - 本地可装 pre-push hook 在 push 前跑快测试：`bash scripts/install-git-hooks.sh`。
 
-## 11. 给新 Agent 的最小阅读路径
+## 11. 跨 Agent 继续与交接
+
+- 用户只说“继续”时，必须按 [`docs/AGENT_WORKFLOW.md`](docs/AGENT_WORKFLOW.md) 恢复当前分支任务：
+  先检查 Git，再读取匹配当前 branch 的唯一 active task state、必要 context 和最近 checkpoint。
+- 不依赖上一段聊天记录，不从 roadmap 或 journal 猜下一项工作。找不到唯一任务且无法从当前 branch/PR/Issue
+  无歧义恢复时，停止并向用户确认。
+- 执行前先校准 state 与 Git/文件/测试证据；冲突时以实际证据为准，并记录 reconcile checkpoint。
+- 每轮只推进 `next_action` 对应的最小可验收单元。结束前更新 state、验证结果和 `checkpoints.jsonl`。
+- 用户说“交接”时，不开始新的大步骤；只完成可运行的验证、更新状态并写清未提交改动和下一动作。
+- 同一 branch/worktree 只允许 Codex、Claude Code、Cursor 顺序交替。并行开发必须拆 branch/worktree 和 task state。
+- `agent/tasks/` 中一个 branch 最多有一个 `planned` / `active` / `blocked` 任务，一个任务最多一个
+  `in_progress` step。
+- 创建或更新 task state/checkpoint 后必须运行 `make agent-validate`。
+
+## 12. 给新 Agent 的最小阅读路径
 
 1. 本文件（开发规范）。
 2. [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) — 现在在做什么、哪里是缺口。
-3. [`tasks/translation/README.md`](tasks/translation/README.md) — 怎么把翻译跑起来。
-4. [`docs/AGENT_CONTEXT.md`](docs/AGENT_CONTEXT.md) — 稳定环境/CUDA/vLLM 背景，遇到具体环境问题时翻。
-5. [`docs/journal/README.md`](docs/journal/README.md) — 历史决策，按需检索。
+3. [`docs/AGENT_WORKFLOW.md`](docs/AGENT_WORKFLOW.md) — 收到“继续/交接”或需要跨 harness 工作时必读。
+4. [`tasks/translation/docs/system-design.md`](tasks/translation/docs/system-design.md) — 改架构、QA/repair、翻译 Agent 协议或版本模型时必读。
+5. [`tasks/translation/README.md`](tasks/translation/README.md) — 怎么把当前翻译跑起来。
+6. [`docs/AGENT_CONTEXT.md`](docs/AGENT_CONTEXT.md) — 稳定环境/CUDA/vLLM 背景，遇到具体环境问题时翻。
+7. [`docs/journal/README.md`](docs/journal/README.md) — 历史决策，按需检索。
 
-不要"先读 journal 重建上下文"——从 1 → 2 → 3 通常就够开始干活。
+不要“先读 journal 重建上下文”。纯运行任务读 1 → 2 → 5；架构任务读 1 → 2 → 4；
+跨 Agent 恢复任务读 1 → 2 → 3，再由 task state 指向其余文件。
