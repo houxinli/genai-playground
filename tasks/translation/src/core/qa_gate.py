@@ -134,16 +134,17 @@ def _align_pairs_to_source_body(
     issues: List[QAIssue] = []
     if not source_text:
         return pairs, issues
-    _, source_body = _split_front_matter(source_text.splitlines())
+    source_front, source_body = _split_front_matter(source_text.splitlines())
     if not source_body:
         return pairs, issues
+    line_offset = len(source_front)
 
     def _missing(idx: int) -> QAIssue:
         return QAIssue(
             code="missing_pair",
             message="源文件原文行在输出中没有配对(可能截断或漏行)",
             severity="error",
-            line=idx + 1,
+            line=line_offset + idx + 1,
             detail={"source": source_body[idx].strip()},
         )
 
