@@ -36,8 +36,8 @@ class TranslationQAGateTest(unittest.TestCase):
             base = Path(tmp)
             source = base / "src.txt"
             output = base / "out.txt"
-            source.write_text("行A\n行B\n行C\n", encoding="utf-8")
-            output.write_text("行A\n译A\n\n行C\n译C\n", encoding="utf-8")
+            source.write_text("---\ntitle: t\n---\n行A\n行B\n行C\n", encoding="utf-8")
+            output.write_text("---\ntitle: t\ntitle: 题\n---\n行A\n译A\n\n行C\n译C\n", encoding="utf-8")
 
             report = TranslationQAGate().run(output, source)
 
@@ -45,6 +45,7 @@ class TranslationQAGateTest(unittest.TestCase):
             self.assertEqual(1, len(missing))
             self.assertEqual("error", missing[0].severity)
             self.assertEqual("行B", missing[0].detail["source"])
+            self.assertEqual(5, missing[0].line)  # front matter 3 行 + 正文第 2 行
             self.assertTrue(report.has_errors)
 
     def test_detects_truncated_tail(self) -> None:
