@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-15-ci-test-coverage",
   "title": "CI 假绿修复:pytest 风格测试与 sunday 离线套件",
-  "status": "active",
+  "status": "complete",
   "branch": "fix/ci-test-coverage",
   "objective": "CI 真实执行仓库全部离线测试:translation 改用 pytest 统跑(含 52 个 pytest 风格用例),sunday 补 3 套,pre-push 与 CI 一致,hooks 支持 worktree。",
   "github": {
     "issue": 15,
-    "pull_request": null
+    "pull_request": 22
   },
   "scope": {
     "in": [
@@ -53,7 +53,7 @@
     {
       "id": "S3",
       "title": "hooks worktree 兼容 + CI/hook/文档一致",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1",
         "S2"
@@ -65,14 +65,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR,CI 绿后置 complete 并合并;issue #15 随 PR 关闭。",
-    "acceptance": [
-      "PR CI 绿且已合并",
-      "issue #15 关闭"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -102,11 +95,15 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260612T220950Z-claude-code",
-    "timestamp": "2026-06-12T22:09:50Z",
+    "checkpoint_id": "cp-20260612T221520Z-claude-code",
+    "timestamp": "2026-06-12T22:15:20Z",
     "agent": "claude-code",
-    "summary": "S1-S3 交付完成,待 PR 收尾",
-    "observed_head": "7fa7e78"
+    "summary": "任务完成,PR #22 待合并",
+    "observed_head": "607f7f9"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 14,
+    "task_id": "gh-14-harness-hardening",
+    "branch": "feat/harness-hardening"
+  }
 }
