@@ -61,7 +61,7 @@
     {
       "id": "S2",
       "title": "QA 基线:全部存量 bilingual 的 --qa-only 汇总",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1"
       ],
@@ -73,7 +73,7 @@
     {
       "id": "S3",
       "title": "坏产物隔离与处置记录",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         "S1"
       ],
@@ -97,11 +97,11 @@
     }
   ],
   "next_action": {
-    "step_id": "S2",
-    "instruction": "对盘点清单中的全部存量 bilingual 输出运行 qa_gate 硬规则检查(复用 --qa-only 路径),把问题行数与类型分布汇总进 inventory 报告或独立 QA 基线报告;真实数据全库跑一次,结论写入 checkpoint。",
+    "step_id": "S3",
+    "instruction": "把盘点出的 3 个隔离候选(pixiv/50235390_bilingual_repair_clean_tmp、pixiv/50235390_bilingual_repair_tmp、pixiv/53230930_bilingual_fixed_broken_bak)移入 tasks/translation/data/quarantine/,写处置 manifest;重跑盘点确认隔离候选清零。",
     "acceptance": [
-      "全库 QA 基线报告生成,命令幂等",
-      "测试基线保持 57"
+      "三个目录已隔离且 manifest 记录原路径/原因/时间",
+      "重跑 inventory 后 quarantine_candidates 为空"
     ]
   },
   "validation": {
@@ -110,18 +110,24 @@
       {
         "command": "conda run -n llm python -m unittest discover -s tasks/translation/src -t . -p '*_test.py'",
         "status": "passed",
-        "summary": "57 全绿(基线 50→57:+6 盘点测试,+1 补回被 discovery 遗漏的 extract_chinese_test)",
-        "timestamp": "2026-06-12T08:40:46Z"
+        "summary": "59 全绿(57+2 QA 基线测试)",
+        "timestamp": "2026-06-12T08:43:05Z"
+      },
+      {
+        "command": "python tasks/translation/src/scripts/qa_baseline.py",
+        "status": "passed",
+        "summary": "21 目录/731 文件,616 文件含 error;kana_residue 5016、same_as_source 3853、refusal 505、failure 501",
+        "timestamp": "2026-06-12T08:43:05Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260612T084046Z-claude-code",
-    "timestamp": "2026-06-12T08:40:46Z",
+    "checkpoint_id": "cp-20260612T084305Z-claude-code",
+    "timestamp": "2026-06-12T08:43:05Z",
     "agent": "claude-code",
-    "summary": "S1 完成,进入 S2 QA 基线",
-    "observed_head": "e5244a1"
+    "summary": "S2 完成,进入 S3 隔离",
+    "observed_head": "acdaa24"
   },
   "next_task": null
 }
