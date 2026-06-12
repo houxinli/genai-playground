@@ -55,7 +55,7 @@ class QABaselineTest(unittest.TestCase):
         )
 
     def test_packaged_top_level_bilingual_included(self):
-        # merge_chinese_files 产物:章节头 + 元数据 + 空行分隔的双语对(review: PR #25)
+        # merge_chinese_files 产物:章节头 + 元数据 + 空行分隔的双语对
         (self.data / "111_bilingual.txt").write_text(
             "第1章 标题甲\n\n标题: 标题甲\n标签: [x / y]\n创建时间: 2021-01-01\n\n\n"
             "こんにちは\n你好\n\nさようなら\n再见\n\n"

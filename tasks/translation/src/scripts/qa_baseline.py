@@ -48,7 +48,7 @@ def _split_packaged_chapters(text: str) -> List[tuple]:
 
 
 def _qa_packaged_file(gate: TranslationQAGate, path: Path) -> Dict[str, Any]:
-    """打包文件不是严格交替双语,先按章提取正文再逐章过 gate(review: PR #25)。"""
+    """打包文件不是严格交替双语,先按章提取正文再逐章过 gate。"""
     text = path.read_text(encoding="utf-8", errors="ignore")
     chapters = _split_packaged_chapters(text)
     if not chapters:
@@ -126,7 +126,7 @@ def build_baseline(data_root: Path, collections: List[str]) -> Dict[str, Any]:
                 entry["source"] = source["source"]
                 results.append(entry)
 
-    # 顶层打包的 bilingual 产物同样纳入基线(review: PR #13);打包文件无逐篇源,gate 走无源路径
+    # 顶层打包的 bilingual 产物同样纳入基线;打包文件无逐篇源,gate 走无源路径
     for item in inventory["packaged_top_level"]:
         if item["kind"] != "bilingual":
             continue
