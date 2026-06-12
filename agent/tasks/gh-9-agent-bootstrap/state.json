@@ -52,7 +52,7 @@
     {
       "id": "S1",
       "title": "实现 scripts/bootstrap_agent_task.py",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "acceptance": [
         "命令行参数 task-id/branch/title/objective(issue 可选)生成 agent/tasks/<task-id>/state.json + 空 checkpoints.jsonl",
@@ -63,8 +63,10 @@
     {
       "id": "S2",
       "title": "单元测试覆盖成功与失败路径",
-      "status": "pending",
-      "depends_on": ["S1"],
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
       "acceptance": [
         "成功路径:生成文件存在且通过校验",
         "失败路径:重复 branch 拒绝、非法 task-id 拒绝",
@@ -74,8 +76,10 @@
     {
       "id": "S3",
       "title": "Makefile 与文档接入",
-      "status": "pending",
-      "depends_on": ["S2"],
+      "status": "in_progress",
+      "depends_on": [
+        "S2"
+      ],
       "acceptance": [
         "make agent-bootstrap 可用并在 CI 测试覆盖内",
         "docs/AGENT_WORKFLOW.md §9 与 agent/README.md 指向该命令"
@@ -83,11 +87,12 @@
     }
   ],
   "next_action": {
-    "step_id": "S1",
-    "instruction": "实现 scripts/bootstrap_agent_task.py:argparse 接收 --task-id --branch --title --objective [--issue],从 agent/templates/task-state.json 生成 state.json 并创建空 checkpoints.jsonl;写盘前先扫描 agent/tasks/*/state.json,若同 branch 已有 planned/active/blocked 任务则报错退出且不写文件;完成后用 scripts/validate_agent_tasks.py 自校验。",
+    "step_id": "S3",
+    "instruction": "开 PR、记录 PR 号到 github.pull_request,确认 CI 绿后置 status=complete、next_action=null,追加最终 checkpoint 并合并。",
     "acceptance": [
-      "对一个全新 branch 运行命令后,make agent-validate 通过",
-      "对本任务自身 branch 重复运行命令时报错退出且 agent/tasks 无新增目录"
+      "PR CI 绿且已合并",
+      "issue #9 关闭",
+      "state status=complete 且最终 checkpoint 与日志尾一致"
     ]
   },
   "validation": {
@@ -100,18 +105,30 @@
       {
         "command": "conda run -n llm python scripts/validate_agent_tasks.py",
         "status": "passed",
-        "summary": "bootstrap 本 task state 后通过(含本任务自身)",
-        "timestamp": "2026-06-12T07:01:13Z"
+        "summary": "通过(含 gh-9 自身)",
+        "timestamp": "2026-06-12T07:38:52Z"
+      },
+      {
+        "command": "conda run -n llm python -m unittest scripts.validate_agent_tasks_test",
+        "status": "passed",
+        "summary": "7 测试通过(经 make agent-validator-test)",
+        "timestamp": "2026-06-12T07:38:52Z"
+      },
+      {
+        "command": "conda run -n llm python -m unittest scripts.bootstrap_agent_task_test",
+        "status": "passed",
+        "summary": "6 测试通过;真仓库上对活动 branch 重复 bootstrap 被拒且零写入",
+        "timestamp": "2026-06-12T07:38:52Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260612T070113Z-claude-code",
-    "timestamp": "2026-06-12T07:01:13Z",
+    "checkpoint_id": "cp-20260612T073852Z-claude-code",
+    "timestamp": "2026-06-12T07:38:52Z",
     "agent": "claude-code",
-    "summary": "task bootstrap:创建 state 与空 checkpoint 日志,S1 置为 in_progress",
-    "observed_head": "471fa37"
+    "summary": "S1-S3 交付完成,待 PR/CI/合并收尾",
+    "observed_head": "f0ed24d"
   },
   "next_task": null
 }
