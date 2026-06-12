@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-17-inventory-qa-fixes",
   "title": "盘点/QA 基线脚本修正与基线重跑",
-  "status": "active",
+  "status": "complete",
   "branch": "fix/inventory-qa-baseline",
   "objective": "修正 PR #13 review 的三处缺陷(顶层打包产物入基线、派生命名优先于 meta 信号、空文件 partial),全库重跑基线并同步文档数字(含 #16 的 missing_pair)。",
   "github": {
     "issue": 17,
-    "pull_request": null
+    "pull_request": 25
   },
   "scope": {
     "in": [
@@ -55,7 +55,7 @@
     {
       "id": "S3",
       "title": "PR 收尾",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1",
         "S2"
@@ -65,13 +65,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR,triage review,CI 绿后合并。",
-    "acceptance": [
-      "PR 合并,issue #17 关闭"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -82,23 +76,27 @@
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
         "summary": "114 passed",
-        "timestamp": "2026-06-12T22:35:33Z"
+        "timestamp": "2026-06-12T22:41:50Z"
       },
       {
         "command": "python tasks/translation/src/scripts/qa_baseline.py",
         "status": "passed",
-        "summary": "v2:25 目录/735 文件/620 error;missing_pair=0",
-        "timestamp": "2026-06-12T22:35:33Z"
+        "summary": "v2.1:25 目录/1048 单元/894 error;missing_pair=0",
+        "timestamp": "2026-06-12T22:41:50Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260612T223533Z-claude-code",
-    "timestamp": "2026-06-12T22:35:33Z",
+    "checkpoint_id": "cp-20260612T224150Z-claude-code",
+    "timestamp": "2026-06-12T22:41:50Z",
     "agent": "claude-code",
-    "summary": "S1-S2 完成,待 PR 收尾",
-    "observed_head": "cc84c58"
+    "summary": "任务完成,PR #25 待合并",
+    "observed_head": "16b0c08"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 18,
+    "task_id": "gh-18-mlx-macos-script",
+    "branch": "fix/mlx-macos-script"
+  }
 }
