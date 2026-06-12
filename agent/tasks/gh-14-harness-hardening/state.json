@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-14-harness-hardening",
+  "title": "harness 强化:validator 完成性校验与 review triage 流程",
+  "status": "active",
+  "branch": "feat/harness-hardening",
+  "objective": "validator 拒绝越序/未验证/无证据的任务状态;bootstrap 默认 required_commands;协议与 PR 模板明确 review triage。",
+  "github": {
+    "issue": 14,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "scripts/validate_agent_tasks.py(+test)",
+      "scripts/bootstrap_agent_task.py(+test)",
+      "docs/AGENT_WORKFLOW.md §9",
+      ".github/pull_request_template.md",
+      "gh-10 state reconcile"
+    ],
+    "out": [
+      "GitHub 状态自动同步",
+      "Projects 看板"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "validator 三条完成性校验",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "依赖序/required 通过/最终 checkpoint 三规则各有测试",
+        "新规则先逮到 gh-10 再经 reconcile 转绿"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "bootstrap 默认 required_commands",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "默认 agent-validate,--required-command 可覆盖"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "协议与 PR 模板加入 review triage",
+      "status": "in_progress",
+      "depends_on": [
+        "S1",
+        "S2"
+      ],
+      "acceptance": [
+        "§9 完成条件与 PR 模板更新",
+        "PR CI 绿、review triage 后合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR,triage review comments,CI 绿后置 complete 并合并。",
+    "acceptance": [
+      "PR 合并,issue #14 关闭"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest scripts/bootstrap_agent_task_test.py scripts/validate_agent_tasks_test.py -q",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest scripts/bootstrap_agent_task_test.py scripts/validate_agent_tasks_test.py -q",
+        "status": "passed",
+        "summary": "18 passed",
+        "timestamp": "2026-06-12T22:19:07Z"
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "reconcile gh-10 后通过",
+        "timestamp": "2026-06-12T22:19:07Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260612T221907Z-claude-code",
+    "timestamp": "2026-06-12T22:19:07Z",
+    "agent": "claude-code",
+    "summary": "S1-S2 完成,S3 待 PR 收尾",
+    "observed_head": "f9a915b"
+  },
+  "next_task": null
+}

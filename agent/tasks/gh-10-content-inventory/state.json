@@ -98,7 +98,10 @@
   ],
   "next_action": null,
   "validation": {
-    "required_commands": [],
+    "required_commands": [
+      "conda run -n llm python -m unittest discover -s tasks/translation/src -t . -p '*_test.py'",
+      "python tasks/translation/src/scripts/qa_baseline.py"
+    ],
     "last_results": [
       {
         "command": "conda run -n llm python -m unittest discover -s tasks/translation/src -t . -p '*_test.py'",

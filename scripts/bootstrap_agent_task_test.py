@@ -79,7 +79,8 @@ class BootstrapAgentTaskTest(unittest.TestCase):
     def test_bootstrap_allows_branch_reuse_after_terminal_task(self):
         task_dir = self._bootstrap("gh-1-one", "feat/reuse")
         state = json.loads((task_dir / "state.json").read_text(encoding="utf-8"))
-        state["status"] = "complete"
+        # cancelled 同为终态;complete 还需验证记录与最终 checkpoint(validator 测试覆盖)
+        state["status"] = "cancelled"
         state["plan"][0]["status"] = "completed"
         state["next_action"] = None
         (task_dir / "state.json").write_text(
