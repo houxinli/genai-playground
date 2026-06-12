@@ -69,6 +69,12 @@
 
 ## Recent Engineering Changes
 
+2026-06-12 主干收敛与首个 dogfood 任务（详见 [journal](journal/2026-06-12-trunk-split.md)）：
+
+- 长期混合分支的 21 个未合并提交按子项目拆为 #3/#4/#5，rebase 线性合入 main，树等价验证无损。
+- harness 经 #6 合入；#7 系统设计文档；#8 fitness 入库；旧分支删除，仓库收敛到唯一 `main`。
+- 首个 dogfood 任务 `gh-9-agent-bootstrap`（issue #9）已按协议 bootstrap；存量盘点进入 backlog（#10）。
+
 2026-06-12 跨 Agent 开发连续性：
 
 - 增加 `agent/tasks/<task-id>/state.json` 与 append-only `checkpoints.jsonl` 的共享协议。
@@ -123,7 +129,8 @@
 - 当前没有规范化 `Document/Segment`，候选、QA、repair 和用户反馈只能围绕双语 TXT 工作。
 - 当前没有 candidate/version 模型，实验结果依赖多个目录名保存，难以比较、回滚和审计。
 - 当前没有统一 API/Agent job 协议，Codex/Claude Code/Cursor 无法可靠参与批量 review。
-- 开发任务的跨 Agent 协议已有 validator/CI，但还没有任务 bootstrap 命令和 GitHub 状态同步。
+- 开发任务的跨 Agent 协议已有 validator/CI，但还没有任务 bootstrap 命令和 GitHub 状态同步（#9）。
+- 存量内容库没有全库清单与 QA 基线，坏产物与游离文件混在数据目录中（#10）。
 - 当前没有用户 annotation 生命周期和句级定向重译入口。
 - 人名规则尚未实体化、作用域化和版本化，同名跨系列冲突仍需人工避免。
 - 还没有内建的文件级并发调度器，批量任务提速仍依赖外部手动拆分。
@@ -136,11 +143,13 @@
 
 ### P0: 协议与数据基础
 
-1. 为 `agent/tasks` 增加 bootstrap 命令和 GitHub 状态同步。
-2. 固定 revision、candidate、evaluation、annotation、version、task、result 的 JSON Schema。
-3. 建立 Pixiv/Fanbox 最小 fixture、golden bilingual/zh 和 ID/hash 稳定性测试。
-4. 建立 source adapter、`DocumentRevision/Segment` 和 renderer 的 shadow path。
-5. 支持把现有 bilingual/fixed 文件导入为 legacy candidate，确保迁移不丢历史。
+1. 存量内容库盘点、QA 基线与坏产物隔离（#10）：全库状态清单、`--qa-only` 基线报告、
+   `*_broken_bak` 等坏产物隔离与处置记录，在 legacy 导入前完成。
+2. 为 `agent/tasks` 增加 bootstrap 命令（#9）和 GitHub 状态同步。
+3. 固定 revision、candidate、evaluation、annotation、version、task、result 的 JSON Schema。
+4. 建立 Pixiv/Fanbox 最小 fixture、golden bilingual/zh 和 ID/hash 稳定性测试。
+5. 建立 source adapter、`DocumentRevision/Segment` 和 renderer 的 shadow path。
+6. 支持把现有 bilingual/fixed 文件导入为 legacy candidate，确保迁移不丢历史（以 1 的清单为输入）。
 
 ### P1: 多候选、版本与非破坏性闭环
 
