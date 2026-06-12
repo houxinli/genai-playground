@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-14-harness-hardening",
   "title": "harness 强化:validator 完成性校验与 review triage 流程",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/harness-hardening",
   "objective": "validator 拒绝越序/未验证/无证据的任务状态;bootstrap 默认 required_commands;协议与 PR 模板明确 review triage。",
   "github": {
     "issue": 14,
-    "pull_request": null
+    "pull_request": 23
   },
   "scope": {
     "in": [
@@ -55,7 +55,7 @@
     {
       "id": "S3",
       "title": "协议与 PR 模板加入 review triage",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1",
         "S2"
@@ -66,13 +66,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR,triage review comments,CI 绿后置 complete 并合并。",
-    "acceptance": [
-      "PR 合并,issue #14 关闭"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest scripts/bootstrap_agent_task_test.py scripts/validate_agent_tasks_test.py -q",
@@ -82,24 +76,28 @@
       {
         "command": "conda run -n llm python -m pytest scripts/bootstrap_agent_task_test.py scripts/validate_agent_tasks_test.py -q",
         "status": "passed",
-        "summary": "18 passed",
-        "timestamp": "2026-06-12T22:19:07Z"
+        "summary": "19 passed(含 review 修复新增)",
+        "timestamp": "2026-06-12T22:25:15Z"
       },
       {
         "command": "conda run -n llm python scripts/validate_agent_tasks.py",
         "status": "passed",
-        "summary": "reconcile gh-10 后通过",
-        "timestamp": "2026-06-12T22:19:07Z"
+        "summary": "passed",
+        "timestamp": "2026-06-12T22:25:15Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260612T221907Z-claude-code",
-    "timestamp": "2026-06-12T22:19:07Z",
+    "checkpoint_id": "cp-20260612T222515Z-claude-code",
+    "timestamp": "2026-06-12T22:25:15Z",
     "agent": "claude-code",
-    "summary": "S1-S2 完成,S3 待 PR 收尾",
-    "observed_head": "f9a915b"
+    "summary": "任务完成,PR #23 待合并",
+    "observed_head": "8f6c698"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 16,
+    "task_id": "gh-16-qa-gate-alignment",
+    "branch": "fix/qa-gate-alignment"
+  }
 }
