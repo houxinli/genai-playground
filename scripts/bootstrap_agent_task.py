@@ -26,6 +26,7 @@ DEFAULT_ACCEPTANCE = [
 ]
 SCOPE_PLACEHOLDER_IN = "(bootstrap 占位) 待补：本任务拥有的路径或子系统"
 SCOPE_PLACEHOLDER_OUT = "(bootstrap 占位) 待补：明确排除的相邻工作"
+DEFAULT_REQUIRED_COMMANDS = ["conda run -n llm python scripts/validate_agent_tasks.py"]
 
 
 class BootstrapError(Exception):
@@ -71,6 +72,7 @@ def build_state(
     acceptance: list[str],
     scope_in: list[str],
     scope_out: list[str],
+    required_commands: list[str],
 ) -> dict[str, Any]:
     state = json.loads(json.dumps(template))
     state.update(
@@ -98,6 +100,7 @@ def build_state(
         "instruction": next_action_instruction,
         "acceptance": acceptance,
     }
+    state["validation"] = {"required_commands": required_commands, "last_results": []}
     state["last_checkpoint"] = None
     state["next_task"] = None
     return state
@@ -117,6 +120,7 @@ def bootstrap_task(
     acceptance: list[str] | None = None,
     scope_in: list[str] | None = None,
     scope_out: list[str] | None = None,
+    required_commands: list[str] | None = None,
 ) -> Path:
     """Create agent/tasks/<task_id>/ and return its path. Raises BootstrapError without writing."""
 
@@ -162,6 +166,7 @@ def bootstrap_task(
         acceptance=acceptance or list(DEFAULT_ACCEPTANCE),
         scope_in=scope_in or [SCOPE_PLACEHOLDER_IN],
         scope_out=scope_out or [SCOPE_PLACEHOLDER_OUT],
+        required_commands=required_commands or list(DEFAULT_REQUIRED_COMMANDS),
     )
 
     task_dir.mkdir()
@@ -202,6 +207,12 @@ def main() -> int:
     parser.add_argument("--scope-in", action="append", default=None, help="repeatable")
     parser.add_argument("--scope-out", action="append", default=None, help="repeatable")
     parser.add_argument(
+        "--required-command",
+        action="append",
+        default=None,
+        help="repeatable; validation.required_commands, defaults to agent-validate",
+    )
+    parser.add_argument(
         "--root",
         type=Path,
         default=Path(__file__).resolve().parents[1],
@@ -223,6 +234,7 @@ def main() -> int:
             acceptance=args.acceptance,
             scope_in=args.scope_in,
             scope_out=args.scope_out,
+            required_commands=args.required_command,
         )
     except BootstrapError as exc:
         print(f"Bootstrap failed: {exc}", file=sys.stderr)

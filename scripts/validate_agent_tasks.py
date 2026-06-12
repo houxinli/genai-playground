@@ -95,6 +95,19 @@ def _validate_plan(state_path: Path, state: dict[str, Any], errors: list[str]) -
     if len(in_progress) > 1:
         errors.append(f"{state_path}: at most one plan step may be in_progress")
 
+    for step in in_progress:
+        unmet = [
+            dependency
+            for dependency in step["depends_on"]
+            if dependency in steps
+            and steps[dependency]["status"] not in {"completed", "skipped"}
+        ]
+        if unmet:
+            errors.append(
+                f"{state_path}: in_progress step {step['id']} has unmet dependencies: "
+                f"{', '.join(unmet)}"
+            )
+
     next_action = state["next_action"]
     if next_action is not None:
         step = steps.get(next_action["step_id"])
@@ -133,6 +146,33 @@ def _validate_plan(state_path: Path, state: dict[str, Any], errors: list[str]) -
             )
         if active_blockers:
             errors.append(f"{state_path}: complete task cannot have active blockers")
+
+        required = state["validation"]["required_commands"]
+        if not required:
+            errors.append(
+                f"{state_path}: complete task must declare at least one required command"
+            )
+        latest_by_command = {
+            result["command"]: result["status"]
+            for result in state["validation"]["last_results"]
+        }
+        for command in required:
+            recorded = latest_by_command.get(command)
+            if recorded is None:
+                errors.append(
+                    f"{state_path}: complete task has no recorded result for required "
+                    f"command: {command}"
+                )
+            elif recorded != "passed":
+                errors.append(
+                    f"{state_path}: complete task required command did not pass "
+                    f"({recorded}): {command}"
+                )
+
+        if state["last_checkpoint"] is None:
+            errors.append(
+                f"{state_path}: complete task must record a final checkpoint"
+            )
 
     return steps
 

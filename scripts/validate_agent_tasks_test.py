@@ -111,6 +111,76 @@ class AgentTaskValidatorTest(unittest.TestCase):
         errors = VALIDATOR.validate_repository(self.root)
         self.assertTrue(any("invalid JSON" in error for error in errors))
 
+    def _write_state(self, task_dir, state):
+        (task_dir / "state.json").write_text(
+            json.dumps(state, ensure_ascii=False), encoding="utf-8"
+        )
+
+    def _make_complete(self, state):
+        state["status"] = "complete"
+        for step in state["plan"]:
+            step["status"] = "completed"
+        state["next_action"] = None
+        state["validation"] = {
+            "required_commands": ["cmd-a"],
+            "last_results": [
+                {"command": "cmd-a", "status": "passed", "summary": "ok",
+                 "timestamp": "2026-06-12T00:00:00Z"}
+            ],
+        }
+
+    def test_in_progress_step_requires_met_dependencies(self):
+        task_dir, state, _ = self._write_task()
+        state["plan"] = [
+            {"id": "S1", "title": "a", "status": "pending", "depends_on": [],
+             "acceptance": ["x"]},
+            {"id": "S2", "title": "b", "status": "in_progress", "depends_on": ["S1"],
+             "acceptance": ["y"]},
+        ]
+        state["next_action"]["step_id"] = "S2"
+        self._write_state(task_dir, state)
+        errors = VALIDATOR.validate_repository(self.root)
+        self.assertTrue(any("unmet dependencies" in error for error in errors))
+
+    def test_complete_requires_nonempty_required_commands(self):
+        task_dir, state, _ = self._write_task()
+        self._make_complete(state)
+        state["validation"]["required_commands"] = []
+        self._write_state(task_dir, state)
+        errors = VALIDATOR.validate_repository(self.root)
+        self.assertTrue(any("at least one required command" in error for error in errors))
+
+    def test_complete_requires_passed_results_for_each_command(self):
+        task_dir, state, _ = self._write_task()
+        self._make_complete(state)
+        state["validation"]["required_commands"] = ["cmd-a", "cmd-b"]
+        self._write_state(task_dir, state)
+        errors = VALIDATOR.validate_repository(self.root)
+        self.assertTrue(any("no recorded result" in error for error in errors))
+
+        state["validation"]["last_results"].append(
+            {"command": "cmd-b", "status": "failed", "summary": "boom",
+             "timestamp": "2026-06-12T00:00:00Z"}
+        )
+        self._write_state(task_dir, state)
+        errors = VALIDATOR.validate_repository(self.root)
+        self.assertTrue(any("did not pass" in error for error in errors))
+
+    def test_complete_requires_final_checkpoint(self):
+        task_dir, state, _ = self._write_task()
+        self._make_complete(state)
+        state["last_checkpoint"] = None
+        (task_dir / "checkpoints.jsonl").write_text("", encoding="utf-8")
+        self._write_state(task_dir, state)
+        errors = VALIDATOR.validate_repository(self.root)
+        self.assertTrue(any("final checkpoint" in error for error in errors))
+
+    def test_valid_complete_task_passes(self):
+        task_dir, state, _ = self._write_task()
+        self._make_complete(state)
+        self._write_state(task_dir, state)
+        self.assertEqual([], VALIDATOR.validate_repository(self.root))
+
 
 if __name__ == "__main__":
     unittest.main()
