@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-16-qa-gate-alignment",
   "title": "qa_gate:对齐阶段漏检缺失配对",
-  "status": "active",
+  "status": "complete",
   "branch": "fix/qa-gate-alignment",
   "objective": "双语输出缺失某原文行的配对时,qa_gate 产生 error 级 missing_pair issue,截断输出不再通过硬 gate;修复后重跑全库基线由 #17 统一执行。",
   "github": {
     "issue": 16,
-    "pull_request": null
+    "pull_request": 24
   },
   "scope": {
     "in": [
@@ -43,7 +43,7 @@
     {
       "id": "S2",
       "title": "PR 收尾",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1"
       ],
@@ -52,13 +52,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S2",
-    "instruction": "开 PR,triage review,CI 绿后合并。",
-    "acceptance": [
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q"
@@ -68,17 +62,21 @@
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
         "summary": "112 passed(110+2 新增)",
-        "timestamp": "2026-06-12T22:28:16Z"
+        "timestamp": "2026-06-12T22:32:40Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260612T222816Z-claude-code",
-    "timestamp": "2026-06-12T22:28:16Z",
+    "checkpoint_id": "cp-20260612T223240Z-claude-code",
+    "timestamp": "2026-06-12T22:32:40Z",
     "agent": "claude-code",
-    "summary": "S1 完成,待 PR 收尾",
-    "observed_head": "ce4c29c"
+    "summary": "任务完成,PR #24 待合并",
+    "observed_head": "5736659"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 17,
+    "task_id": "gh-17-inventory-qa-fixes",
+    "branch": "fix/inventory-qa-baseline"
+  }
 }
