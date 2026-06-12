@@ -175,9 +175,28 @@ class AgentTaskValidatorTest(unittest.TestCase):
         errors = VALIDATOR.validate_repository(self.root)
         self.assertTrue(any("final checkpoint" in error for error in errors))
 
-    def test_valid_complete_task_passes(self):
+    def test_complete_final_checkpoint_must_close_next_action(self):
+        # 旧的开发中 checkpoint(next_action 非空)不能充当完成态的最终 checkpoint
         task_dir, state, _ = self._write_task()
         self._make_complete(state)
+        self._write_state(task_dir, state)
+        errors = VALIDATOR.validate_repository(self.root)
+        self.assertTrue(any("must set next_action to null" in error for error in errors))
+
+    def test_valid_complete_task_passes(self):
+        task_dir, state, checkpoint = self._write_task()
+        self._make_complete(state)
+        final = copy.deepcopy(checkpoint)
+        final.update(
+            {"checkpoint_id": "cp-2", "timestamp": "2026-06-12T01:00:00Z",
+             "next_action": None}
+        )
+        with (task_dir / "checkpoints.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(final, ensure_ascii=False) + "\n")
+        state["last_checkpoint"] = {
+            "checkpoint_id": "cp-2", "timestamp": "2026-06-12T01:00:00Z",
+            "agent": "test", "summary": "final", "observed_head": "abcdef0",
+        }
         self._write_state(task_dir, state)
         self.assertEqual([], VALIDATOR.validate_repository(self.root))
 

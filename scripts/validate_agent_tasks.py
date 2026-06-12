@@ -283,6 +283,12 @@ def _validate_checkpoints(
                 f"the final checkpoint"
             )
 
+    if state["status"] == "complete" and latest.get("next_action") is not None:
+        errors.append(
+            f"{checkpoints_path}: complete task's final checkpoint must set "
+            f"next_action to null"
+        )
+
 
 def validate_repository(root: Path) -> list[str]:
     """Return all validation errors for the repository rooted at ``root``."""
