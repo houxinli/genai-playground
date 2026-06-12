@@ -1,5 +1,8 @@
 # 脚本整合总结
 
+> 本文记录现有脚本整合结果。未来 candidate/version/renderer 迁移方向以
+> [`../docs/system-design.md`](../docs/system-design.md) 为准。
+
 ## 已整合的脚本
 
 ### 1. file_manager.py (新整合脚本)
@@ -70,7 +73,7 @@ python file_manager.py cleanup --dir tasks/translation/data/pixiv/50235390 --dry
 ## 使用建议
 
 1. **日常翻译**: 使用 `./translate` 命令配合 `--bilingual-simple` 参数
-2. **质量提升**: 使用 `--repair-existing`（可选 `--repair-from-qa-report-dir`）对已有双语文件做局部修复
+2. **质量提升**: 通过主入口 `src/translate.py --repair-existing`（可选 `--repair-from-qa-report-dir`）对已有双语文件做局部修复
 3. **文件管理**: 使用 `file_manager.py` 进行文件重命名、列表查看、质量清理
 4. **数据获取**: 使用 `batch_download_v1.py` 从Pixiv下载小说
 5. **后处理**: 使用 `extract_chinese.py` 提取中文内容

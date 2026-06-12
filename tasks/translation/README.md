@@ -1,14 +1,17 @@
 # Translation Task
 
-当前翻译流水线分为 3 段：`下载 -> 翻译 -> 修复/清理`，支持 Pixiv 和 Fanbox 两条下载链路。
+当前生产流水线分为 3 段：`下载 -> 翻译 -> 修复/清理`，支持 Pixiv 和 Fanbox 两条下载链路。
+下一代 workspace/candidate/version/API+Agent 目标架构尚未切入生产，见
+[`docs/system-design.md`](docs/system-design.md)。
 
 开始前建议先看：
 
 - [`../../docs/PROJECT_STATUS.md`](../../docs/PROJECT_STATUS.md)：当前状态、组件健康度、开发计划
+- [`docs/system-design.md`](docs/system-design.md)：目标数据模型、API/Agent 双路线、多候选版本和迁移计划
 - [`../../docs/AGENT_CONTEXT.md`](../../docs/AGENT_CONTEXT.md)：稳定背景和常用约定
 - [`../../docs/journal/README.md`](../../docs/journal/README.md)：历史决策和问题记录
 
-这份 README 主要负责“怎么运行”，不是“当前优先级的真相源”。
+这份 README 只负责“当前怎么运行”，不是目标架构或当前优先级的真相源。
 
 ## 环境
 
@@ -32,7 +35,7 @@ tasks/translation/
 ├── scripts/fanbox_download.py         # Fanbox 终端下载
 ├── scripts/fanbox_browser_downloader.js # Fanbox 浏览器批量下载
 ├── scripts/fanbox_browser_snippet.js    # Fanbox 浏览器单篇下载
-├── scripts/repair_bilingual.py         # 增量修复双语文件
+├── scripts/repair_bilingual.py         # 历史 repair 入口，优先用 src/translate.py
 ├── scripts/convert_bilingual_to_simplified.py # 双语译文繁转简
 └── scripts/cleanup_bad_outputs.py      # 清理异常双语输出
 ```
@@ -175,7 +178,7 @@ conda run -n llm python tasks/translation/src/translate.py \
 
 这会自动读取同级 `*_bilingual/`，输出到 `*_bilingual_fixed/`。
 
-### 增量修复（高级覆盖参数）
+### 增量修复（历史兼容入口）
 
 ```bash
 conda run -n llm python tasks/translation/scripts/repair_bilingual.py \
@@ -184,6 +187,8 @@ conda run -n llm python tasks/translation/scripts/repair_bilingual.py \
   --output-dir tasks/translation/data/pixiv/50235390_bilingual_fixed \
   --repair-existing --bilingual-simple --stream
 ```
+
+该脚本只用于兼容旧操作或诊断。新调用统一走主入口 `src/translate.py --repair-existing`。
 
 ### 清理低质量 bilingual
 
@@ -218,6 +223,19 @@ conda run -n llm python tasks/translation/scripts/convert_bilingual_to_simplifie
   --output-dir tasks/translation/data/fanbox/momizi813_bilingual_simp \
   --backend opencc
 ```
+
+## 4. 目标工作流（尚未实现）
+
+目标系统会在保持当前 Make 入口兼容的前提下，逐步增加：
+
+- segment 级多个 candidate 和不可变 document version
+- OpenRouter/vLLM/MLX 批量 API 与 Codex/Claude Code/Cursor job bundle 双路线
+- 单篇与跨文本 entity/terminology 一致性
+- 用户标记某句话有问题并触发定向 review/repair
+- QA 后只接受明确改善的 repair candidate
+- 从确定版本渲染 bilingual/zh/package
+
+实现阶段、JSON/SQLite 边界和兼容策略见 [`docs/system-design.md`](docs/system-design.md)。
 
 ## 常用查看命令
 
