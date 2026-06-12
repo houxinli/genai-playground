@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-9-agent-bootstrap",
   "title": "agent task bootstrap 命令",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/agent-bootstrap-cli",
   "objective": "一条命令生成合法的 agent/tasks/<task-id>/ 骨架(state.json + 空 checkpoints.jsonl),立即通过 agent-validate,且拒绝同 branch 重复活动任务。",
   "github": {
     "issue": 9,
-    "pull_request": null
+    "pull_request": 12
   },
   "scope": {
     "in": [
@@ -76,7 +76,7 @@
     {
       "id": "S3",
       "title": "Makefile 与文档接入",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S2"
       ],
@@ -86,15 +86,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR、记录 PR 号到 github.pull_request,确认 CI 绿后置 status=complete、next_action=null,追加最终 checkpoint 并合并。",
-    "acceptance": [
-      "PR CI 绿且已合并",
-      "issue #9 关闭",
-      "state status=complete 且最终 checkpoint 与日志尾一致"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python scripts/validate_agent_tasks.py",
@@ -124,11 +116,15 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260612T073852Z-claude-code",
-    "timestamp": "2026-06-12T07:38:52Z",
+    "checkpoint_id": "cp-20260612T074050Z-claude-code",
+    "timestamp": "2026-06-12T07:40:50Z",
     "agent": "claude-code",
-    "summary": "S1-S3 交付完成,待 PR/CI/合并收尾",
-    "observed_head": "f0ed24d"
+    "summary": "任务完成,PR #12 待合并",
+    "observed_head": "20dd0cd"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 10,
+    "task_id": "gh-10-content-inventory",
+    "branch": "feat/content-inventory"
+  }
 }
