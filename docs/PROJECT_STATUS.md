@@ -58,7 +58,8 @@
 | 人名一致性 | 可用 | 支持人工规则优先、自动预读候选保存、正文 OpenRouter + 本地 vLLM/MLX 抽名的分离运行时 | `tasks/translation/src/core/translator.py` |
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
 | 目标系统设计 | 已完成设计 | 已定义 JSON/SQLite 边界、candidate/version、API/Agent 协议、用户 annotation、跨文本知识与迁移顺序；尚未实现 | `tasks/translation/docs/system-design.md` |
-| 开发 Agent 连续性 | 基础已落地 | 已定义 branch task state、checkpoint、继续/交接语义、JSON Schema、validator、CI 和 GitHub 模板；bootstrap 命令与 GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
+| 开发 Agent 连续性 | 基础已落地 | 协议、Schema、validator、CI、GitHub 模板与 `make agent-bootstrap` 已实现；GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
+| 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线；731 文件中 616 个含 error 级问题，坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
 | 多候选与版本 | 未实现 | 当前仍以单份 bilingual/fixed 文件作为主要结果 | 目标见系统设计 |
 | 翻译 Agent harness | 未实现 | 尚无统一翻译 task/result job export/import 协议 | 目标见系统设计 |
 | 用户句级反馈 | 未实现 | 尚不能持久化“某句话有问题”并触发定向修复 | 目标见系统设计 |
@@ -129,8 +130,9 @@
 - 当前没有规范化 `Document/Segment`，候选、QA、repair 和用户反馈只能围绕双语 TXT 工作。
 - 当前没有 candidate/version 模型，实验结果依赖多个目录名保存，难以比较、回滚和审计。
 - 当前没有统一 API/Agent job 协议，Codex/Claude Code/Cursor 无法可靠参与批量 review。
-- 开发任务的跨 Agent 协议已有 validator/CI，但还没有任务 bootstrap 命令和 GitHub 状态同步（#9）。
-- 存量内容库没有全库清单与 QA 基线，坏产物与游离文件混在数据目录中（#10）。
+- 开发任务的跨 Agent 协议还没有 GitHub 状态同步（bootstrap 命令已完成，#9）。
+- 存量 QA 基线显示 731 文件中 616 个含 error 级问题（假名残留、与原文相同、拒绝/失败标记），
+  逐条修复依赖 P1 的 candidate/repair 闭环；基线报告见 `logs/inventory/qa_baseline.json`。
 - 当前没有用户 annotation 生命周期和句级定向重译入口。
 - 人名规则尚未实体化、作用域化和版本化，同名跨系列冲突仍需人工避免。
 - 还没有内建的文件级并发调度器，批量任务提速仍依赖外部手动拆分。
@@ -143,9 +145,9 @@
 
 ### P0: 协议与数据基础
 
-1. 存量内容库盘点、QA 基线与坏产物隔离（#10）：全库状态清单、`--qa-only` 基线报告、
-   `*_broken_bak` 等坏产物隔离与处置记录，在 legacy 导入前完成。
-2. 为 `agent/tasks` 增加 bootstrap 命令（#9）和 GitHub 状态同步。
+1. ~~存量内容库盘点、QA 基线与坏产物隔离~~（#10，已完成 2026-06-12：`inventory_content.py` +
+   `qa_baseline.py`，3 个坏产物目录已隔离并记录 manifest）。
+2. 为 `agent/tasks` 增加 GitHub 状态同步（bootstrap 命令已完成，#9）。
 3. 固定 revision、candidate、evaluation、annotation、version、task、result 的 JSON Schema。
 4. 建立 Pixiv/Fanbox 最小 fixture、golden bilingual/zh 和 ID/hash 稳定性测试。
 5. 建立 source adapter、`DocumentRevision/Segment` 和 renderer 的 shadow path。
