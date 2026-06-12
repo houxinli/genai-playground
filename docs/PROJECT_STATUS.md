@@ -65,7 +65,7 @@
 | 用户句级反馈 | 未实现 | 尚不能持久化“某句话有问题”并触发定向修复 | 目标见系统设计 |
 | 跨文本知识库 | 未实现 | 当前主要依赖人工规则文件和单篇自动预读 | 目标见系统设计 |
 | 并发调度 | 缺口明显 | 当前仍主要依赖手工并行，没有内建 worker 调度器 | `tasks/translation/src/core/pipeline.py` |
-| 测试 | 基线健康 | `unittest discover` 当前为 50 个测试全绿 | `tasks/translation/src/**/*_test.py` |
+| 测试 | 基线健康 | pytest 统跑当前为 110 个测试全绿（unittest discover 会漏 pytest 风格用例） | `tasks/translation/src/**/*_test.py` |
 | Sunday Movies | 维护模式 | 仓库中保留，但当前不作为近期规划重点 | `tasks/sunday-movies/` |
 
 ## Recent Engineering Changes
@@ -187,7 +187,7 @@
 当前推荐的基础验证命令：
 
 ```bash
-conda run -n llm python -m unittest discover -s tasks/translation/src -t . -p "*_test.py"
+conda run -n llm python -m pytest tasks/translation/src -q
 ```
 
 如果只想回归本轮新增的关键测试：

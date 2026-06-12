@@ -18,6 +18,7 @@
 ## 📅 2026年
 
 ### 06月
+- [2026-06-12 CI 假绿修复:pytest 统跑与被遗漏的测试](./2026-06-12-ci-coverage.md)
 - [2026-06-12 存量内容库盘点、QA 基线与坏产物隔离](./2026-06-12-content-inventory.md)
 - [2026-06-12 task bootstrap 命令(首个 dogfood 任务收官)](./2026-06-12-agent-bootstrap.md)
 - [2026-06-12 主干收敛、harness 落地与首个 dogfood 任务](./2026-06-12-trunk-split.md)

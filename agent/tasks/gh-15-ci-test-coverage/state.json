@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-15-ci-test-coverage",
+  "title": "CI 假绿修复:pytest 风格测试与 sunday 离线套件",
+  "status": "active",
+  "branch": "fix/ci-test-coverage",
+  "objective": "CI 真实执行仓库全部离线测试:translation 改用 pytest 统跑(含 52 个 pytest 风格用例),sunday 补 3 套,pre-push 与 CI 一致,hooks 支持 worktree。",
+  "github": {
+    "issue": 15,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      ".github/workflows/tests.yml",
+      "scripts/git-hooks/ 与 install-git-hooks.sh",
+      "AGENTS.md/PROJECT_STATUS 基线表述",
+      "被新覆盖暴露的测试/收集器最小修复"
+    ],
+    "out": [
+      "新增测试用例",
+      "qa_gate/盘点脚本(#16/#17)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "translation 改 pytest 统跑并修复暴露的失败",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "pytest tasks/translation/src 110 全绿(含 52 个 pytest 风格用例)"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "sunday 补 3 套离线测试并修复暴露的 amc bug",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "5 套 sunday 离线 suite 全绿"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "hooks worktree 兼容 + CI/hook/文档一致",
+      "status": "in_progress",
+      "depends_on": [
+        "S1",
+        "S2"
+      ],
+      "acceptance": [
+        "install-git-hooks 实跑通过",
+        "pre-push 实跑通过",
+        "AGENTS/PROJECT_STATUS 基线更新"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR,CI 绿后置 complete 并合并;issue #15 随 PR 关闭。",
+    "acceptance": [
+      "PR CI 绿且已合并",
+      "issue #15 关闭"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "cd tasks/sunday-movies/src && conda run -n llm python -m unittest ratings.tests.utils_test ratings.tests.test_aggregator collectors.amc_test collectors.fandango_test ratings.tests.rottentomatoes_fetcher_test",
+      "bash scripts/git-hooks/pre-push"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "110 passed",
+        "timestamp": "2026-06-12T22:09:50Z"
+      },
+      {
+        "command": "cd tasks/sunday-movies/src && conda run -n llm python -m unittest ratings.tests.utils_test ratings.tests.test_aggregator collectors.amc_test collectors.fandango_test ratings.tests.rottentomatoes_fetcher_test",
+        "status": "passed",
+        "summary": "OK(amc 修复后)",
+        "timestamp": "2026-06-12T22:09:50Z"
+      },
+      {
+        "command": "bash scripts/git-hooks/pre-push",
+        "status": "passed",
+        "summary": "all fast tests passed",
+        "timestamp": "2026-06-12T22:09:50Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260612T220950Z-claude-code",
+    "timestamp": "2026-06-12T22:09:50Z",
+    "agent": "claude-code",
+    "summary": "S1-S3 交付完成,待 PR 收尾",
+    "observed_head": "7fa7e78"
+  },
+  "next_task": null
+}

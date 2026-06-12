@@ -100,7 +100,8 @@ class AMCShowtimeCollector:
             movie_title = title_element.get_text(strip=True)
 
             for button in movie_block.select("a[data-qa='showtime-button']"):
-                time_text = button.get_text(strip=True)
+                # 只取直接文本节点：按钮内嵌套的 <span class="Showtime__format"> 会污染时间文本
+                time_text = "".join(button.find_all(string=True, recursive=False)).strip()
                 try:
                     start_time = self._combine_date_time(date, time_text)
                 except ValueError:
