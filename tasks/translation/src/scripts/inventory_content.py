@@ -34,7 +34,9 @@ def inspect_content(text: str) -> str:
     if any(marker in text for marker in FAILURE_MARKERS):
         return "failed"
     if not text.strip():
-        return "missing"
+        # 与 TranslationStateStore.inspect_output 一致:文件存在但为空是 partial,
+        # missing 只表示文件不存在(review: PR #13)
+        return "partial"
     return "complete"
 
 
@@ -43,15 +45,16 @@ def _post_ids(directory: Path) -> List[str]:
 
 
 def _is_source_dir(directory: Path, sibling_names: List[str]) -> bool:
-    """源目录：含 .meta.json 是强信号；否则要求有 txt、无派生记号、且不是兄弟目录的派生。"""
+    """源目录：派生命名(_bilingual/_zh)优先排除——即使目录残留 .meta.json 边车文件
+    (review: PR #13);其余情况 .meta.json 是强信号,否则要求有 txt 且不是兄弟目录的派生。"""
     if directory.name in EXCLUDED_DIRS:
         return False
     if not any(directory.glob("*.txt")):
         return False
-    if any(directory.glob("*.meta.json")):
-        return True
     if DERIVED_TOKEN_PATTERN.search(directory.name):
         return False
+    if any(directory.glob("*.meta.json")):
+        return True
     return not any(
         directory.name.startswith(f"{other}_") for other in sibling_names if other != directory.name
     )

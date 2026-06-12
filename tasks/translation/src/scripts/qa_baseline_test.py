@@ -54,6 +54,16 @@ class QABaselineTest(unittest.TestCase):
             entry["issue_counts"],
         )
 
+    def test_packaged_top_level_bilingual_included(self):
+        (self.data / "111_bilingual.txt").write_text(
+            "こんにちは\n你好\n", encoding="utf-8"
+        )
+        (self.data / "111_zh.txt").write_text("你好\n", encoding="utf-8")  # zh 不纳入
+        baseline = build_baseline(self.data, ["pixiv"])
+        packaged = [e for e in baseline["dirs"] if e["collection"] == "(packaged)"]
+        self.assertEqual(["111_bilingual.txt"], [e["dir"] for e in packaged])
+        self.assertEqual(3, baseline["totals"]["files"])  # 2 目录内 + 1 打包
+
     def test_clean_dir_reports_zero_errors(self):
         baseline = build_baseline(self.data, ["pixiv"])
         total = baseline["totals"]

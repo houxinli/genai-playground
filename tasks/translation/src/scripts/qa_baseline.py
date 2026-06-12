@@ -20,29 +20,39 @@ except ImportError:  # 直接以脚本运行时
     from scripts.inventory_content import build_inventory
 
 
-def _qa_dir(
+def _qa_files(
     gate: TranslationQAGate,
-    derived_dir: Path,
-    source_dir: Path,
+    file_pairs: List[tuple],
 ) -> Dict[str, Any]:
+    """对 (output_path, source_path|None) 列表跑 gate 并聚合。"""
     issue_counts: Dict[str, int] = {}
     files_with_errors = 0
-    file_count = 0
-    for output_path in sorted(derived_dir.glob("*.txt")):
-        file_count += 1
-        source_path = source_dir / output_path.name
-        report = gate.run(output_path, source_path if source_path.exists() else None)
+    for output_path, source_path in file_pairs:
+        report = gate.run(output_path, source_path)
         if report.has_errors:
             files_with_errors += 1
         for issue in report.issues:
             key = f"{issue.code}:{issue.severity}"
             issue_counts[key] = issue_counts.get(key, 0) + 1
     return {
-        "dir": derived_dir.name,
-        "files": file_count,
+        "files": len(file_pairs),
         "files_with_errors": files_with_errors,
         "issue_counts": dict(sorted(issue_counts.items())),
     }
+
+
+def _qa_dir(
+    gate: TranslationQAGate,
+    derived_dir: Path,
+    source_dir: Path,
+) -> Dict[str, Any]:
+    pairs = []
+    for output_path in sorted(derived_dir.glob("*.txt")):
+        source_path = source_dir / output_path.name
+        pairs.append((output_path, source_path if source_path.exists() else None))
+    entry = _qa_files(gate, pairs)
+    entry["dir"] = derived_dir.name
+    return entry
 
 
 def build_baseline(data_root: Path, collections: List[str]) -> Dict[str, Any]:
@@ -62,6 +72,16 @@ def build_baseline(data_root: Path, collections: List[str]) -> Dict[str, Any]:
                 entry["collection"] = collection["root"]
                 entry["source"] = source["source"]
                 results.append(entry)
+
+    # 顶层打包的 bilingual 产物同样纳入基线(review: PR #13);打包文件无逐篇源,gate 走无源路径
+    for item in inventory["packaged_top_level"]:
+        if item["kind"] != "bilingual":
+            continue
+        entry = _qa_files(gate, [(data_root / item["file"], None)])
+        entry["dir"] = item["file"]
+        entry["collection"] = "(packaged)"
+        entry["source"] = item["matched_source"] or item["base"]
+        results.append(entry)
 
     total_issues: Dict[str, int] = {}
     for entry in results:

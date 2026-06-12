@@ -25,7 +25,7 @@ class InspectContentTest(unittest.TestCase):
         self.assertEqual("partial", inspect_content("a\n[翻译未完成]\nb"))
         self.assertEqual("failed", inspect_content("x[翻译失败]y"))
         self.assertEqual("failed", inspect_content("（以下省略）"))
-        self.assertEqual("missing", inspect_content("  \n "))
+        self.assertEqual("partial", inspect_content("  \n "))  # 与 inspect_output 一致:空文件=partial
         self.assertEqual("complete", inspect_content("原文\n译文"))
 
 
@@ -75,6 +75,15 @@ class ScanRootTest(unittest.TestCase):
         bak = next(d for d in entry["derived"] if d["name"].endswith("_broken_bak"))
         self.assertTrue(bak["quarantine_candidate"])
         self.assertEqual(["999_bilingual"], result["orphan_dirs"])
+
+    def test_derived_dir_with_meta_sidecar_is_not_source(self):
+        # 派生命名优先:_bilingual 目录即使残留 .meta.json 也不是源,且仍挂到真实源下
+        derived = self.root / "111_bilingual"
+        (derived / "a.meta.json").write_text("{}", encoding="utf-8")
+        result = scan_root(self.root)
+        self.assertEqual(["111"], [s["source"] for s in result["sources"]])
+        entry = result["sources"][0]
+        self.assertIn("111_bilingual", [d["name"] for d in entry["derived"]])
 
     def test_excluded_dirs_are_not_sources(self):
         result = scan_root(self.root)
