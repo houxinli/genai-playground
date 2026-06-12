@@ -124,30 +124,52 @@ def _parse_bilingual_body(body_lines: List[str], line_offset: int = 0) -> Tuple[
     return pairs, issues
 
 
-def _align_pairs_to_source_body(pairs: List[QAPair], source_text: str) -> List[QAPair]:
-    """Map bilingual source lines back to source-body indices when the source file is available."""
+def _align_pairs_to_source_body(
+    pairs: List[QAPair], source_text: str
+) -> Tuple[List[QAPair], List[QAIssue]]:
+    """Map bilingual source lines back to source-body indices when the source file is available.
+
+    被跳过或尾部未消费的非空源行说明输出缺失配对(常见于截断),必须报 error 而非静默放过。
+    """
+    issues: List[QAIssue] = []
     if not source_text:
-        return pairs
+        return pairs, issues
     _, source_body = _split_front_matter(source_text.splitlines())
     if not source_body:
-        return pairs
+        return pairs, issues
+
+    def _missing(idx: int) -> QAIssue:
+        return QAIssue(
+            code="missing_pair",
+            message="源文件原文行在输出中没有配对(可能截断或漏行)",
+            severity="error",
+            line=idx + 1,
+            detail={"source": source_body[idx].strip()},
+        )
+
     aligned: List[QAPair] = []
     source_idx = 0
     for pair in pairs:
         normalized_source = pair.source.strip()
         matched_idx: Optional[int] = None
-        while source_idx < len(source_body):
-            if not source_body[source_idx].strip():
-                source_idx += 1
+        skipped: List[int] = []
+        probe = source_idx
+        while probe < len(source_body):
+            line = source_body[probe].strip()
+            if not line:
+                probe += 1
                 continue
-            if source_body[source_idx].strip() == normalized_source:
-                matched_idx = source_idx
-                source_idx += 1
+            if line == normalized_source:
+                matched_idx = probe
                 break
-            source_idx += 1
+            skipped.append(probe)
+            probe += 1
         if matched_idx is None:
+            # 输出侧多出的原文行:保留原 pair,不消费源游标,避免后续整体错位
             aligned.append(pair)
             continue
+        issues.extend(_missing(idx) for idx in skipped)
+        source_idx = matched_idx + 1
         aligned.append(
             QAPair(
                 source_body_index=matched_idx,
@@ -158,7 +180,10 @@ def _align_pairs_to_source_body(pairs: List[QAPair], source_text: str) -> List[Q
                 translation=pair.translation,
             )
         )
-    return aligned
+    issues.extend(
+        _missing(idx) for idx in range(source_idx, len(source_body)) if source_body[idx].strip()
+    )
+    return aligned, issues
 
 
 def _load_name_aliases(path: Optional[Path]) -> Dict[str, List[str]]:
@@ -240,7 +265,8 @@ class TranslationQAGate:
         output_lines = output_text.splitlines()
         front_matter_lines, body_lines = _split_front_matter(output_lines)
         pairs, issues = _parse_bilingual_body(body_lines, line_offset=len(front_matter_lines))
-        pairs = _align_pairs_to_source_body(pairs, source_text)
+        pairs, alignment_issues = _align_pairs_to_source_body(pairs, source_text)
+        issues.extend(alignment_issues)
         issues.extend(_metadata_issues(source_text, output_text))
 
         for pair in pairs:

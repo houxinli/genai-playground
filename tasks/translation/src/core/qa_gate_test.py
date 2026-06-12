@@ -30,6 +30,38 @@ class TranslationQAGateTest(unittest.TestCase):
             self.assertEqual(report.status, "pass")
             self.assertEqual(report.summary["errors"], 0)
 
+    def test_detects_missing_pair_in_middle(self) -> None:
+        # 源行 A,B,C;输出只有 A、C 的配对 → B 必须报 missing_pair error
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source = base / "src.txt"
+            output = base / "out.txt"
+            source.write_text("行A\n行B\n行C\n", encoding="utf-8")
+            output.write_text("行A\n译A\n\n行C\n译C\n", encoding="utf-8")
+
+            report = TranslationQAGate().run(output, source)
+
+            missing = [i for i in report.issues if i.code == "missing_pair"]
+            self.assertEqual(1, len(missing))
+            self.assertEqual("error", missing[0].severity)
+            self.assertEqual("行B", missing[0].detail["source"])
+            self.assertTrue(report.has_errors)
+
+    def test_detects_truncated_tail(self) -> None:
+        # 输出在中途截断:尾部未消费的源行必须全部报 missing_pair
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source = base / "src.txt"
+            output = base / "out.txt"
+            source.write_text("行A\n行B\n行C\n行D\n", encoding="utf-8")
+            output.write_text("行A\n译A\n", encoding="utf-8")
+
+            report = TranslationQAGate().run(output, source)
+
+            missing = [i.detail["source"] for i in report.issues if i.code == "missing_pair"]
+            self.assertEqual(["行B", "行C", "行D"], missing)
+            self.assertTrue(report.has_errors)
+
     def test_detects_kana_placeholders_refusal_and_name_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
