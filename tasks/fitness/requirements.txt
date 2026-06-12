@@ -1,0 +1,2 @@
+# No third-party dependencies — standard library only (csv, json, re, datetime).
+# Charts are emitted as plain SVG so nothing here needs matplotlib/pandas.
