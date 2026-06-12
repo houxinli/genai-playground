@@ -202,6 +202,10 @@ canonical artifact 使用完整对象文件；高频运行事件可以使用 app
 3. `flush/fsync` 后原子 rename。
 4. 不覆盖已存在且 digest 不同的不可变对象。
 5. 更新 `refs/current.json` 时使用 expected-parent compare-and-swap，防止两个 reviewer 互相覆盖。
+   注意：临时文件 + 原子 rename 本身不能让"检查 expected parent 再替换"成为原子操作——两个
+   写入者可能同时通过检查后相互覆盖。CAS 必须在持有互斥的前提下执行：用同目录文件锁
+   （`flock`/`O_EXCL` lockfile）或 SQLite 事务把"读 parent → 比较 → rename"包成临界区；
+   比较失败者必须放弃写入并走冲突分叉流程，而不是重试覆盖。
 
 canonical JSON 的排序、Unicode 和数字规则必须固定。可采用 RFC 8785/JCS，或在项目内定义并测试等价的
 UTF-8、sorted-key、无浮点歧义序列化规则。
@@ -612,6 +616,18 @@ entity linking 证据应保存：
 
 `result_candidate_key` 只在当前 result 内引用。canonical `candidate_id` 必须由 importer 分配，
 不能信任 Agent 或外部 executor 自行生成的 ID。`rationale` 仅用于 review，不拼接进译文。
+
+导入必须幂等：同一 `result.json` 因 importer 崩溃恢复、任务重试或索引重建而再次导入时，
+不得生成重复 candidate。为此 `candidate_id` 由结果身份确定性派生：
+
+```text
+candidate_id = "cand_" + sha256(task_digest + ":" + result_candidate_key + ":" + segment_id)[:16]
+```
+
+`task_digest` 与 `result_candidate_key` 同时作为字段持久化在 Candidate 工件内，
+索引层对 `(task_digest, result_candidate_key, segment_id)` 施加唯一约束；
+重复导入命中已有 candidate 时跳过写入并返回原 ID（与 §4 "不覆盖已存在且 digest 不同的
+不可变对象"一致——同 ID 不同内容视为损坏，必须报错而非覆盖）。
 
 ## 10. API 与 Harness 双路线
 
