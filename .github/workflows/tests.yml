@@ -38,8 +38,9 @@ jobs:
       - name: Design-doc coupling (PR only)
         if: github.event_name == 'pull_request'
         run: |
-          git fetch origin "${{ github.base_ref }}" --depth=1
-          CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          git fetch origin "${{ github.base_ref }}" --depth=1 || exit 0
+          # 两参 diff 直接比两棵树,浅克隆也成立(三点 diff 需 merge-base)
+          CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}" HEAD) || exit 0
           NEEDS_DESIGN=$(echo "$CHANGED" | grep -E '^tasks/translation/schemas/|^tasks/translation/src/core/[^/]+\.py$' | grep -v '_test\.py' || true)
           TOUCHED_DESIGN=$(echo "$CHANGED" | grep -E '^tasks/translation/docs/system-design\.md$|^docs/PROJECT_STATUS\.md$' || true)
           if [ -n "$NEEDS_DESIGN" ] && [ -z "$TOUCHED_DESIGN" ]; then
