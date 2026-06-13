@@ -1,0 +1,26 @@
+---
+novel_id: 700001
+title: 朝の挨拶
+title: 早晨的问候
+caption: テスト用の短い文章です。
+caption: 用于测试的简短文章。
+author:
+  id: 700000
+  name: テスト作者
+  account: user_testpixiv
+series:
+  id: None
+  title: 
+  order: None
+tags: [テスト, 日常]
+x_restrict: 0
+create_date: 2026-01-01T09:00:00+09:00
+update_date: 
+source_url: https://www.pixiv.net/novel/show.php?id=700001
+lang: ja
+---
+「おはよう」
+「早上好」
+
+今日はいい天気だ。
+今天天气真好。
