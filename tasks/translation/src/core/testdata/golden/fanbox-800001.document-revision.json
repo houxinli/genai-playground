@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "document_id": "fanbox:800000:800001",
-  "revision_id": "rev_1a7aa0769861d62f6a38c9c2fdff02c94aa323871c3c632e1584275bc0638aca",
+  "revision_id": "rev_d153b812e796af3766ab91837dd7eabe408efdfcd533548f17cc5a0a0cb82da4",
   "source": {
     "provider": "fanbox",
     "creator_id": "800000",
@@ -11,33 +11,41 @@
   "metadata": {
     "title": "散歩",
     "caption": "フィクスチャ用のサンプル。",
+    "tags": "[テスト, 散歩]",
     "published_at": "2026-02-02T10:00:00+09:00"
   },
   "segments": [
     {
-      "segment_id": "rev_1a7aa0769861d62f6a38c9c2fdff02c94aa323871c3c632e1584275bc0638aca:000000:39f6833d",
+      "segment_id": "rev_d153b812e796af3766ab91837dd7eabe408efdfcd533548f17cc5a0a0cb82da4:000000:39f6833d",
       "ordinal": 0,
       "kind": "metadata.title",
       "source_text": "散歩",
       "source_hash": "39f6833d3a96a5b1fb813e364044312a009984441f1cd3d31cf78c815a3e4dca"
     },
     {
-      "segment_id": "rev_1a7aa0769861d62f6a38c9c2fdff02c94aa323871c3c632e1584275bc0638aca:000001:784ff18d",
+      "segment_id": "rev_d153b812e796af3766ab91837dd7eabe408efdfcd533548f17cc5a0a0cb82da4:000001:784ff18d",
       "ordinal": 1,
       "kind": "metadata.caption",
       "source_text": "フィクスチャ用のサンプル。",
       "source_hash": "784ff18de2351b106c052484e17e5eb673a4b8d41ee5fd3807d38950e974013b"
     },
     {
-      "segment_id": "rev_1a7aa0769861d62f6a38c9c2fdff02c94aa323871c3c632e1584275bc0638aca:000002:04772e4c",
+      "segment_id": "rev_d153b812e796af3766ab91837dd7eabe408efdfcd533548f17cc5a0a0cb82da4:000002:d32f05c0",
       "ordinal": 2,
+      "kind": "metadata.tags",
+      "source_text": "[テスト, 散歩]",
+      "source_hash": "d32f05c024b54b90392b7c84e5e91b777970605130b3dbeef67e937c3d8795dc"
+    },
+    {
+      "segment_id": "rev_d153b812e796af3766ab91837dd7eabe408efdfcd533548f17cc5a0a0cb82da4:000003:04772e4c",
+      "ordinal": 3,
       "kind": "body",
       "source_text": "公園を歩いた。",
       "source_hash": "04772e4c4e0262af1665b3c807bbf7e8f8f2631ec6a5efd78e22314541c7d192"
     },
     {
-      "segment_id": "rev_1a7aa0769861d62f6a38c9c2fdff02c94aa323871c3c632e1584275bc0638aca:000003:c09f2ac0",
-      "ordinal": 3,
+      "segment_id": "rev_d153b812e796af3766ab91837dd7eabe408efdfcd533548f17cc5a0a0cb82da4:000004:c09f2ac0",
+      "ordinal": 4,
       "kind": "body",
       "source_text": "犬がいた。",
       "source_hash": "c09f2ac01931c97772433b62a57e6bf4460501507c69d8bca9d1cf0385dbb8d4"

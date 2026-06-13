@@ -47,28 +47,46 @@ def render_bilingual(revision: Dict[str, Any], source_text: str, translations: D
             raise KeyError(f"missing translation for segment {key}")
         return translations[key]
 
-    # 可翻译 front matter 键 -> 对应 metadata segment kind
-    paired_keys = {"title": "metadata.title", caption_key: "metadata.caption"}
+    # 顶层可翻译键 -> metadata segment kind(复刻旧流水线 pipeline.py 的配对集合)
+    top_keys = {"title": "metadata.title", caption_key: "metadata.caption", "tags": "metadata.tags"}
 
     out: List[str] = []
     front, body = _split_front_matter(source_text)
     if front is not None:
+        in_series = False
         for line in front:
             out.append(line)
             stripped = line.lstrip()
-            if line == stripped:  # 仅顶层键参与配对
-                key = stripped.split(":", 1)[0] if ":" in stripped else ""
-                kind = paired_keys.get(key)
+            indent = line[: len(line) - len(stripped)]
+            key = stripped.split(":", 1)[0] if ":" in stripped else ""
+            if not indent:  # 顶层键
+                in_series = key == "series"
+                kind = top_keys.get(key)
                 if kind and kind in segs_by_kind:
                     out.append(f"{key}: {_tr(segs_by_kind[kind])}")
+            elif in_series and key == "title" and "metadata.series_title" in segs_by_kind:
+                # series.title 在缩进层配对,沿用源行缩进
+                out.append(f"{indent}title: {_tr(segs_by_kind['metadata.series_title'])}")
 
     body_idx = 0
     for line in body:
         if not line.strip():
             out.append(line)
             continue
+        if body_idx >= len(body_segs):
+            raise ValueError("source_text has more body lines than revision segments")
+        seg = body_segs[body_idx]
+        if line.strip() != seg["source_text"]:
+            raise ValueError(
+                f"source line {body_idx} does not match revision segment "
+                f"{seg['segment_id']}: {line.strip()!r} != {seg['source_text']!r}"
+            )
         out.append(line)
-        out.append(_tr(body_segs[body_idx]))
+        out.append(_tr(seg))
         body_idx += 1
+    if body_idx != len(body_segs):
+        raise ValueError(
+            f"source_text consumed {body_idx} body lines but revision has {len(body_segs)} segments"
+        )
 
     return "\n".join(out) + "\n"

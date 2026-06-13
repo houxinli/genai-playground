@@ -9,9 +9,10 @@
 
 - `source_adapter.py`:源目录 → DocumentRevision 列表(枚举 .txt、排除 .meta.json,委托 source_identity)。
 - `renderer.py::render_bilingual`:revision + 逐 segment 译文 → bilingual,复刻现有格式——
-  front matter 里 title、caption/excerpt 的译文行紧跟源行插入(provider 感知:pixiv caption /
-  fanbox excerpt),其余键透传;正文每个非空源行后紧跟译文,源空行结构原样保留。
-- golden `*.render.bilingual.txt` + 7 测试(逐字节匹配、配对、空行保留、缺译文报错、adapter)。
+  front matter 里 title、caption/excerpt(provider 感知)、series.title(缩进层)、tags 的译文行紧跟
+  源行插入,其余键透传;正文每个非空源行后紧跟译文,源空行结构原样保留;渲染前按 source_text 校验
+  每行与 revision 匹配,行数不符报错。
+- golden `*.render.bilingual.txt` + 测试(逐字节匹配、配对、空行保留、缺译文报错、adapter)。
 
 ## 决策(已记入 PR)
 

@@ -62,6 +62,14 @@ def _coerce(value: Any) -> Any:
     return value
 
 
+def _tags_text(meta: Dict[str, Any]) -> str | None:
+    """把 tags(YAML 解析成 list)还原成源行内的方括号形式,无 tags 返回 None。"""
+    tags = meta.get("tags")
+    if not isinstance(tags, list) or not tags:
+        return None
+    return "[" + ", ".join(str(t).strip() for t in tags) + "]"
+
+
 def _structured_metadata(provider: str, meta: Dict[str, Any]) -> Dict[str, Any]:
     """按 provider 映射出参与身份的稳定 metadata,统一成 provider 无关的键。"""
     spec = _PROVIDER_SPEC[provider]
@@ -70,10 +78,11 @@ def _structured_metadata(provider: str, meta: Dict[str, Any]) -> Dict[str, Any]:
         "title": _coerce(meta.get("title")),
         "caption": _coerce(meta.get(spec["caption_key"])),
         "series_title": (_coerce(series.get("title")) or None),
+        "tags": _tags_text(meta),
         "published_at": _coerce(meta.get(spec["published_key"])),
         "updated_at": _coerce(meta.get(spec["updated_key"])),
     }
-    return {k: v for k, v in out.items() if v not in (None, "")}
+    return {k: v for k, v in out.items() if v not in (None, "", [])}
 
 
 def parse_source(path: Path) -> Tuple[Dict[str, Any], List[str]]:
@@ -146,6 +155,8 @@ def build_document_revision(provider: str, path: Path) -> Dict[str, Any]:
         _emit("metadata.caption", structured["caption"])
     if structured.get("series_title"):
         _emit("metadata.series_title", structured["series_title"])
+    if structured.get("tags"):
+        _emit("metadata.tags", structured["tags"])
     for line in body_lines:
         _emit("body", line)
 
