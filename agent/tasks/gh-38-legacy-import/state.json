@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-38-legacy-import",
+  "title": "legacy candidate 导入:存量 bilingual/fixed 入新模型(P0.6)",
+  "status": "active",
+  "branch": "feat/legacy-import",
+  "objective": "把现有 bilingual/fixed/v2/namefix 目录按显式目录标签导入为 legacy Candidate(确定性幂等、不按目录名猜质量、隔离区不导入),迁移不丢历史;以 source_identity/adapter 建 revision,反解 bilingual 得逐 segment 译文。",
+  "github": {
+    "issue": 38,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/legacy_import.py(+test)",
+      "PROJECT_STATUS/journal"
+    ],
+    "out": [
+      "result 导入(#44)",
+      "QA/version/select 闭环(P1)",
+      "candidate 文本去重"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "bilingual 反解 + legacy candidate 构建",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "parse_bilingual_translations 恢复逐 segment 译文;build_legacy_candidates schema 合法、确定性 id"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "幂等写入 + 目录导入报告 + 真实冒烟",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "write_candidates 幂等;import_directory 报告;真实 momizi813 跑通;6 测试;全量 158"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "文档同步与 PR 收尾",
+      "status": "in_progress",
+      "depends_on": [
+        "S1",
+        "S2"
+      ],
+      "acceptance": [
+        "PROJECT_STATUS/journal;三渠道 triage;CI 绿;合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR,三渠道 triage,CI 绿后合并。",
+    "acceptance": [
+      "PR 合并,issue #38 关闭"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "158 passed(152+6)",
+        "timestamp": "2026-06-13T06:10:16Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260613T061016Z-claude-code",
+    "timestamp": "2026-06-13T06:10:16Z",
+    "agent": "claude-code",
+    "summary": "S1-S2 完成,待 PR 收尾",
+    "observed_head": "3c0f4d0"
+  },
+  "next_task": null
+}
