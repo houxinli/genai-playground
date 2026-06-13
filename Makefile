@@ -229,6 +229,19 @@ agent-bootstrap:
 		--title "$(TITLE)" --objective "$(OBJECTIVE)" $(if $(ISSUE),--issue $(ISSUE))
 
 
+# ============ 候选导入(新架构) ============
+.PHONY: legacy-import import-result
+
+# 存量 bilingual → legacy candidate。用法: make legacy-import PROVIDER=fanbox SOURCE=... BILINGUAL=... LABEL=... STORE=...
+legacy-import:
+	$(PY) tasks/translation/src/core/legacy_import.py --provider "$(PROVIDER)" \
+		--source "$(SOURCE)" --bilingual "$(BILINGUAL)" --label "$(LABEL)" --store "$(STORE)"
+
+# Task+Result → candidate。用法: make import-result TASK=task.json RESULT=result.json STORE=...
+import-result:
+	$(PY) tasks/translation/src/core/result_import.py --task "$(TASK)" --result "$(RESULT)" --store "$(STORE)"
+
+
 # ============ 健身记录 (tasks/fitness) ============
 FITNESS_PY := conda run -n $(CONDA_ENV) python tasks/fitness/src/cli.py
 export EXERCISE ?=

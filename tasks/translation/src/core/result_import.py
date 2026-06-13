@@ -37,8 +37,14 @@ except ImportError:  # 作为脚本运行
     from core.legacy_import import write_candidates
 
 
+# Agent/API 的 Result 是不可信输入(system-design §16):限制大小与数量,防止内存/磁盘耗尽。
+MAX_RESULT_BYTES = 8 * 1024 * 1024
+MAX_CANDIDATES = 10_000
+MAX_TEXT_LEN = 50_000
+
+
 class QuarantineError(Exception):
-    """Result 与 Task 不匹配(stale),整份进 quarantine,不导入。"""
+    """Result 与 Task 不匹配/超限/重复(不可信输入),整份进 quarantine,不导入。"""
 
     def __init__(self, reasons: List[str]):
         super().__init__("; ".join(reasons))
@@ -55,6 +61,21 @@ def build_candidates_from_result(task: Dict[str, Any], result: Dict[str, Any]) -
     stale = check_result_against_task(task, result)
     if stale:
         raise QuarantineError(stale)
+
+    entries = result["candidates"]
+    if len(entries) > MAX_CANDIDATES:
+        raise QuarantineError([f"too many candidates: {len(entries)} > {MAX_CANDIDATES}"])
+    seen_keys = set()
+    oversized = []
+    for entry in entries:
+        composite = (entry["result_candidate_key"], entry["segment_id"])
+        if composite in seen_keys:
+            raise QuarantineError([f"duplicate (result_candidate_key, segment_id): {composite}"])
+        seen_keys.add(composite)
+        if len(entry["text"]) > MAX_TEXT_LEN:
+            oversized.append(entry["segment_id"])
+    if oversized:
+        raise QuarantineError([f"candidate text exceeds {MAX_TEXT_LEN} chars: {oversized}"])
 
     task_digest = result["task_digest"]
     result_digest = canonical_digest(result)
@@ -115,8 +136,11 @@ def import_result(task: Dict[str, Any], result: Dict[str, Any], store_dir: Path)
     }
 
 
-def _load(path: Path) -> Dict[str, Any]:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+def _load(path: Path, max_bytes: int | None = None) -> Dict[str, Any]:
+    path = Path(path)
+    if max_bytes is not None and path.stat().st_size > max_bytes:
+        raise QuarantineError([f"{path}: file exceeds {max_bytes} bytes"])
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def main() -> int:
@@ -126,7 +150,14 @@ def main() -> int:
     parser.add_argument("--store", required=True, type=Path)
     args = parser.parse_args()
 
-    report = import_result(_load(args.task), _load(args.result), args.store)
+    try:
+        task = _load(args.task, MAX_RESULT_BYTES)
+        result = _load(args.result, MAX_RESULT_BYTES)
+    except QuarantineError as exc:
+        for reason in exc.reasons:
+            print(f"- {reason}", file=sys.stderr)
+        return 1
+    report = import_result(task, result, args.store)
     if report["quarantined"]:
         print("quarantined:", file=sys.stderr)
         for reason in report["reasons"]:

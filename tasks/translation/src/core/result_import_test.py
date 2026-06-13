@@ -104,5 +104,32 @@ class ImportResultTest(unittest.TestCase):
         self.assertEqual(a, b)
 
 
+    def test_duplicate_candidate_key_quarantined_before_write(self):
+        result = make_result()
+        dup = dict(result["candidates"][0]); dup["text"] = "不同文本"
+        result["candidates"].append(dup)  # 同 (key, segment) 不同文本
+        result["task_digest"] = canonical_digest(make_task())  # 保持对齐
+        # 重算 task_digest 不变(task 未变);触发重复键检查
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp)
+            report = ri.import_result(make_task(), result, store)
+            self.assertTrue(report["quarantined"])
+            self.assertTrue(any("duplicate" in r for r in report["reasons"]))
+            self.assertEqual([], list(store.glob("*.json")))  # 写入前拒绝,零落盘
+
+    def test_oversized_text_quarantined(self):
+        result = make_result("x" * (ri.MAX_TEXT_LEN + 1))
+        report = ri.import_result(make_task(), result, Path("/unused"))
+        self.assertTrue(report["quarantined"])
+        self.assertTrue(any("exceeds" in r for r in report["reasons"]))
+
+    def test_oversized_file_rejected_on_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            big = Path(tmp) / "big.json"
+            big.write_text("{}" + " " * 100, encoding="utf-8")
+            with self.assertRaises(ri.QuarantineError):
+                ri._load(big, max_bytes=10)
+
+
 if __name__ == "__main__":
     unittest.main()
