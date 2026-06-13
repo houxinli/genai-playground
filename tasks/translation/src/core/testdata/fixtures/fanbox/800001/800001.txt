@@ -1,20 +1,17 @@
 ---
 post_id: 800001
 title: 散歩
-caption: フィクスチャ用のサンプル。
-author:
+excerpt: フィクスチャ用のサンプル。
+creator:
   id: 800000
   name: テスト作者
-  account: user_testfanbox
-series:
-  id: None
-  title: 
-  order: None
+fee_required: 0
+is_restricted: False
+published_at: 2026-02-02T10:00:00+09:00
+updated_at: 
+body_type: article
 tags: [テスト, 散歩]
-x_restrict: 0
-create_date: 2026-02-02T10:00:00+09:00
-update_date: 
-source_url: https://www.fanbox.cc/@user_testfanbox/posts/800001
+source_url: https://user_testfanbox.fanbox.cc/posts/800001
 lang: ja
 ---
 公園を歩いた。

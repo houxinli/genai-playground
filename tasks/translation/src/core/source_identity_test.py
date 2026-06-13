@@ -34,7 +34,7 @@ CASES = {
     "fanbox-800001": {
         "provider": "fanbox",
         "source": FIXTURES / "fanbox" / "800001" / "800001.txt",
-        "revision_id": "rev_399e1d2cc9ffffc9f12f3ae10f4e9c1a26c6dea0b6cbe5b8722f706e58f3abe7",
+        "revision_id": "rev_1a7aa0769861d62f6a38c9c2fdff02c94aa323871c3c632e1584275bc0638aca",
     },
 }
 
@@ -97,6 +97,28 @@ class RevisionStabilityTest(unittest.TestCase):
         with mock.patch.object(si, "SEGMENTATION_VERSION", "nonempty-lines-v2"):
             bumped = si.compute_revision_id(case["provider"], meta, body)
         self.assertNotEqual(case["revision_id"], bumped)
+
+
+class ProviderIdentityTest(unittest.TestCase):
+    def test_provider_specific_creator_and_metadata(self):
+        # Fanbox 读 creator.id 与 excerpt/published_at(非 Pixiv 的 author.id/caption/create_date)
+        art = si.build_document_revision("fanbox", CASES["fanbox-800001"]["source"])
+        self.assertEqual("fanbox:800000:800001", art["document_id"])
+        self.assertEqual("800000", art["source"]["creator_id"])
+        self.assertIn("published_at", art["metadata"])
+        self.assertEqual("フィクスチャ用のサンプル。", art["metadata"]["caption"])
+        # Pixiv 读 author.id
+        art_p = si.build_document_revision("pixiv", CASES["pixiv-700001"]["source"])
+        self.assertEqual("pixiv:700000:700001", art_p["document_id"])
+
+    def test_missing_creator_id_raises(self):
+        meta = {"post_id": "800001", "title": "x", "creator": {"name": "no-id"}}
+        with self.assertRaises(ValueError):
+            si._identity("fanbox", meta)
+        # 字符串 "None" 也必须被拒绝,不得污染身份
+        meta2 = {"novel_id": "1", "author": {"id": None}}
+        with self.assertRaises(ValueError):
+            si._identity("pixiv", meta2)
 
 
 class GoldenRenderConsistencyTest(unittest.TestCase):
