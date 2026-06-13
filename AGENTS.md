@@ -39,7 +39,7 @@
   ```bash
   conda run -n llm python -m pytest tasks/translation/src -q
   ```
-  当前 baseline 是 110 测试全绿，PR 合入前必须保持 ≥ 此基线。
+  当前 baseline 是 186 测试全绿，PR 合入前必须保持 ≥ 此基线。
   （必须用 pytest 统跑：`unittest discover` 不执行 parser/prompt 下的 pytest 风格用例，会假绿。）
 
 ## 3. 编码风格
@@ -122,6 +122,8 @@
 - 长任务和跨会话进度用 `agent/tasks/<task-id>/state.json` 与 append-only `checkpoints.jsonl`
   跟踪；不要用聊天记忆、journal 或 `PROJECT_STATUS.md` 代替执行游标。
 - **每个合并的 PR 配一条 journal**（`docs/journal/YYYY-MM-DD.md` + 索引），记录动机、改动、验证、后续。
+- 连续完成 3–5 个同一架构链路 PR 或跨越 Phase 边界时，必须单独做一次
+  `system-design` / `PROJECT_STATUS` / GitHub issue reconcile，不能只追加 journal。
 
 ### Commit
 
