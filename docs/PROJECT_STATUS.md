@@ -57,6 +57,7 @@
 | 质量检测 | 可用 | 规则 QC + LLM QC 可工作；新增硬规则 QA gate，可检查双语配对、假名残留、拒绝模板、失败标记和人名坏别名 | `tasks/translation/src/core/qa_gate.py` |
 | 人名一致性 | 可用 | 支持人工规则优先、自动预读候选保存、正文 OpenRouter + 本地 vLLM/MLX 抽名的分离运行时 | `tasks/translation/src/core/translator.py` |
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
+| Legacy 导入 | 已完成 | bilingual 反解 → legacy Candidate(目录标签区分、确定性幂等、截断容错),真实 momizi813 跑通 | `tasks/translation/src/core/legacy_import.py` |
 | Source adapter / renderer | 部分完成 | 目录→DocumentRevision 适配 + bilingual shadow renderer(与现格式逐字节一致,golden 验证);zh renderer 待做(#42) | `tasks/translation/src/core/source_adapter.py` |
 | Fixture/Golden 底座 | 已完成 | 合成脱敏 Pixiv/Fanbox fixture、golden document-revision/bilingual/zh、revision/segment ID pin 稳定性测试 | `tasks/translation/src/core/testdata/` |
 | 业务工件 Schema | 已完成 | 七类工件 JSON Schema(candidate v2 含幂等键)、validate/round-trip/stale-result 测试、CLI 校验入口 | `tasks/translation/schemas/` |
@@ -160,7 +161,7 @@
 3. ~~固定 revision、candidate、evaluation、annotation、version、task、result 的 JSON Schema~~（#35，已完成 2026-06-13：`tasks/translation/schemas/` 七类 schema + 校验入口 + 15 个测试）。
 4. ~~建立 Pixiv/Fanbox 最小 fixture、golden bilingual/zh 和 ID/hash 稳定性测试~~（#36，已完成 2026-06-13：`src/core/testdata/` 合成 fixture + golden + `source_identity.py` 稳定性测试）。
 5. source adapter + `DocumentRevision/Segment` + renderer shadow path（#37：adapter 与 bilingual renderer 已完成,zh renderer 拆为 #42）。
-6. 支持把现有 bilingual/fixed 文件导入为 legacy candidate，确保迁移不丢历史（以 1 的清单为输入）。
+6. ~~支持把现有 bilingual/fixed 文件导入为 legacy candidate~~（#38，已完成 2026-06-13：`legacy_import.py`,按目录标签确定性幂等导入,真实 momizi813 一篇 159 candidate 跑通）。
 
 ### P1: 多候选、版本与非破坏性闭环
 
