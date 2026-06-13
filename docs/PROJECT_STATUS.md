@@ -3,7 +3,7 @@
 > 当前项目状态、组件健康度和开发计划的真相源。
 > 新的 agent / 新的对话优先读这份文档，再进入具体子系统文档。
 
-**最后更新**: 2026-06-12
+**最后更新**: 2026-06-13
 
 ## Start Here
 
@@ -23,14 +23,20 @@
 - `tasks/sunday-movies` 仍在仓库内，但当前处于维护模式，不是近期主要开发方向。
 - 常用运行环境是 `conda` 的 `llm` 环境。
 - 当前生产路径仍是“下载 -> 翻译 -> 修复/清理 -> 打包”。
-- 下一阶段的架构目标已收敛为：JSON 规范工件 + 可重建 SQLite 索引、segment 多候选版本、
-  API/Agent 双执行路线、用户 annotation 与非破坏性 repair。
+- Schema、DocumentRevision/Segment、candidate 导入、translate Task/Result 往返和 candidate QA
+  已进入主干；下一步是把候选安全地变成可审计 `DocumentVersion`。
 - 开发侧已定义 Codex/Claude Code/Cursor 共用的 branch-level task state 与 append-only checkpoint 协议。
 
 ## Current Focus
 
-当前目标是先建立新的文档/segment/candidate/version 基础，再在其上实现 QA 闭环、Agent harness、
-跨文本一致性、并发调度和用户 review。完整目标设计见
+当前目标从“继续补协议”转为“完成第一个安全 vertical slice”：
+
+```text
+source -> revision -> legacy/new candidates -> evaluations
+       -> conservative recommendation -> draft version -> bilingual/zh
+```
+
+完整目标设计与 2026-06-13 实施检查点见
 [`tasks/translation/docs/system-design.md`](../tasks/translation/docs/system-design.md)。
 
 开发任务本身的跨会话上下文由 [`AGENT_WORKFLOW.md`](AGENT_WORKFLOW.md) 和 `agent/tasks/` 管理；
@@ -43,6 +49,9 @@
 - API、本地模型、Codex、Claude Code、Cursor 和人工编辑统一生产 candidate，不直接覆盖发布物。
 - bilingual/zh 是由确定版本渲染的派生产物，不再兼任 checkpoint 和修复数据库。
 - repair 只生成新 candidate；只有 QA 与选择策略确认改善后才进入新版本。
+- 硬规则 QA 是证据和 gate，不是语义质量排名；不能仅按 `error_count` 自动替换当前译文。
+- recommendation 与 version creation 分离；无法证明 challenger 严格改善时保留 incumbent。
+- 发布/current ref/批量 repair 前必须先建立统一 Artifact Store。
 
 ## Component Status
 
@@ -57,25 +66,34 @@
 | 质量检测 | 可用 | 规则 QC + LLM QC 可工作；新增硬规则 QA gate，可检查双语配对、假名残留、拒绝模板、失败标记和人名坏别名 | `tasks/translation/src/core/qa_gate.py` |
 | 人名一致性 | 可用 | 支持人工规则优先、自动预读候选保存、正文 OpenRouter + 本地 vLLM/MLX 抽名的分离运行时 | `tasks/translation/src/core/translator.py` |
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
-| candidate QA 评估 | 已完成 | 对 candidate 跑硬规则(复用 qa_gate)产出绑定 Evaluation,verdict+error_count 作打分基础 | `tasks/translation/src/core/candidate_eval.py` |
-| task/result 协议 | 已完成 | export-job(revision→Task+job bundle,task_id 确定性)+ import-result;agent 执行路线端到端往返通过 | `tasks/translation/src/core/task_export.py` |
+| candidate QA 评估 | 已完成 | 对 candidate 跑硬规则产出绑定 Evaluation；用于 gate/证据，不单独裁决语义优劣 | `tasks/translation/src/core/candidate_eval.py` |
+| translate task/result 协议 | 最小闭环完成 | export-job + import-result 已往返；context builder、review/repair job 和 instruction pack 待实现 | `tasks/translation/src/core/task_export.py` |
 | result 导入(import-result) | 已完成 | Task+Result → Candidate:§5.4 stale 校验进 quarantine、candidate_id_for 幂等、跨执行独立 | `tasks/translation/src/core/result_import.py` |
 | Legacy 导入 | 已完成 | bilingual 反解 → legacy Candidate(目录标签区分、确定性幂等、截断容错),真实 momizi813 跑通 | `tasks/translation/src/core/legacy_import.py` |
 | Source adapter / renderer | 部分完成 | 目录→DocumentRevision 适配 + bilingual shadow renderer(与现格式逐字节一致,golden 验证);zh renderer 待做(#42) | `tasks/translation/src/core/source_adapter.py` |
 | Fixture/Golden 底座 | 已完成 | 合成脱敏 Pixiv/Fanbox fixture、golden document-revision/bilingual/zh、revision/segment ID pin 稳定性测试 | `tasks/translation/src/core/testdata/` |
-| 业务工件 Schema | 已完成 | 七类工件 JSON Schema(candidate v2 含幂等键)、validate/round-trip/stale-result 测试、CLI 校验入口 | `tasks/translation/schemas/` |
-| 目标系统设计 | 已完成设计 | 已定义 JSON/SQLite 边界、candidate/version、API/Agent 协议、用户 annotation、跨文本知识与迁移顺序；尚未实现 | `tasks/translation/docs/system-design.md` |
+| 业务工件 Schema | 基础完成 | 七类工件 JSON Schema、validate/round-trip/stale-result 测试与 CLI 校验已落地；DocumentVersion v2 待 #50 | `tasks/translation/schemas/` |
+| Artifact Store | 未实现 | importer 仍接收任意 store_dir；缺统一原子写、路径和跨工件引用校验 | Issue #52 / 系统设计 §2.7 |
+| 目标系统设计 | 分阶段实施 | P0 基础与 translate job 最小闭环已落地；2026-06-13 已按真实实现重新校准 | `tasks/translation/docs/system-design.md` |
 | 开发 Agent 连续性 | 基础已落地 | 协议、Schema、validator、CI、GitHub 模板与 `make agent-bootstrap` 已实现；GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
 | 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线（v2 含打包产物与截断检查）；1048 单元中 894 个含 error（v2.1 打包按章拆分），坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
-| 多候选与版本 | 未实现 | 当前仍以单份 bilingual/fixed 文件作为主要结果 | 目标见系统设计 |
-| 翻译 Agent harness | 未实现 | 尚无统一翻译 task/result job export/import 协议 | 目标见系统设计 |
+| 多候选与版本 | 部分完成 | candidate 已可导入/评估；DocumentVersion v2、保守选择和 current ref 未实现 | Issue #50 / 系统设计 |
+| 翻译 Agent harness | 部分完成 | translate JSON job 可由编码 Agent 执行并导回 candidate；隔离目录/instructions/context adapter 待实现 | `tasks/translation/src/core/task_export.py` |
 | 用户句级反馈 | 未实现 | 尚不能持久化“某句话有问题”并触发定向修复 | 目标见系统设计 |
 | 跨文本知识库 | 未实现 | 当前主要依赖人工规则文件和单篇自动预读 | 目标见系统设计 |
 | 并发调度 | 缺口明显 | 当前仍主要依赖手工并行，没有内建 worker 调度器 | `tasks/translation/src/core/pipeline.py` |
-| 测试 | 基线健康 | pytest 统跑当前为 149 个测试全绿（unittest discover 会漏 pytest 风格用例） | `tasks/translation/src/**/*_test.py` |
+| 测试 | 基线健康 | pytest 统跑当前为 186 个测试全绿（unittest discover 会漏 pytest 风格用例） | `tasks/translation/src/**/*_test.py` |
 | Sunday Movies | 维护模式 | 仓库中保留，但当前不作为近期规划重点 | `tasks/sunday-movies/` |
 
 ## Recent Engineering Changes
+
+2026-06-13 架构检查点：
+
+- P0 Schema/fixture/adapter/legacy import 已落地，translate Task/Result/Candidate 最小往返已打通。
+- candidate deterministic QA 已完成，但明确降级为 gate/证据，不能按 error 数直接定义“最佳译文”。
+- 下一版本模型改为 recommendation 与 materialization 分离，并为每个 segment 保存选择证据。
+- 识别出 Artifact Store 是进入发布、repair、SQLite 前必须补齐的核心边界。
+- 测试基线更新为 186。
 
 2026-06-12 主干收敛与首个 dogfood 任务（详见 [journal](journal/2026-06-12-trunk-split.md)）：
 
@@ -134,9 +152,10 @@
 
 ## Known Gaps
 
-- 当前没有规范化 `Document/Segment`，候选、QA、repair 和用户反馈只能围绕双语 TXT 工作。
-- 当前没有 candidate/version 模型，实验结果依赖多个目录名保存，难以比较、回滚和审计。
-- 当前没有统一 API/Agent job 协议，Codex/Claude Code/Cursor 无法可靠参与批量 review。
+- DocumentRevision/Segment 已有 shadow path，但生产入口仍以 TXT 目录为主。
+- candidate 已有 schema/import/evaluation；DocumentVersion、per-segment 选择证据和 current ref 未实现。
+- translate Task/Result 最小闭环已完成，但 review/compare/repair context bundle 和 harness instruction pack 未实现。
+- Artifact Store 未实现，当前写入路径仍由 CLI 调用方传入。
 - 开发任务的跨 Agent 协议还没有 GitHub 状态同步（bootstrap 命令已完成，#9）。
 - 存量 QA 基线 v2.1（2026-06-12，含顶层打包产物按章拆分与 missing_pair 检查）：
   1048 个单元（逐篇文件 + 打包章节）中 894 个含 error 级问题（kana 8757、
@@ -158,7 +177,7 @@
 
 ### P0: 协议与数据基础
 
-> P0 主链(schema/fixture/adapter+renderer/legacy 导入)已全部完成;import-result keystone 亦就位。
+> P0 主链除 zh renderer（#42）外已完成；Artifact Store 从原“后期实现细节”提升为 P1 前置边界。
 
 1. ~~存量内容库盘点、QA 基线与坏产物隔离~~（#10，已完成 2026-06-12：`inventory_content.py` +
    `qa_baseline.py`，3 个坏产物目录已隔离并记录 manifest）。
@@ -170,18 +189,19 @@
 
 ### P1: 多候选、版本与非破坏性闭环
 
-1. 翻译结果按 segment 创建 candidate，不覆盖历史。
-2. 用 `DocumentVersion` 保存 selection manifest，并从版本渲染 bilingual/zh。
-3. ~~QA finding 绑定 candidate + segment~~（#48,已完成:candidate_eval 产出绑定 Evaluation）。
+1. 修订 #50：保守 recommendation + `DocumentVersion` v2 + 从版本渲染 bilingual。
+2. 建立 Artifact Store、跨工件引用校验和 current ref（#52 先完成 store；CAS 可后续拆分）。
+3. 完成 zh renderer（#42）并做单文档端到端 vertical slice。
 4. repair 创建新 candidate，完成 QA -> compare -> select 闭环。
 5. 建立 CLI 级 candidate 比较、选择、回滚和用户 annotation。
 
 ### P2: API/Agent 双执行路线与知识一致性
 
-1. 实现统一 task/result 协议和 `export-job` / `validate-result` / `import-result`。
-2. 为 Codex、Claude Code、Cursor 提供由同一 instruction pack 派生的薄适配。
-3. 建立 scoped entity store、knowledge snapshot、entity linking review 和规则影响分析。
-4. 将现有人工 name map 迁移为 locked entity translations，自动预读只进入 candidate。
+1. ~~实现 translate task/result 的 `export-job` / `import-result` 最小闭环~~（#44/#46）。
+2. 补 `validate-result`、context builder、job 目录和 review/repair task。
+3. 为 Codex、Claude Code、Cursor 提供由同一 instruction pack 派生的薄适配。
+4. 建立 scoped entity store、knowledge snapshot、entity linking review 和规则影响分析。
+5. 将现有人工 name map 迁移为 locked entity translations，自动预读只进入 candidate。
 
 ### P3: 调度、并发与体验
 
@@ -196,6 +216,7 @@
 - 稳定目标架构更新到 `tasks/translation/docs/system-design.md`，不要把完整设计复制回本文件。
 - 只要有值得回溯的阶段性决策或问题处理，就新增一篇 journal 条目并在索引登记。
 - `AGENT_CONTEXT.md` 保持偏稳定背景；不要再把短期任务清单长期堆在里面。
+- 连续完成 3–5 个同一架构链路的 PR，或跨越一个 Phase 边界时，必须做一次 design/status/issue reconcile。
 
 ## Validation Baseline
 
