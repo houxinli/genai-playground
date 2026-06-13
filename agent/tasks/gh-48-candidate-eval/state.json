@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-48-candidate-eval",
   "title": "candidate QA 评估:对 candidate 跑硬规则,产出绑定的 Evaluation",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/candidate-eval",
   "objective": "对一个 Candidate(+其 source segment 文本)跑确定性硬规则(复用 qa_gate:空译文/失败标记/拒绝/与原文相同/假名残留),产出 schema 合法、绑定 candidate_id 的 Evaluation(verdict + findings),作为 compare/select 的打分基础。",
   "github": {
     "issue": 48,
-    "pull_request": null
+    "pull_request": 51
   },
   "scope": {
     "in": [
@@ -42,7 +42,7 @@
     {
       "id": "S2",
       "title": "文档 + PR 收尾",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1"
       ],
@@ -51,13 +51,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S2",
-    "instruction": "开 PR,三渠道 triage,CI 绿后合并。",
-    "acceptance": [
-      "PR 合并,issue #48 关闭"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q"
@@ -66,18 +60,22 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "184 passed(178+6)",
-        "timestamp": "2026-06-13T17:52:58Z"
+        "summary": "186 passed(review 修复后)",
+        "timestamp": "2026-06-13T17:58:43Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260613T175258Z-claude-code",
-    "timestamp": "2026-06-13T17:52:58Z",
+    "checkpoint_id": "cp-20260613T175843Z-claude-code",
+    "timestamp": "2026-06-13T17:58:43Z",
     "agent": "claude-code",
-    "summary": "S1 完成,待 PR 收尾",
-    "observed_head": "eaec681"
+    "summary": "任务完成,PR #51 待合并",
+    "observed_head": "729db2c"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 50,
+    "task_id": "gh-50-version-select",
+    "branch": "feat/version-select"
+  }
 }
