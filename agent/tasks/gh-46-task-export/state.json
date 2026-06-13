@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-46-task-export",
   "title": "export-job:从 revision+segments 生成 Task(供执行器消费)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/task-export",
   "objective": "从 DocumentRevision + 选定 segment 生成 schema 合法的 Task 与自包含 job bundle(含源文本),task_id 确定性、task_digest 与 import 端一致;export→(模拟 result)→import_result 往返通过。",
   "github": {
     "issue": 46,
-    "pull_request": null
+    "pull_request": 49
   },
   "scope": {
     "in": [
@@ -55,7 +55,7 @@
     {
       "id": "S3",
       "title": "文档 + PR 收尾",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1",
         "S2"
@@ -65,13 +65,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR,三渠道 triage,CI 绿后合并。",
-    "acceptance": [
-      "PR 合并,issue #46 关闭"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q"
@@ -80,18 +74,22 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "175 passed(171+4)",
-        "timestamp": "2026-06-13T07:59:08Z"
+        "summary": "178 passed(review 修复后)",
+        "timestamp": "2026-06-13T08:05:47Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260613T075908Z-claude-code",
-    "timestamp": "2026-06-13T07:59:08Z",
+    "checkpoint_id": "cp-20260613T080547Z-claude-code",
+    "timestamp": "2026-06-13T08:05:47Z",
     "agent": "claude-code",
-    "summary": "S1-S2 完成,待 PR 收尾",
-    "observed_head": "1150e9b"
+    "summary": "任务完成,PR #49 待合并",
+    "observed_head": "4eccba6"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 48,
+    "task_id": "gh-48-candidate-eval",
+    "branch": "feat/candidate-eval"
+  }
 }
