@@ -73,7 +73,7 @@ source -> revision -> legacy/new candidates -> evaluations
 | Source adapter / renderer | 部分完成 | 目录→DocumentRevision 适配 + bilingual shadow renderer(与现格式逐字节一致,golden 验证);zh renderer 待做(#42) | `tasks/translation/src/core/source_adapter.py` |
 | Fixture/Golden 底座 | 已完成 | 合成脱敏 Pixiv/Fanbox fixture、golden document-revision/bilingual/zh、revision/segment ID pin 稳定性测试 | `tasks/translation/src/core/testdata/` |
 | 业务工件 Schema | 基础完成 | 七类工件 JSON Schema、validate/round-trip/stale-result 测试与 CLI 校验已落地；DocumentVersion v2 待 #50 | `tasks/translation/schemas/` |
-| Artifact Store | 未实现 | importer 仍接收任意 store_dir；缺统一原子写、路径和跨工件引用校验 | Issue #52 / 系统设计 §2.7 |
+| Candidate 身份 / Artifact Store | 未实现 | 当前两套不一致 candidate ID + 一文件一 candidate（5.5万）。已定稿:#52 Candidate v3 + Attestation（内容寻址、文本去重）→ #54 Sharded ArtifactStore + integrity gate + importer 迁移 → #55 SQLite 投影 | Issue #52/#54/#55 / 系统设计 §2.7 |
 | 目标系统设计 | 分阶段实施 | P0 基础与 translate job 最小闭环已落地；2026-06-13 已按真实实现重新校准 | `tasks/translation/docs/system-design.md` |
 | 开发 Agent 连续性 | 基础已落地 | 协议、Schema、validator、CI、GitHub 模板与 `make agent-bootstrap` 已实现；GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
 | 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线（v2 含打包产物与截断检查）；1048 单元中 894 个含 error（v2.1 打包按章拆分），坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
@@ -189,11 +189,14 @@ source -> revision -> legacy/new candidates -> evaluations
 
 ### P1: 多候选、版本与非破坏性闭环
 
-1. 修订 #50：保守 recommendation + `DocumentVersion` v2 + 从版本渲染 bilingual。
-2. 建立 Artifact Store、跨工件引用校验和 current ref（#52 先完成 store；CAS 可后续拆分）。
-3. 完成 zh renderer（#42）并做单文档端到端 vertical slice。
-4. repair 创建新 candidate，完成 QA -> compare -> select 闭环。
-5. 建立 CLI 级 candidate 比较、选择、回滚和用户 annotation。
+实施顺序（2026-06-13 与 Codex 收敛）:**#52 → #54 → #50 →（#55 later）**。
+
+1. **#52** Candidate v3 + Attestation（内容寻址身份、文本等价去重）— #50 的前置。
+2. **#54** Sharded ArtifactStore + integrity gate（`verify_references`）+ legacy/result importer 迁移。
+3. **#50** 保守 recommendation（按判定表，error 只做 gate 不排名）+ `DocumentVersion` v2 + 从版本渲染 bilingual。
+4. **#55** SQLite 可重建投影（vertical slice 之后，非硬前置）；zh renderer（#42）。
+5. 执行器 harness:共享 instruction pack + 自然语言触发的 translate-job skill + Cursor/Codex 适配（NSFW 走 Cursor+Grok）。
+6. repair 创建新 candidate，完成 QA -> compare -> select 闭环;CLI 级比较/选择/回滚/annotation;current ref 与 CAS。
 
 ### P2: API/Agent 双执行路线与知识一致性
 

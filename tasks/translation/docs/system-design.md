@@ -137,14 +137,28 @@ repair 的输出是新的 candidate。旧 candidate 永远保留。
 
 纯领域函数可以先于 Artifact Store 实现和测试，但任何“发布/current ref/批量 repair”功能不得绕过它。
 
-**规模与身份（2026-06-13 决策）**：当前“一个 candidate 一个 JSON 文件”不可扩展——单作者 momizi813
-按现有派生目录导入即约 5.5 万 candidate。Artifact Store 据此固定两点：
+**规模与身份（2026-06-13 决策，Claude Code × Codex 收敛于 Issue #52/#54 评论）**：当前“一个 candidate
+一个 JSON 文件 + legacy/result 两套不一致 ID”不可扩展——单作者 momizi813 按现有派生目录导入即约 5.5 万
+candidate。据此固定:
 
-- **按文档分片**：candidate 等高频工件按 `document_id` 落 append-only JSONL（`<document_id>.jsonl`），
-  文件数 = 文档数（momizi813≈128）而非 candidate 数；SQLite 仅作可重建索引。
-- **内容寻址身份**：统一 `candidate_id = sha256(revision_id + segment_id + normalized_text)`，
-  producer/provenance 降为可多值元数据，替换当前 legacy 与 result 两套不一致的 ID 派生，使
-  **文本等价的候选自动去重**。这是 Artifact Store 去重键的前置决策。
+- **Candidate / Attestation 二分**：Candidate 升级为 **v3，只保留可由内容确定、不随第二次观察变化的字段**
+  （`candidate_id, document_id, revision_id, segment_id, source_hash, normalization_version, text`）。
+  `producer / provenance / purpose / parent_candidate_id / created_at` 全部移入 **append-only Attestation**
+  （`parent_candidate_id` 尤其不能固化在共享 Candidate 上——相同文本可从不同 parent 独立生成）。
+- **内容寻址身份**：`candidate_id = sha256({identity_version, revision_id, segment_id, source_hash,
+  normalization_version, normalized_text})`，完整 64-hex。Attestation ID 同样确定性派生（同 Result 重放不新增）。
+  效果:同一句被多 producer 译成相同文本 → 一个 Candidate + 多条 Attestation，**文本等价自动去重**。
+- **normalization_version=1 必须 display-preserving**：仅 去尾随空白 + Unicode NFC，不折叠内部空白、不改
+  标点/引号；`Candidate.text` 存归一化后文本，且 == 可直接渲染的译文（否则去重虽对、渲染会偏离原译）。
+- **按文档分片 + 原子批写**：按安全路径 `store/<kind>/<provider>/<creator_id>/<post_id>.jsonl`（不把含 `:`
+  的 document_id 当文件名）落 append-only JSONL，文件数 = 文档数（momizi813≈128）而非 candidate 数。
+  `put_many(document_id, artifacts)`:锁 shard → 读一次建 ID map → 校验 → 写全量临时 shard → fsync +
+  atomic rename + dir fsync。**冲突检测保留**:同 ID + 同 canonical payload skip，payload 不同 fatal/quarantine
+  （防 normalization 漂移、截断 digest、算法 bug、存储损坏）。
+- **SQLite 仅作可重建投影**:写入幂等只凭 JSON 工件成立，不依赖 SQLite；SQLite 丢失可从 JSONL 重建。
+
+落地拆为三步:**#52 Candidate v3 + Attestation → #54 Sharded ArtifactStore + integrity gate + importer 迁移
+→ #55 SQLite 投影**（#55 在 vertical slice 之后，不作 DocumentVersion 硬前置）。#50 依赖 #52 的 Candidate v3。
 
 ## 3. 系统总览
 
