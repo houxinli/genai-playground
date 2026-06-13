@@ -189,6 +189,10 @@ def main() -> int:
     args = parser.parse_args()
     document = json.loads(args.path.read_text(encoding="utf-8"))
     errors = validate_artifact(args.kind, document)
+    # candidate 是内容寻址工件:CLI 作为独立校验入口也必须强制身份自洽,
+    # 否则 schema 合法但 text/candidate_id 被篡改的 candidate 会被误判 valid。
+    if args.kind == "candidate" and not errors:
+        errors = validate_candidate_identity(document)
     if errors:
         print(f"{args.path}: validation failed:", file=sys.stderr)
         for error in errors:

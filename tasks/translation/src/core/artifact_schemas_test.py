@@ -6,7 +6,10 @@ from __future__ import annotations
 
 import copy
 import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 try:
     from .artifact_schemas import (
@@ -17,6 +20,7 @@ try:
         canonical_digest,
         check_result_against_task,
         load_schema,
+        main,
         normalize_text,
         validate_artifact,
         validate_candidate_identity,
@@ -30,6 +34,7 @@ except ImportError:  # unittest discover may import as top-level core.artifact_s
         canonical_digest,
         check_result_against_task,
         load_schema,
+        main,
         normalize_text,
         validate_artifact,
         validate_candidate_identity,
@@ -416,6 +421,20 @@ class CandidateIdentityValidationTest(unittest.TestCase):
         doc = make_candidate()
         doc["normalization_version"] = 2
         self.assertNotEqual([], validate_artifact("candidate", doc))
+
+    def _run_cli(self, doc):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate.json"
+            path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+            with mock.patch("sys.argv", ["prog", "candidate", str(path)]):
+                return main()
+
+    def test_cli_enforces_candidate_identity(self):
+        # 校验 CLI 是独立入口:schema 合法但身份被篡改的 candidate 也必须非零退出
+        self.assertEqual(0, self._run_cli(make_candidate()))
+        tampered = make_candidate()
+        tampered["text"] = "完全不同的译文"  # id 没变 → schema 过、身份不过
+        self.assertEqual(1, self._run_cli(tampered))
 
 
 if __name__ == "__main__":

@@ -97,7 +97,8 @@ source -> revision -> legacy/new candidates -> evaluations
 - evaluation/document-version/annotation/task 的 candidate_id 引用同步收紧为 64-hex。
 - review follow-up:`normalization_version` 收为 `const:1`;新增 `validate_candidate_identity`
   (text 已归一化 + candidate_id 与内容重算一致),在 importer 构建边界与 candidate_eval 强制调用
-  (#54 的 `put_many` 也须调用);pin 身份已知向量;system-design §6.2 改 v3 + §6.2a Attestation。测试基线 188 → 207。
+  (#54 的 `put_many` 也须调用);校验 CLI 对 candidate 也接身份强校验;pin 身份已知向量;
+  system-design §6.2 改 v3 + §6.2a Attestation。测试基线 188 → 208。
 
 2026-06-13 架构检查点：
 
