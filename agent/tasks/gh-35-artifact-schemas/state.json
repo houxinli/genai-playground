@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-35-artifact-schemas",
   "title": "业务工件 JSON Schema(P0.3)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/artifact-schemas",
   "objective": "固定 revision/candidate/evaluation/annotation/version/task/result 七类工件的 JSON Schema(含 schema_version 与 candidate 幂等键),配 schema validation、round-trip、stale-result 测试,可被 CI 调用。",
   "github": {
     "issue": 35,
-    "pull_request": null
+    "pull_request": 40
   },
   "scope": {
     "in": [
@@ -55,7 +55,7 @@
     {
       "id": "S3",
       "title": "文档同步与 PR 收尾",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1",
         "S2"
@@ -66,13 +66,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR,三渠道 triage review,CI 绿后合并。",
-    "acceptance": [
-      "PR 合并,issue #35 关闭"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q"
@@ -81,18 +75,22 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "130 passed(115+15)",
-        "timestamp": "2026-06-13T01:47:22Z"
+        "summary": "131 passed(review 修复后)",
+        "timestamp": "2026-06-13T01:53:35Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260613T014722Z-claude-code",
-    "timestamp": "2026-06-13T01:47:22Z",
+    "checkpoint_id": "cp-20260613T015335Z-claude-code",
+    "timestamp": "2026-06-13T01:53:35Z",
     "agent": "claude-code",
-    "summary": "S1-S2 完成,待 PR 收尾",
-    "observed_head": "1b97782"
+    "summary": "任务完成,PR #40 待合并",
+    "observed_head": "9f68a19"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 36,
+    "task_id": "gh-36-fixtures-golden",
+    "branch": "feat/fixtures-golden"
+  }
 }
