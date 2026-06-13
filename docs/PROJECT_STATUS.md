@@ -68,12 +68,12 @@ source -> revision -> legacy/new candidates -> evaluations
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
 | candidate QA 评估 | 已完成 | 对 candidate 跑硬规则产出绑定 Evaluation；用于 gate/证据，不单独裁决语义优劣 | `tasks/translation/src/core/candidate_eval.py` |
 | translate task/result 协议 | 最小闭环完成 | export-job + import-result 已往返；context builder、review/repair job 和 instruction pack 待实现 | `tasks/translation/src/core/task_export.py` |
-| result 导入(import-result) | 已完成(v3) | Task+Result → Candidate v3 + Attestation:§5.4 stale 校验进 quarantine;内容寻址身份,同译文跨执行去重(一 Candidate + 多 Attestation),重放幂等 | `tasks/translation/src/core/result_import.py` |
-| Legacy 导入 | 已完成(v3) | bilingual 反解 → Candidate v3 + legacy Attestation:同译文跨目录代次去重为同一 Candidate,代次差异由 Attestation.legacy_label 区分;确定性幂等、截断容错,真实 momizi813 跑通 | `tasks/translation/src/core/legacy_import.py` |
+| result 导入(import-result) | 已完成(v3+store) | Task+Result → Candidate v3 + Attestation,写入分片 ArtifactStore:§5.4 stale 校验进 quarantine;内容寻址身份,同译文跨执行去重(一 Candidate + 多 Attestation),重放幂等 | `tasks/translation/src/core/result_import.py` |
+| Legacy 导入 | 已完成(v3+store) | bilingual 反解 → Candidate v3 + legacy Attestation + DocumentRevision,写入分片 ArtifactStore:同译文跨目录代次去重为同一 Candidate,代次差异由 Attestation.legacy_label 区分;确定性幂等、截断容错 | `tasks/translation/src/core/legacy_import.py` |
 | Source adapter / renderer | 部分完成 | 目录→DocumentRevision 适配 + bilingual shadow renderer(与现格式逐字节一致,golden 验证);zh renderer 待做(#42) | `tasks/translation/src/core/source_adapter.py` |
 | Fixture/Golden 底座 | 已完成 | 合成脱敏 Pixiv/Fanbox fixture、golden document-revision/bilingual/zh、revision/segment ID pin 稳定性测试 | `tasks/translation/src/core/testdata/` |
 | 业务工件 Schema | 基础完成 | 八类工件 JSON Schema（新增 attestation）、validate/round-trip/stale-result 测试与 CLI 校验已落地；DocumentVersion v2 待 #50 | `tasks/translation/schemas/` |
-| Candidate 身份 / Artifact Store | 身份已统一,存储待 #54 | #52 已落地:Candidate v3（纯内容、内容寻址 64-hex）+ Attestation（append-only 来源），同译文跨 producer 去重；legacy/result importer 已迁移。仍待 #54 Sharded ArtifactStore + integrity gate（当前仍一工件一 JSON 文件）→ #55 SQLite 投影 | `tasks/translation/src/core/artifact_schemas.py` / 系统设计 §2.7 |
+| Candidate 身份 / Artifact Store | 已落地(#52+#54) | Candidate v3 内容寻址 + Attestation；Sharded `ArtifactStore`（按文档分片 JSONL + put_many 原子批写 + 冲突/身份硬 gate + `verify_references`）；legacy/result importer 已走 store。仍待 #55 SQLite 只读投影 | `tasks/translation/src/core/artifact_store.py` / 系统设计 §2.7 |
 | 目标系统设计 | 分阶段实施 | P0 基础与 translate job 最小闭环已落地；2026-06-13 已按真实实现重新校准 | `tasks/translation/docs/system-design.md` |
 | 开发 Agent 连续性 | 基础已落地 | 协议、Schema、validator、CI、GitHub 模板、`make agent-bootstrap`、`make docs-drift`(文档漂移闸门)与 PR 设计耦合检查已实现；GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
 | 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线（v2 含打包产物与截断检查）；1048 单元中 894 个含 error（v2.1 打包按章拆分），坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
@@ -86,6 +86,16 @@ source -> revision -> legacy/new candidates -> evaluations
 | Sunday Movies | 维护模式 | 仓库中保留，但当前不作为近期规划重点 | `tasks/sunday-movies/` |
 
 ## Recent Engineering Changes
+
+2026-06-13 Sharded ArtifactStore + integrity gate（#54，P1 第二步）：
+
+- `artifact_store.ArtifactStore`：按 `store/<kind>/<provider>/<creator_id>/<source_id>.jsonl` 分片
+  （文件数=文档数而非 candidate 数），`put_many(document_id, artifacts)` flock 锁 shard + 读一次建 id map
+  + 校验（schema + candidate `validate_candidate_identity`）+ 冲突检测 + 写全量临时 + fsync + 原子 rename + dir fsync。
+- 冲突保留：同 id 同 payload skip / 不同 payload `StoreConflictError`；幂等仅凭 JSONL，不依赖外部索引。
+- `verify_references(artifact, resolver)`：candidate↔revision.source_hash、attestation/evaluation→真 candidate、
+  version selection 同 revision/segment；resolver 按 document 作用域，不替代 stale-envelope 校验。
+- legacy/result importer 迁移走 store（legacy 连 DocumentRevision 一并入库）；旧 flat write 移除。测试基线 208 → 220。
 
 2026-06-13 Candidate v3 + Attestation（#52，P1 第一步）：
 
@@ -210,7 +220,7 @@ source -> revision -> legacy/new candidates -> evaluations
 实施顺序（2026-06-13 与 Codex 收敛）:**#52 → #54 → #50 →（#55 later）**。
 
 1. ~~**#52** Candidate v3 + Attestation（内容寻址身份、文本等价去重）~~（已完成 2026-06-13：Candidate v3 纯内容 schema + Attestation append-only schema + 内容寻址 64-hex 身份 + display-preserving 归一化；legacy/result importer 迁移并去重）— #50 的前置。
-2. **#54** Sharded ArtifactStore + integrity gate（`verify_references`）+ legacy/result importer 迁移。
+2. ~~**#54** Sharded ArtifactStore + integrity gate（`verify_references`）+ legacy/result importer 迁移~~（已完成 2026-06-13：`artifact_store.py` 分片 JSONL + put_many 原子批写 + 冲突/身份硬 gate + verify_references；importer 走 store）。
 3. **#50** 保守 recommendation（按判定表，error 只做 gate 不排名）+ `DocumentVersion` v2 + 从版本渲染 bilingual。
 4. **#55** SQLite 可重建投影（vertical slice 之后，非硬前置）；zh renderer（#42）。
 5. 执行器 harness:共享 instruction pack + 自然语言触发的 translate-job skill + Cursor/Codex 适配（NSFW 走 Cursor+Grok）。

@@ -13,11 +13,13 @@ try:
     from . import source_identity as si
     from . import task_export as te
     from .artifact_schemas import canonical_digest, validate_artifact
+    from .artifact_store import ArtifactStore
 except ImportError:  # core/ 在 sys.path 上
     import result_import as ri
     import source_identity as si
     import task_export as te
     from artifact_schemas import canonical_digest, validate_artifact
+    from artifact_store import ArtifactStore
 
 
 SRC = Path(__file__).resolve().parent / "testdata" / "fixtures" / "pixiv" / "700001" / "700001.txt"
@@ -83,12 +85,13 @@ class TaskExportTest(unittest.TestCase):
         }
         self.assertEqual([], validate_artifact("result", result))
         with tempfile.TemporaryDirectory() as tmp:
-            store = Path(tmp)
+            store = ArtifactStore(Path(tmp))
             report = ri.import_result(task, result, store)
             self.assertFalse(report["quarantined"], report)
             self.assertEqual(len(bundle["segments"]), report["written"])
-            self.assertEqual(len(bundle["segments"]), len(list(store.glob("cand_*.json"))))
-            self.assertEqual(len(bundle["segments"]), len(list(store.glob("att_*.json"))))
+            doc = task["document_id"]
+            self.assertEqual(len(bundle["segments"]), len(store.list_shard("candidate", doc)))
+            self.assertEqual(len(bundle["segments"]), len(store.list_shard("attestation", doc)))
 
 
     def test_tampered_revision_rejected(self):

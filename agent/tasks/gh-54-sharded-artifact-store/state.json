@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-54-sharded-artifact-store",
+  "title": "Sharded ArtifactStore + integrity gate + importer 迁移",
+  "status": "active",
+  "branch": "feat/sharded-artifact-store",
+  "objective": "统一 ArtifactStore:按 document path 分片 JSONL + 原子批写 + 冲突检测 + 身份硬 gate + cross-artifact verify_references;legacy/result importer 迁移到 store。解决文件过多(5.5万→按文档分片)。",
+  "github": {
+    "issue": 54,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/artifact_store.py 新增 ArtifactStore(分片/put_many/get/exists/verify_references)",
+      "tasks/translation/src/core/legacy_import.py 迁移到 store",
+      "tasks/translation/src/core/result_import.py 迁移到 store",
+      "对应 *_test.py 更新与新增(分片/原子/冲突/身份gate/integrity/迁移)",
+      "Makefile legacy-import/import-result 入口对齐 store",
+      "system-design.md / PROJECT_STATUS.md 同 PR 更新"
+    ],
+    "out": [
+      "SQLite 可重建投影(#55)",
+      "conservative selection / DocumentVersion v2(#50)",
+      "并发调度器(#P3)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "§2.7 store 决策 + §6.2 Candidate v3 身份",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/artifact_schemas.py",
+      "purpose": "validate_artifact / validate_candidate_identity / canonical_digest 复用",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "分片路径 store/<kind>/<provider>/<creator_id>/<source_id>.jsonl",
+      "reason": "由 document_id 三段拆出(pattern 已保证 path-safe);文件数=文档数而非 candidate 数;含冒号的 document_id 不直接当文件名。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "put_many(document_id, artifacts) 按 kind 分组、每(kind,document)一 shard 原子批写",
+      "reason": "flock 锁 shard → 读一次建 id map → 校验(schema + candidate 身份) → 冲突检测 → 写全量临时 + fsync + atomic rename + dir fsync;幂等仅凭 JSON。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "kind 由工件自有 id 字段/判别字段推断",
+      "reason": "attestation_id/evaluation_id/version_id/annotation_id 唯一;revision 用 segments;candidate 用 candidate_id+text。attestation 不带 document_id,shard key 取 put_many 参数。",
+      "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "冲突=同 id 同 payload skip,不同 payload fatal(raise)",
+      "reason": "content-addressing 不免 normalization 漂移/截断/算法 bug/存储损坏(Codex #52 纠正);candidate 写入前强制 validate_candidate_identity。",
+      "status": "active"
+    },
+    {
+      "id": "D5",
+      "summary": "verify_references(artifact, resolver) resolver 按 document 作用域",
+      "reason": "attestation/evaluation 只带 candidate_id 不带 document_id,resolver 在同文档 shard 内解析;不替代 Task/Result stale-envelope 校验。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "ArtifactStore 核心:分片路径 + put_many 原子批写 + 冲突/身份 gate + get/exists",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "分片路径正确",
+        "原子批写 + 幂等 + 冲突 fatal",
+        "candidate 身份 gate 拦截篡改",
+        "单测绿"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "verify_references cross-artifact integrity gate",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "candidate↔revision.source_hash、attestation/evaluation→真 candidate、version selection 同 revision/segment",
+        "单测绿"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "legacy/result importer 迁移到 store + 测试更新",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "importer 走 put_many",
+        "fixture 一篇:按文档分片、重复文本去重",
+        "测试绿"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "docs 同步 + 全量 pytest + 基线对齐",
+      "status": "completed",
+      "depends_on": [
+        "S2",
+        "S3"
+      ],
+      "acceptance": [
+        "pytest 全绿",
+        "system-design/PROJECT_STATUS 同步",
+        "AGENTS 基线一致"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S4"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三通道已三联",
+        "PR 合并、main 收敛"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S5",
+    "instruction": "推送 feat/sharded-artifact-store,开 PR(closes #54),等 CI;按三通道核对 Codex review 并三联处理后合并。",
+    "acceptance": [
+      "CI tests 全绿",
+      "PR 合并、删除分支、main 拉回"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "220 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 220)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260613T231616Z-claude-code",
+    "timestamp": "2026-06-13T23:16:16Z",
+    "agent": "claude-code",
+    "summary": "ArtifactStore 落地:按文档分片 JSONL + put_many 原子批写(flock/全量临时/fsync/rename/dir-fsync)",
+    "observed_head": "6f81c35"
+  },
+  "next_task": null
+}

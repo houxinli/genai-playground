@@ -11,15 +11,18 @@ from pathlib import Path
 try:
     from . import result_import as ri
     from .artifact_schemas import canonical_digest, validate_artifact
+    from .artifact_store import ArtifactStore
 except ImportError:  # core/ 在 sys.path 上
     import result_import as ri
     from artifact_schemas import canonical_digest, validate_artifact
+    from artifact_store import ArtifactStore
 
 
 REV = "rev_" + "a" * 16
 SEG = f"{REV}:000042:" + "b" * 8
 HASH = "c" * 16
 KNOW = "knowledge_" + "d" * 16
+DOC = "pixiv:50235390:12430834"
 
 
 def make_task():
@@ -76,7 +79,7 @@ class ImportResultTest(unittest.TestCase):
 
     def test_import_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = Path(tmp)
+            store = ArtifactStore(Path(tmp))
             r1 = ri.import_result(make_task(), make_result(), store)
             self.assertEqual((1, 0), (r1["written"], r1["skipped"]))
             self.assertEqual((1, 0), (r1["attestations_written"], r1["attestations_skipped"]))
@@ -90,11 +93,11 @@ class ImportResultTest(unittest.TestCase):
         result = make_result()
         result["candidates"][0]["source_hash"] = "9" * 16
         with tempfile.TemporaryDirectory() as tmp:
-            store = Path(tmp)
+            store = ArtifactStore(Path(tmp))
             report = ri.import_result(make_task(), result, store)
             self.assertTrue(report["quarantined"])
             self.assertTrue(any("stale source_hash" in r for r in report["reasons"]))
-            self.assertEqual([], list(store.glob("*.json")))
+            self.assertEqual([], list(Path(tmp).rglob("*.jsonl")))  # 零落盘
 
     def test_same_text_dedup_one_candidate_two_attestations(self):
         # 两次不同执行(producer/完成时刻不同)产出相同译文 → 同一 Candidate + 两条 Attestation
@@ -103,7 +106,7 @@ class ImportResultTest(unittest.TestCase):
         result_b["producer"] = {"type": "api", "name": "openrouter", "model": "grok-4.1-fast"}
         result_b["completed_at"] = "2026-06-14T00:00:00Z"
         with tempfile.TemporaryDirectory() as tmp:
-            store = Path(tmp)
+            store = ArtifactStore(Path(tmp))
             ra = ri.import_result(make_task(), result_a, store)
             rb = ri.import_result(make_task(), result_b, store)
             self.assertEqual(ra["candidate_ids"], rb["candidate_ids"])  # 文本等价去重
@@ -111,15 +114,13 @@ class ImportResultTest(unittest.TestCase):
             self.assertEqual((0, 1), (rb["written"], rb["skipped"]))  # candidate 已存在,跳过
             self.assertNotEqual(ra["attestation_ids"], rb["attestation_ids"])  # 来源各记一条
             self.assertEqual((1, 0), (rb["attestations_written"], rb["attestations_skipped"]))
-            cand_files = list(store.glob("cand_*.json"))
-            att_files = list(store.glob("att_*.json"))
-            self.assertEqual(1, len(cand_files))
-            self.assertEqual(2, len(att_files))
+            self.assertEqual(1, len(store.list_shard("candidate", DOC)))
+            self.assertEqual(2, len(store.list_shard("attestation", DOC)))
 
     def test_changed_task_digest_quarantined(self):
         result = make_result()
         result["task_digest"] = "0" * 16  # 与当前 task canonical digest 不符
-        report = ri.import_result(make_task(), result, Path("/nonexistent-should-not-be-used"))
+        report = ri.import_result(make_task(), result, ArtifactStore(Path("/nonexistent")))
         self.assertTrue(report["quarantined"])
         self.assertTrue(any("task_digest mismatch" in r for r in report["reasons"]))
 
@@ -141,15 +142,15 @@ class ImportResultTest(unittest.TestCase):
         result["task_digest"] = canonical_digest(make_task())  # 保持对齐
         # 重算 task_digest 不变(task 未变);触发重复键检查
         with tempfile.TemporaryDirectory() as tmp:
-            store = Path(tmp)
+            store = ArtifactStore(Path(tmp))
             report = ri.import_result(make_task(), result, store)
             self.assertTrue(report["quarantined"])
             self.assertTrue(any("duplicate" in r for r in report["reasons"]))
-            self.assertEqual([], list(store.glob("*.json")))  # 写入前拒绝,零落盘
+            self.assertEqual([], list(Path(tmp).rglob("*.jsonl")))  # 写入前拒绝,零落盘
 
     def test_oversized_text_quarantined(self):
         result = make_result("x" * (ri.MAX_TEXT_LEN + 1))
-        report = ri.import_result(make_task(), result, Path("/unused"))
+        report = ri.import_result(make_task(), result, ArtifactStore(Path("/unused")))
         self.assertTrue(report["quarantined"])
         self.assertTrue(any("exceeds" in r for r in report["reasons"]))
 

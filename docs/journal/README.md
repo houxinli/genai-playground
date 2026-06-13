@@ -18,6 +18,7 @@
 ## 📅 2026年
 
 ### 06月
+- [2026-06-13 Sharded ArtifactStore + integrity gate（#54）](./2026-06-13-sharded-artifact-store.md)
 - [2026-06-13 Candidate v3 + Attestation 内容寻址身份拆分（#52）](./2026-06-13-candidate-attestation.md)
 - [2026-06-13 开发复盘与系统设计检查点](./2026-06-13-system-design-review.md)
 - [2026-06-13 文档漂移 CI 闸门](./2026-06-13-docs-drift-gate.md)

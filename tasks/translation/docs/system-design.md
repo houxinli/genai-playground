@@ -166,8 +166,14 @@ Attestation schema(append-only 来源)已进入主干;`artifact_schemas.candidat
 `normalize_text`(normalization_version=1:NFC + 去尾随空白,display-preserving)与 `attestation_id_for`/
 `build_attestation`(确定性派生)已实现;`legacy_import` / `result_import` 已迁移为产出 Candidate v3 + Attestation,
 **同译文跨 producer 去重 → 一个 Candidate + 多条 Attestation**。evaluation/document-version/annotation/task
-(`existing_candidate_ids`)的 `candidate_id` 引用模式同步收紧为 64-hex。**仍待 #54**:把当前 importer 的"一工件一 JSON 文件 + 调用方传
-`store_dir`"换成 sharded `ArtifactStore.put_many` + integrity gate(`verify_references`)。
+(`existing_candidate_ids`)的 `candidate_id` 引用模式同步收紧为 64-hex。**已落地(2026-06-13,#54)**:`artifact_store.ArtifactStore` 按
+`store/<kind>/<provider>/<creator_id>/<source_id>.jsonl` 分片;`put_many(document_id, artifacts)`
+按 kind 分组 → flock 锁 shard → 读一次建 id map → 校验(schema + candidate `validate_candidate_identity`)→
+冲突检测(同 id 同 payload skip / 不同 payload `StoreConflictError`)→ 写全量临时 + fsync + 原子
+rename + dir fsync;幂等仅凭 JSONL。`verify_references(artifact, resolver)` 做 cross-artifact 引用
+完整性(candidate↔revision.source_hash、attestation/evaluation→真 candidate、version selection 同
+revision/segment),resolver 按 document 作用域,不替代 Task/Result stale-envelope 校验。legacy/result
+importer 已迁移走 store(legacy 连同 DocumentRevision 一并入库)。**仍待 #55**:SQLite 只读投影。
 
 ## 3. 系统总览
 
