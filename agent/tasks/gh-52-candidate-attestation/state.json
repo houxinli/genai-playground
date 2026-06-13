@@ -7,7 +7,7 @@
   "objective": "把 candidate 拆成纯内容、不可变、content-addressed 的 Candidate v3 与 append-only Attestation;统一身份、文本等价去重;legacy/result importer 迁移产出 v3+attestation。#50 与 #54 的前置。",
   "github": {
     "issue": 52,
-    "pull_request": null
+    "pull_request": 64
   },
   "scope": {
     "in": [
