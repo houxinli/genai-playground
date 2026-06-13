@@ -4,6 +4,14 @@
 
 协议见 [`../docs/AGENT_WORKFLOW.md`](../docs/AGENT_WORKFLOW.md)。
 
+目录：
+
+- `tasks/` 分支级任务状态（state.json + checkpoints.jsonl）。
+- `schemas/` 任务状态与 checkpoint 的 JSON Schema。
+- `templates/` 任务状态与 checkpoint 的 JSON 模板（数据骨架，bootstrap 用）。
+- `prompts/` 可复用的 agent prompt 模板（如
+  [`prompts/review-clean-state.md`](prompts/review-clean-state.md)：变更后清洁度/一致性审查）。
+
 约定：
 
 - 每个活动 branch 最多一个 `agent/tasks/<task-id>/state.json`。
