@@ -39,7 +39,7 @@
   ```bash
   conda run -n llm python -m pytest tasks/translation/src -q
   ```
-  当前 baseline 是 199 测试全绿，PR 合入前必须保持 ≥ 此基线。**此处是基线数字的唯一来源**
+  当前 baseline 是 207 测试全绿，PR 合入前必须保持 ≥ 此基线。**此处是基线数字的唯一来源**
   （`make docs-drift` 在 CI 强制它 == 实际 `pytest --collect-only` 计数；改动测试数必须同 PR 更新这里）。
   （必须用 pytest 统跑：`unittest discover` 不执行 parser/prompt 下的 pytest 风格用例，会假绿。）
 

@@ -106,9 +106,48 @@ def attestation_id_for(core: Dict[str, Any]) -> str:
     return "att_" + canonical_digest(payload)
 
 
+_ATTESTATION_RESERVED = ("schema_version", "attestation_id", "attestation_identity_version")
+
+
 def build_attestation(core: Dict[str, Any]) -> Dict[str, Any]:
-    """由 core(全部业务字段)组装完整 attestation 工件:补 schema_version 与确定性 attestation_id。"""
+    """由 core(全部业务字段)组装完整 attestation 工件:补 schema_version 与确定性 attestation_id。
+    core 不得携带生成字段(schema_version/attestation_id/attestation_identity_version),否则会
+    污染身份派生 → 拒绝,保证公共构造函数自洽。"""
+    reserved = [k for k in _ATTESTATION_RESERVED if k in core]
+    if reserved:
+        raise ValueError(f"attestation core must not carry generated fields: {reserved}")
     return {"schema_version": 1, "attestation_id": attestation_id_for(core), **core}
+
+
+def validate_candidate_identity(candidate: Dict[str, Any]) -> List[str]:
+    """内容寻址工件边界强校验(防 schema 通过但身份/文本被篡改):
+    - text 必须已按其 normalization_version 归一化(text == normalize_text(text, ver));
+    - candidate_id 必须 == 由内容重算的 candidate_id_v3。
+    schema 只能保证形状,这里保证"同 id 必同内容"。读写边界(importer/candidate_eval/store)都应调它。"""
+    errors: List[str] = []
+    ver = candidate.get("normalization_version")
+    text = candidate.get("text")
+    try:
+        normalized = normalize_text(text, ver)
+    except (TypeError, ValueError) as exc:
+        return [f"candidate {candidate.get('candidate_id')}: cannot normalize text: {exc}"]
+    if text != normalized:
+        errors.append(
+            f"candidate {candidate.get('candidate_id')}: text 未按 normalization_version={ver} 归一化"
+        )
+    expected = candidate_id_v3(
+        candidate.get("revision_id"),
+        candidate.get("segment_id"),
+        candidate.get("source_hash"),
+        normalized,
+        normalization_version=ver,
+    )
+    if candidate.get("candidate_id") != expected:
+        errors.append(
+            f"candidate_id 与内容不符: 声明 {candidate.get('candidate_id')} 实算 {expected}"
+            "(身份漂移/截断/文本被改)"
+        )
+    return errors
 
 
 def check_result_against_task(task: Dict[str, Any], result: Dict[str, Any]) -> List[str]:

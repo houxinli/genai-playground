@@ -103,6 +103,20 @@ class LegacyImportTest(unittest.TestCase):
         att_b = {a["attestation_id"] for a in ab}
         self.assertEqual(set(), att_a & att_b)  # legacy_label 不同 → attestation 不同
 
+    def test_two_labels_same_store_dedup_on_disk(self):
+        # 落到同一 store:第二个 label 不新增 Candidate,只追加 Attestation(N Candidate + 2N Attestation)
+        ca, aa, _ = self._build("dir_bilingual")
+        cb, ab, _ = self._build("dir_bilingual_v2")
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp)
+            self.assertEqual((len(ca), 0), li.write_candidates(ca, store))
+            self.assertEqual((len(aa), 0), li.write_attestations(aa, store))
+            # 第二个 label:candidate 全部命中去重(0 写入),attestation 全部新增
+            self.assertEqual((0, len(cb)), li.write_candidates(cb, store))
+            self.assertEqual((len(ab), 0), li.write_attestations(ab, store))
+            self.assertEqual(len(ca), len(list(store.glob("cand_*.json"))))
+            self.assertEqual(len(aa) + len(ab), len(list(store.glob("att_*.json"))))
+
     def test_empty_translation_does_not_bleed_into_next_segment(self):
         # 合法的空译文(译文行为空)不应让下一段原文被当成上一段译文(基线含 112 个 empty)
         rev = si.build_document_revision("pixiv", SRC)

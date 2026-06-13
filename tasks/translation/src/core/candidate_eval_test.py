@@ -8,28 +8,32 @@ import unittest
 
 try:
     from . import candidate_eval as ce
-    from .artifact_schemas import validate_artifact
+    from .artifact_schemas import candidate_id_v3, normalize_text, validate_artifact
     from .source_identity import _source_hash
 except ImportError:  # core/ 在 sys.path 上
     import candidate_eval as ce
-    from artifact_schemas import validate_artifact
+    from artifact_schemas import candidate_id_v3, normalize_text, validate_artifact
     from source_identity import _source_hash
 
 
 SOURCE = "彼女は振り返った。"
 _H = _source_hash(SOURCE)
+_REV = "rev_" + "a" * 16
+_SEG = f"{_REV}:000000:" + _H[:8]
 
 
-def _candidate(text, cid="cand_" + "e" * 64):
+def _candidate(text):
+    """构建内容寻址自洽的 v3 candidate(text 归一化、id 由内容重算),满足 validate_candidate_identity。"""
+    normalized = normalize_text(text)
     return {
         "schema_version": 3,
-        "candidate_id": cid,
+        "candidate_id": candidate_id_v3(_REV, _SEG, _H, normalized),
         "document_id": "pixiv:1:2",
-        "revision_id": "rev_" + "a" * 16,
-        "segment_id": f"rev_{'a' * 16}:000000:" + _H[:8],
+        "revision_id": _REV,
+        "segment_id": _SEG,
         "source_hash": _H,
         "normalization_version": 1,
-        "text": text,
+        "text": normalized,
     }
 
 

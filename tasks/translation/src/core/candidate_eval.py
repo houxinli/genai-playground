@@ -16,12 +16,12 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 try:
-    from .artifact_schemas import canonical_dumps, validate_artifact
+    from .artifact_schemas import canonical_dumps, validate_artifact, validate_candidate_identity
     from .qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana
     from .source_identity import _source_hash
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core.artifact_schemas import canonical_dumps, validate_artifact
+    from core.artifact_schemas import canonical_dumps, validate_artifact, validate_candidate_identity
     from core.qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana
     from core.source_identity import _source_hash
 
@@ -63,6 +63,9 @@ def evaluate_candidate(
     schema_errors = validate_artifact("candidate", candidate)
     if schema_errors:
         raise ValueError(f"candidate schema invalid: {schema_errors}")
+    identity_errors = validate_candidate_identity(candidate)
+    if identity_errors:
+        raise ValueError(f"candidate identity invalid: {identity_errors}")
     if _source_hash(source_text) != candidate["source_hash"]:
         raise ValueError(
             f"source_text hash mismatch for candidate {candidate['candidate_id']}: "

@@ -137,13 +137,13 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "198 passed",
+        "summary": "199 passed",
         "timestamp": null
       },
       {
         "command": "conda run -n llm python scripts/check_docs_drift.py",
         "status": "passed",
-        "summary": "文档漂移检查通过(基线 198)",
+        "summary": "文档漂移检查通过(基线 199)",
         "timestamp": null
       },
       {
