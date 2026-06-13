@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-36-fixtures-golden",
   "title": "Pixiv/Fanbox 最小 fixture 与 golden 稳定性测试(P0.4)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/fixtures-golden",
   "objective": "建立脱敏最小 Pixiv/Fanbox fixture、golden document-revision 与 bilingual/zh 快照,以及 revision/segment ID 稳定性测试,为迁移提供回归底座;不调用真实模型。",
   "github": {
     "issue": 36,
-    "pull_request": null
+    "pull_request": 41
   },
   "scope": {
     "in": [
@@ -54,7 +54,7 @@
     {
       "id": "S3",
       "title": "文档同步与 PR 收尾",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1",
         "S2"
@@ -64,13 +64,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR(说明 data/test→src/core/testdata 的 reconcile),三渠道 triage,CI 绿后合并。",
-    "acceptance": [
-      "PR 合并,issue #36 关闭"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q"
@@ -79,18 +73,22 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "140 passed(131+9)",
-        "timestamp": "2026-06-13T02:07:19Z"
+        "summary": "142 passed(review 修复后)",
+        "timestamp": "2026-06-13T02:19:08Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260613T020719Z-claude-code",
-    "timestamp": "2026-06-13T02:07:19Z",
+    "checkpoint_id": "cp-20260613T021908Z-claude-code",
+    "timestamp": "2026-06-13T02:19:08Z",
     "agent": "claude-code",
-    "summary": "S1-S2 完成,待 PR 收尾",
-    "observed_head": "2e18536"
+    "summary": "任务完成,PR #41 待合并",
+    "observed_head": "eb67b0c"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 37,
+    "task_id": "gh-37-adapter-shadow",
+    "branch": "feat/adapter-shadow"
+  }
 }
