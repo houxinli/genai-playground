@@ -163,6 +163,11 @@ source -> revision -> legacy/new candidates -> evaluations
   逐条修复依赖 P1 的 candidate/repair 闭环；报告见 `logs/inventory/qa_baseline.json`。
 - 当前没有用户 annotation 生命周期和句级定向重译入口。
 - 人名规则尚未实体化、作用域化和版本化，同名跨系列冲突仍需人工避免。
+- **人名预读（name-glossary pre-reading）质量差**（#61）：本地模型自动抽取的人名候选词表错漏多
+  （漏抽、错译、把普通词当人名、同名不统一），实测不可直接信任，仍需人工规则兜底；
+  待 P2 scoped entity store / locked entity translations（见 Development Plan P2.4–P2.5）系统性解决。
+- **历史派生目录待清理**（#62，gated 在 #54 之后）：`data/**` 下 `*_bilingual/*_fixed/*_zh/*_v2/*_namefix/*_trial`
+  等多代中间产物冗余，须在内容完整迁入 Artifact Store 且通过 integrity gate 后再归档/删除。
 - 还没有内建的文件级并发调度器，批量任务提速仍依赖外部手动拆分。
 - metadata 翻译、preset 选择、来源差异目前仍然耦合得不够清晰。
 - 打包已经有元数据回退，但还没有完全摆脱对译后 YAML 的依赖。
@@ -203,8 +208,10 @@ source -> revision -> legacy/new candidates -> evaluations
 1. ~~实现 translate task/result 的 `export-job` / `import-result` 最小闭环~~（#44/#46）。
 2. 补 `validate-result`、context builder、job 目录和 review/repair task。
 3. 为 Codex、Claude Code、Cursor 提供由同一 instruction pack 派生的薄适配。
-4. 建立 scoped entity store、knowledge snapshot、entity linking review 和规则影响分析。
+4. 建立 scoped entity store、knowledge snapshot、entity linking review 和规则影响分析（含 #61 人名预读质量修复）。
 5. 将现有人工 name map 迁移为 locked entity translations，自动预读只进入 candidate。
+
+> Housekeeping（#62）：历史派生目录清理/归档，硬性 gate 在 #54 完成且 integrity 校验无丢失之后执行。
 
 ### P3: 调度、并发与体验
 
