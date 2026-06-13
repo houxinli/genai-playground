@@ -22,6 +22,16 @@ class TestBaselineTest(unittest.TestCase):
         self.assertTrue(CHECK.check_test_baseline("无基线声明", 188))
 
 
+class ParseCollectTest(unittest.TestCase):
+    def test_clean_collect_count(self):
+        self.assertEqual(188, CHECK.parse_collect(0, "188 tests collected in 1.6s"))
+
+    def test_failed_collect_raises(self):
+        # 收集报错(非零退出)即使有 "73 tests collected" 也必须报错,不能当有效计数
+        with self.assertRaises(RuntimeError):
+            CHECK.parse_collect(2, "73 tests collected, 23 errors in 0.5s")
+
+
 class ComponentPathTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
