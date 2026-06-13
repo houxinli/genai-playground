@@ -9,9 +9,15 @@ import unittest
 try:
     from . import candidate_eval as ce
     from .artifact_schemas import validate_artifact
+    from .source_identity import _source_hash
 except ImportError:  # core/ 在 sys.path 上
     import candidate_eval as ce
     from artifact_schemas import validate_artifact
+    from source_identity import _source_hash
+
+
+SOURCE = "彼女は振り返った。"
+_H = _source_hash(SOURCE)
 
 
 def _candidate(text, cid="cand_" + "e" * 16):
@@ -20,8 +26,8 @@ def _candidate(text, cid="cand_" + "e" * 16):
         "candidate_id": cid,
         "document_id": "pixiv:1:2",
         "revision_id": "rev_" + "a" * 16,
-        "segment_id": f"rev_{'a' * 16}:000000:" + "b" * 8,
-        "source_hash": "c" * 16,
+        "segment_id": f"rev_{'a' * 16}:000000:" + _H[:8],
+        "source_hash": _H,
         "text": text,
         "purpose": "translate",
         "parent_candidate_id": None,
@@ -33,9 +39,6 @@ def _candidate(text, cid="cand_" + "e" * 16):
         },
         "created_at": "2026-06-13T00:00:00Z",
     }
-
-
-SOURCE = "彼女は振り返った。"
 
 
 class CandidateEvalTest(unittest.TestCase):
@@ -75,6 +78,16 @@ class CandidateEvalTest(unittest.TestCase):
         b = ce.evaluate_candidate(_candidate("她转过身来。"), SOURCE)
         self.assertEqual(a["evaluation_id"], b["evaluation_id"])
         self.assertEqual(a, b)
+
+
+    def test_source_hash_mismatch_rejected(self):
+        with self.assertRaises(ValueError):
+            ce.evaluate_candidate(_candidate("她转过身来。"), "完全不同的原文")
+
+    def test_created_at_in_identity(self):
+        a = ce.evaluate_candidate(_candidate("她转过身来。"), SOURCE, created_at="2026-01-01T00:00:00Z")
+        b = ce.evaluate_candidate(_candidate("她转过身来。"), SOURCE, created_at="2026-02-02T00:00:00Z")
+        self.assertNotEqual(a["evaluation_id"], b["evaluation_id"])  # created_at 不同 -> id 不同
 
 
 if __name__ == "__main__":
