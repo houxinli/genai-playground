@@ -19,6 +19,7 @@
 
 ### 06月
 - [2026-06-13 开发复盘与系统设计检查点](./2026-06-13-system-design-review.md)
+- [2026-06-13 翻译执行器 harness](./2026-06-13-translate-executor.md)
 - [2026-06-13 candidate QA 评估(P1.3)](./2026-06-13-candidate-eval.md)
 - [2026-06-13 export-job:task/result 协议生成端](./2026-06-13-task-export.md)
 - [2026-06-13 result 导入(import-result)](./2026-06-13-result-import.md)

@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-57-translate-executor",
+  "title": "翻译执行器 harness:共享 instruction pack + 自然语言 translate-job 适配",
+  "status": "active",
+  "branch": "feat/translate-executor",
+  "objective": "agent 中立 instruction pack + Claude/Cursor 薄适配 + make translate-bundle,让编码 agent(SFW=Claude,NSFW=Cursor+Grok)读 job→翻→写 result→import,同一协议。",
+  "github": {
+    "issue": 57,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/docs/executor-instructions.md",
+      ".claude/skills/translate-job",
+      ".cursor/rules/translate-job.mdc",
+      "Makefile translate-bundle",
+      "task_export source-dir 入口(+test)"
+    ],
+    "out": [
+      "candidate v3/store(#52/#54)",
+      "selection(#50)",
+      "真实模型调用"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "instruction pack + 薄适配 + translate-bundle",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "pack 单一真相源;Claude skill/Cursor rule 指向它;make translate-bundle 源→bundle;187 绿;真实 SFW 跑通"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "文档 + PR 收尾",
+      "status": "in_progress",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "PROJECT_STATUS/journal;三渠道 triage;CI 绿;合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S2",
+    "instruction": "开 PR,三渠道 triage,CI 绿后合并。",
+    "acceptance": [
+      "PR 合并,issue #57 关闭"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "187 passed",
+        "timestamp": "2026-06-13T19:50:40Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260613T195040Z-claude-code",
+    "timestamp": "2026-06-13T19:50:40Z",
+    "agent": "claude-code",
+    "summary": "S1 完成,待 PR",
+    "observed_head": "153d9d3"
+  },
+  "next_task": null
+}
