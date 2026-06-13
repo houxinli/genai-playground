@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import sys
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
@@ -22,12 +23,18 @@ SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas"
 ARTIFACT_KINDS = (
     "document-revision",
     "candidate",
+    "attestation",
     "evaluation",
     "document-version",
     "annotation",
     "task",
     "result",
 )
+
+# 内容寻址身份(system-design §2.7):任一版本变化都改变 candidate_id —— 设计要求。
+IDENTITY_VERSION = "candidate-identity-v3"
+NORMALIZATION_VERSION = 1
+ATTESTATION_IDENTITY_VERSION = "attestation-identity-v1"
 
 
 @lru_cache(maxsize=None)
@@ -62,12 +69,46 @@ def canonical_digest(document: Any) -> str:
     return hashlib.sha256(canonical_dumps(document).encode("utf-8")).hexdigest()
 
 
-def candidate_id_for(
-    task_digest: str, result_digest: str, result_candidate_key: str, segment_id: str
+def normalize_text(text: str, normalization_version: int = NORMALIZATION_VERSION) -> str:
+    """归一化译文用于身份与渲染。v1 必须 display-preserving:Unicode NFC + 去尾随空白,
+    不折叠内部空白、不改标点/引号,保证 normalized text == 可直接渲染的译文(system-design §2.7)。"""
+    if normalization_version != 1:
+        raise ValueError(f"unsupported normalization_version: {normalization_version}")
+    return unicodedata.normalize("NFC", text).rstrip()
+
+
+def candidate_id_v3(
+    revision_id: str,
+    segment_id: str,
+    source_hash: str,
+    normalized_text: str,
+    normalization_version: int = NORMALIZATION_VERSION,
+    identity_version: str = IDENTITY_VERSION,
 ) -> str:
-    """system-design §9.2 的确定性幂等键派生。"""
-    payload = f"{task_digest}:{result_digest}:{result_candidate_key}:{segment_id}"
-    return "cand_" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    """内容寻址 candidate_id(system-design §2.7):完整 64-hex。
+    同 (revision, segment, source_hash, 归一化文本) → 同 id,跨 producer 文本等价去重。
+    传入的 normalized_text 必须已经过 normalize_text(同 normalization_version)。"""
+    payload = {
+        "identity_version": identity_version,
+        "revision_id": revision_id,
+        "segment_id": segment_id,
+        "source_hash": source_hash,
+        "normalization_version": normalization_version,
+        "normalized_text": normalized_text,
+    }
+    return "cand_" + canonical_digest(payload)
+
+
+def attestation_id_for(core: Dict[str, Any]) -> str:
+    """attestation_id 确定性派生:attestation 除 id/schema_version 外的全部字段参与。
+    同 Result/同 legacy 重放 → 同 id,append-only 不新增记录。"""
+    payload = {"attestation_identity_version": ATTESTATION_IDENTITY_VERSION, **core}
+    return "att_" + canonical_digest(payload)
+
+
+def build_attestation(core: Dict[str, Any]) -> Dict[str, Any]:
+    """由 core(全部业务字段)组装完整 attestation 工件:补 schema_version 与确定性 attestation_id。"""
+    return {"schema_version": 1, "attestation_id": attestation_id_for(core), **core}
 
 
 def check_result_against_task(task: Dict[str, Any], result: Dict[str, Any]) -> List[str]:

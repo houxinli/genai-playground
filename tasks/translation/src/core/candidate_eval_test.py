@@ -20,24 +20,16 @@ SOURCE = "彼女は振り返った。"
 _H = _source_hash(SOURCE)
 
 
-def _candidate(text, cid="cand_" + "e" * 16):
+def _candidate(text, cid="cand_" + "e" * 64):
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "candidate_id": cid,
         "document_id": "pixiv:1:2",
         "revision_id": "rev_" + "a" * 16,
         "segment_id": f"rev_{'a' * 16}:000000:" + _H[:8],
         "source_hash": _H,
+        "normalization_version": 1,
         "text": text,
-        "purpose": "translate",
-        "parent_candidate_id": None,
-        "producer": {"type": "harness", "name": "claude-code", "model": None, "harness": "claude-code"},
-        "provenance": {
-            "task_id": "task_" + "f" * 12, "task_digest": "1" * 16, "result_digest": "2" * 16,
-            "result_candidate_key": "option-a", "prompt_version": None, "recipe_id": None,
-            "knowledge_snapshot_id": None,
-        },
-        "created_at": "2026-06-13T00:00:00Z",
     }
 
 

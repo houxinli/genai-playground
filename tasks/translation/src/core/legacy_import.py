@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""把存量 bilingual 目录按显式标签导入为 legacy Candidate(迁移不丢历史)。
+"""把存量 bilingual 目录按显式标签导入为 Candidate v3 + legacy Attestation(迁移不丢历史)。
 
 - 以 source_identity 从源构建 DocumentRevision;以源 segment 作锚点反解 bilingual
   逐 segment 译文(锚点法不依赖 bilingual 空行布局,且保留空译文槽、不串段)。
-- 每个 (目录标签, segment) 生成一个 producer.type=legacy 的 Candidate,
-  candidate_id 由 (标签, segment_id, 译文) 确定性派生 → 重复导入幂等、零新增。
-- created_at 取源 published_at(稳定),保证同 id 工件内容可复现。
+- 每个 segment 生成一个**内容寻址**的 Candidate v3(纯内容);译文经 normalization_version=1
+  归一化后取 64-hex content id → 同译文跨标签自动去重。
+- 每个 (标签, candidate) 生成一条 legacy Attestation(append-only 来源),attestation_id 确定性派生 →
+  重复导入幂等、零新增;created_at 取源 published_at(稳定)。
 - 写入做冲突检测(同 id 不同内容报错)与原子 rename。
 不写发布版本,不切主路径(那是 P1)。
 """
@@ -14,7 +15,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -22,20 +22,24 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 try:
-    from .artifact_schemas import validate_artifact
+    from .artifact_schemas import (
+        build_attestation,
+        candidate_id_v3,
+        normalize_text,
+        validate_artifact,
+    )
     from .source_identity import _PROVIDER_SPEC, build_document_revision
 except ImportError:  # 作为脚本运行:把 tasks/translation/src 加入 path,走 core.* 以解析 utils
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core.artifact_schemas import validate_artifact
+    from core.artifact_schemas import (
+        build_attestation,
+        candidate_id_v3,
+        normalize_text,
+        validate_artifact,
+    )
     from core.source_identity import _PROVIDER_SPEC, build_document_revision
 
 _FALLBACK_CREATED_AT = "1970-01-01T00:00:00Z"
-
-
-def legacy_candidate_id(label: str, segment_id: str, text: str) -> str:
-    """legacy candidate 无 task/result,身份由 目录标签 + segment + 译文 确定性派生。"""
-    payload = f"legacy:{label}:{segment_id}:{text}"
-    return "cand_" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def _split_front_matter(text: str) -> Tuple[List[str], List[str]]:
@@ -134,8 +138,8 @@ def _legacy_created_at(revision: Dict[str, Any]) -> str:
 
 def build_legacy_candidates(
     provider: str, source_path: Path, bilingual_path: Path, label: str
-) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """对一个 bilingual 文件构建 legacy Candidate 列表(schema 已校验)。"""
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+    """对一个 bilingual 文件构建 (Candidate v3 列表, legacy Attestation 列表, issues)(schema 已校验)。"""
     revision = build_document_revision(provider, Path(source_path))
     bilingual_text = Path(bilingual_path).read_text(encoding="utf-8", errors="ignore")
     translations, issues = parse_bilingual_translations(revision, bilingual_text)
@@ -143,49 +147,66 @@ def build_legacy_candidates(
 
     segs = {s["segment_id"]: s for s in revision["segments"]}
     candidates: List[Dict[str, Any]] = []
+    attestations: List[Dict[str, Any]] = []
     for segment_id, text in translations.items():
         seg = segs[segment_id]
+        normalized = normalize_text(text)
+        candidate_id = candidate_id_v3(
+            revision["revision_id"], segment_id, seg["source_hash"], normalized
+        )
         candidate = {
-            "schema_version": 2,
-            "candidate_id": legacy_candidate_id(label, segment_id, text),
+            "schema_version": 3,
+            "candidate_id": candidate_id,
             "document_id": revision["document_id"],
             "revision_id": revision["revision_id"],
             "segment_id": segment_id,
             "source_hash": seg["source_hash"],
-            "text": text,
-            "purpose": "legacy",
-            "parent_candidate_id": None,
-            "producer": {"type": "legacy", "name": label, "model": None, "harness": None},
-            "provenance": {
-                "task_id": None, "task_digest": None, "result_digest": None,
-                "result_candidate_key": None, "prompt_version": None,
-                "recipe_id": label, "knowledge_snapshot_id": None,
-            },
-            "created_at": created_at,
+            "normalization_version": 1,
+            "text": normalized,
         }
         errors = validate_artifact("candidate", candidate)
         if errors:
             raise ValueError(f"built legacy candidate invalid: {errors}")
         candidates.append(candidate)
-    return candidates, issues
+
+        attestation = build_attestation({
+            "candidate_id": candidate_id,
+            "producer": {"type": "legacy", "name": label, "model": None, "harness": None},
+            "purpose": "legacy",
+            "parent_candidate_id": None,
+            "task_id": None,
+            "task_digest": None,
+            "result_digest": None,
+            "result_candidate_key": None,
+            "legacy_label": label,
+            "knowledge_snapshot_id": None,
+            "created_at": created_at,
+        })
+        errors = validate_artifact("attestation", attestation)
+        if errors:
+            raise ValueError(f"built legacy attestation invalid: {errors}")
+        attestations.append(attestation)
+    return candidates, attestations, issues
 
 
-def write_candidates(candidates: List[Dict[str, Any]], store_dir: Path) -> Tuple[int, int]:
-    """幂等写入 candidate 工件。已存在且内容一致则跳过;同 id 不同内容报错(损坏)。
+def write_artifacts(
+    artifacts: List[Dict[str, Any]], store_dir: Path, id_key: str
+) -> Tuple[int, int]:
+    """幂等写入工件(候选或 attestation)。已存在且内容一致则跳过;同 id 不同内容报错(损坏)。
     写入走同目录临时文件 + fsync + 原子 rename,避免中断留下截断 JSON。"""
     store = Path(store_dir)
     store.mkdir(parents=True, exist_ok=True)
     written = skipped = 0
-    for candidate in candidates:
-        path = store / f"{candidate['candidate_id']}.json"
-        payload = json.dumps(candidate, ensure_ascii=False, indent=2) + "\n"
+    for artifact in artifacts:
+        path = store / f"{artifact[id_key]}.json"
+        payload = json.dumps(artifact, ensure_ascii=False, indent=2) + "\n"
         if path.exists():
             existing = path.read_text(encoding="utf-8")
-            if json.loads(existing) == candidate:
+            if json.loads(existing) == artifact:
                 skipped += 1
                 continue
             raise ValueError(
-                f"candidate {candidate['candidate_id']} already exists with different content "
+                f"artifact {artifact[id_key]} already exists with different content "
                 f"({path}); refusing to overwrite immutable artifact"
             )
         tmp = path.with_suffix(".json.tmp")
@@ -198,13 +219,25 @@ def write_candidates(candidates: List[Dict[str, Any]], store_dir: Path) -> Tuple
     return written, skipped
 
 
+def write_candidates(candidates: List[Dict[str, Any]], store_dir: Path) -> Tuple[int, int]:
+    """写入 Candidate v3 工件(write_artifacts 的 candidate_id 包装)。"""
+    return write_artifacts(candidates, store_dir, "candidate_id")
+
+
+def write_attestations(attestations: List[Dict[str, Any]], store_dir: Path) -> Tuple[int, int]:
+    """写入 Attestation 工件(write_artifacts 的 attestation_id 包装)。"""
+    return write_artifacts(attestations, store_dir, "attestation_id")
+
+
 def import_directory(
     provider: str, source_dir: Path, bilingual_dir: Path, label: str, store_dir: Path
 ) -> Dict[str, Any]:
     """把一个 bilingual 目录整体导入(按文件名配对源),返回导入报告。"""
     source_dir, bilingual_dir = Path(source_dir), Path(bilingual_dir)
     report: Dict[str, Any] = {
-        "label": label, "posts": 0, "candidates": 0, "written": 0, "skipped": 0,
+        "label": label, "posts": 0, "candidates": 0,
+        "candidates_written": 0, "candidates_skipped": 0,
+        "attestations_written": 0, "attestations_skipped": 0,
         "posts_with_issues": [], "missing_source": [],
     }
     for bilingual_path in sorted(bilingual_dir.glob("*.txt")):
@@ -213,11 +246,16 @@ def import_directory(
             report["missing_source"].append(bilingual_path.name)
             continue
         report["posts"] += 1
-        candidates, issues = build_legacy_candidates(provider, source_path, bilingual_path, label)
-        written, skipped = write_candidates(candidates, store_dir)
+        candidates, attestations, issues = build_legacy_candidates(
+            provider, source_path, bilingual_path, label
+        )
+        c_written, c_skipped = write_candidates(candidates, store_dir)
+        a_written, a_skipped = write_attestations(attestations, store_dir)
         report["candidates"] += len(candidates)
-        report["written"] += written
-        report["skipped"] += skipped
+        report["candidates_written"] += c_written
+        report["candidates_skipped"] += c_skipped
+        report["attestations_written"] += a_written
+        report["attestations_skipped"] += a_skipped
         if issues:
             report["posts_with_issues"].append({"post": bilingual_path.name, "issues": issues})
     return report
@@ -232,9 +270,16 @@ def main() -> int:
     parser.add_argument("--store", required=True, type=Path, help="candidate 工件输出目录")
     args = parser.parse_args()
 
-    candidates, issues = build_legacy_candidates(args.provider, args.source, args.bilingual, args.label)
-    written, skipped = write_candidates(candidates, args.store)
-    print(f"candidates={len(candidates)} written={written} skipped={skipped} issues={len(issues)}")
+    candidates, attestations, issues = build_legacy_candidates(
+        args.provider, args.source, args.bilingual, args.label
+    )
+    c_written, c_skipped = write_candidates(candidates, args.store)
+    a_written, a_skipped = write_attestations(attestations, args.store)
+    print(
+        f"candidates={len(candidates)} written={c_written} skipped={c_skipped} "
+        f"attestations={len(attestations)} att_written={a_written} att_skipped={a_skipped} "
+        f"issues={len(issues)}"
+    )
     for issue in issues:
         print(f"- {issue}", file=sys.stderr)
     return 0
