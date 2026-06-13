@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-37-adapter-shadow",
+  "title": "source adapter + DocumentRevision/Segment + renderer shadow path(P0.5)",
+  "status": "active",
+  "branch": "feat/adapter-shadow",
+  "objective": "把现有源转成 DocumentRevision/Segment(ID 稳定),renderer 从 revision+译文渲染 bilingual/zh 并与旧 writer 字节一致(golden 验证);旧 make translate-* 不受影响。",
+  "github": {
+    "issue": 37,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/source_adapter.py(+test)",
+      "tasks/translation/src/core/renderer.py(+test)",
+      "golden render 快照",
+      "PROJECT_STATUS/journal"
+    ],
+    "out": [
+      "zh renderer(拆为 #42)",
+      "candidate/version 模型(P1)",
+      "切主路径"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "source adapter:目录→DocumentRevision",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "枚举源 .txt、委托 source_identity;fanbox 走 creator 身份;测试通过"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "bilingual renderer + golden shadow",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "front matter 配对 + 正文 pair + 空行保留,与现格式逐字节一致;7 测试;全量 149"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "zh 拆 follow-up + 文档 + PR 收尾",
+      "status": "in_progress",
+      "depends_on": [
+        "S1",
+        "S2"
+      ],
+      "acceptance": [
+        "#42 已建;PROJECT_STATUS/journal 更新;三渠道 triage;CI 绿;合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR(注明 zh 拆 #42 的 reconcile),三渠道 triage,CI 绿后合并。",
+    "acceptance": [
+      "PR 合并,issue #37 关闭"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "149 passed(142+7)",
+        "timestamp": "2026-06-13T04:46:34Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260613T044634Z-claude-code",
+    "timestamp": "2026-06-13T04:46:34Z",
+    "agent": "claude-code",
+    "summary": "S1-S2 完成,待 PR 收尾",
+    "observed_head": "6786681"
+  },
+  "next_task": null
+}

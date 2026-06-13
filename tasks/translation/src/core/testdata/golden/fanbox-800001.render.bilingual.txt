@@ -1,0 +1,23 @@
+---
+post_id: 800001
+title: 散歩
+title: 散步
+excerpt: フィクスチャ用のサンプル。
+excerpt: fixture 用的样本。
+creator:
+  id: 800000
+  name: テスト作者
+fee_required: 0
+is_restricted: False
+published_at: 2026-02-02T10:00:00+09:00
+updated_at: 
+body_type: article
+tags: [テスト, 散歩]
+source_url: https://user_testfanbox.fanbox.cc/posts/800001
+lang: ja
+---
+公園を歩いた。
+在公园里散步了。
+
+犬がいた。
+有一只狗。
