@@ -138,15 +138,19 @@ def export_job(revision: Dict[str, Any], segment_ids: List[str], **kwargs: Any) 
 
 
 def revision_from_source(provider: str, source_dir: Path, document_id: str) -> Dict[str, Any]:
-    """从源目录适配出指定 document 的 DocumentRevision(包装 source_adapter)。"""
+    """只定位并构建指定 document 的 DocumentRevision——不解析整目录,无关文件的错误不影响目标。"""
     try:
-        from .source_adapter import adapt_directory
+        from .source_identity import build_document_revision
     except ImportError:
-        from core.source_adapter import adapt_directory
-    for rev in adapt_directory(provider, source_dir):
-        if rev["document_id"] == document_id:
-            return rev
-    raise ValueError(f"document {document_id} not found under {source_dir}")
+        from core.source_identity import build_document_revision
+    source_id = document_id.rsplit(":", 1)[-1]
+    path = Path(source_dir) / f"{source_id}.txt"
+    if not path.is_file():
+        raise ValueError(f"source file for {document_id} not found: {path}")
+    rev = build_document_revision(provider, path)
+    if rev["document_id"] != document_id:
+        raise ValueError(f"built document_id {rev['document_id']} != requested {document_id}")
+    return rev
 
 
 def main() -> int:
@@ -167,7 +171,8 @@ def main() -> int:
     else:
         parser.error("需 --revision,或 --source-dir + --provider + --document")
 
-    segment_ids = args.segment or [s["segment_id"] for s in revision["segments"] if s["kind"] == "body"]
+    # 默认导出全部可翻译段(body + metadata.*),否则 metadata 无候选会导致渲染缺译文
+    segment_ids = args.segment or [s["segment_id"] for s in revision["segments"]]
     bundle = export_job(revision, segment_ids, task_type=args.task_type)
     args.out.write_text(json.dumps(bundle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"task_id={bundle['task']['task_id']} segments={len(bundle['segments'])} out={args.out}")

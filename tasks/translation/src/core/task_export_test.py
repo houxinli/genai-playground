@@ -120,6 +120,15 @@ class TaskExportTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             te.revision_from_source("pixiv", SRC.parent, "pixiv:0:0")
 
+    def test_revision_from_source_ignores_unrelated_bad_file(self):
+        import tempfile, shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            shutil.copy(SRC, tmp / "700001.txt")
+            (tmp / "junk.txt").write_text("不是合法 front matter", encoding="utf-8")  # 无关坏文件
+            rev = te.revision_from_source("pixiv", tmp, "pixiv:700000:700001")
+            self.assertEqual("pixiv:700000:700001", rev["document_id"])
+
 
 if __name__ == "__main__":
     unittest.main()
