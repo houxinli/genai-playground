@@ -38,10 +38,23 @@
   fixture(pixiv 700001)端到端验证 import_directory → 分片落盘 → 第二个 label 去重(N candidate + 2N attestation),
   机制等价;真实库批量导入是 ops 步骤。
 
+## Review triage（三通道，Codex PR #69）
+
+3 条全采纳,均为写入边界正确性的核心:
+
+- **P1 integrity 没接入写入路径**:`verify_references` 原来只在测试里调用,生产 `put_many` 只做 schema+身份。
+  → put_many 默认 `verify=True`,提交前对全部 staged 工件跑 `verify_references`,resolver=现有∪本批 staged∪
+  已提交 shard(不在本批的 kind 如更早入库的 revision 回落 `self.get`)。result 导入前要求源 revision 已入库,
+  否则整批 quarantine。
+- **P1 跨 shard 非原子**:原实现逐 kind 锁+写,后一个 shard 冲突会留下前一个已 `os.replace` 的半批。
+  → 改两阶段:先锁住全部相关 shard、做冲突预检 + integrity,全通过后再统一提交。按 kind 排序加锁避免死锁。
+- **P2 document_id 与分片键不一致**:调用方把 A 文档工件传给 B 的 document_id 会污染 B 的 shard。
+  → 对含 document_id 的 kind,写入前强制其值 == 分片键参数。
+
 ## 验证
 
-`pytest tasks/translation/src -q` 全绿;基线 208 → 220(新增 store 14 测试 + importer 迁移测试调整)。
-`check_docs_drift` / `validate_agent_tasks` 通过。
+`pytest tasks/translation/src -q` 全绿;基线 208 → 224(store 测试含 integrity-at-write/跨 shard 原子/
+document_id 一致 + importer 迁移与 revision 预置)。`check_docs_drift` / `validate_agent_tasks` 通过。
 
 ## 仍待
 

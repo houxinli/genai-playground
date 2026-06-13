@@ -29,7 +29,7 @@ try:
         validate_artifact,
         validate_candidate_identity,
     )
-    from .artifact_store import ArtifactStore
+    from .artifact_store import ArtifactStore, StoreConflictError, StoreIntegrityError
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.artifact_schemas import (
@@ -41,7 +41,7 @@ except ImportError:  # 作为脚本运行
         validate_artifact,
         validate_candidate_identity,
     )
-    from core.artifact_store import ArtifactStore
+    from core.artifact_store import ArtifactStore, StoreConflictError, StoreIntegrityError
 
 
 # Agent/API 的 Result 是不可信输入(system-design §16):限制大小与数量,防止内存/磁盘耗尽。
@@ -153,7 +153,17 @@ def import_result(task: Dict[str, Any], result: Dict[str, Any], store: ArtifactS
             "written": 0, "skipped": 0, "candidate_ids": [],
             "attestations_written": 0, "attestations_skipped": 0,
         }
-    report = store.put_many(task["document_id"], [*candidates, *attestations])
+    try:
+        # integrity gate 要求 revision 已在 store(result 导入前必有源 revision 入库);
+        # 悬空/损坏均整批拒绝,不落盘。
+        report = store.put_many(task["document_id"], [*candidates, *attestations])
+    except (StoreIntegrityError, StoreConflictError) as exc:
+        reasons = getattr(exc, "reasons", None) or [str(exc)]
+        return {
+            "quarantined": True, "reasons": reasons,
+            "written": 0, "skipped": 0, "candidate_ids": [],
+            "attestations_written": 0, "attestations_skipped": 0,
+        }
     kinds = report["kinds"]
     return {
         "quarantined": False,

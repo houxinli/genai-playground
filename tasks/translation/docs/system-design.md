@@ -172,8 +172,11 @@ Attestation schema(append-only 来源)已进入主干;`artifact_schemas.candidat
 冲突检测(同 id 同 payload skip / 不同 payload `StoreConflictError`)→ 写全量临时 + fsync + 原子
 rename + dir fsync;幂等仅凭 JSONL。`verify_references(artifact, resolver)` 做 cross-artifact 引用
 完整性(candidate↔revision.source_hash、attestation/evaluation→真 candidate、version selection 同
-revision/segment),resolver 按 document 作用域,不替代 Task/Result stale-envelope 校验。legacy/result
-importer 已迁移走 store(legacy 连同 DocumentRevision 一并入库)。**仍待 #55**:SQLite 只读投影。
+revision/segment),**在写入边界强制执行**:put_many 先锁全部相关 shard、做冲突预检 + integrity
+(resolver=现有∪本批 staged∪已提交 shard),全通过后再统一提交 → 跨 shard 任一失败不落半批;含
+document_id 的 kind 强制与分片键一致。不替代 Task/Result stale-envelope 校验。legacy/result importer
+已迁移走 store(legacy 连同 DocumentRevision 一并入库;result 导入前要求源 revision 已入库,否则整批
+quarantine)。**仍待 #55**:SQLite 只读投影。
 
 ## 3. 系统总览
 

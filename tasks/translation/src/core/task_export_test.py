@@ -86,6 +86,7 @@ class TaskExportTest(unittest.TestCase):
         self.assertEqual([], validate_artifact("result", result))
         with tempfile.TemporaryDirectory() as tmp:
             store = ArtifactStore(Path(tmp))
+            store.put_many(rev["document_id"], [rev])  # 先入源 revision,供 integrity gate
             report = ri.import_result(task, result, store)
             self.assertFalse(report["quarantined"], report)
             self.assertEqual(len(bundle["segments"]), report["written"])

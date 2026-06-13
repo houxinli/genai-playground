@@ -43,6 +43,27 @@ def make_task():
     }
 
 
+def make_revision():
+    # 与 make_task 对齐的最小 revision(document_id/revision_id/segment/source_hash 一致),
+    # 供 store integrity gate 解析 candidate↔revision。
+    return {
+        "schema_version": 1,
+        "document_id": DOC,
+        "revision_id": REV,
+        "source": {"provider": "pixiv", "creator_id": "50235390", "source_id": "12430834",
+                   "url": "https://example.invalid/12430834"},
+        "metadata": {"title": "标题"},
+        "segments": [{"segment_id": SEG, "ordinal": 42, "kind": "body",
+                      "source_text": "原文", "source_hash": HASH}],
+    }
+
+
+def _store_with_revision(tmp):
+    store = ArtifactStore(Path(tmp))
+    store.put_many(DOC, [make_revision()])
+    return store
+
+
 def make_result(text="她转过身来。"):
     return {
         "schema_version": 1,
@@ -79,7 +100,7 @@ class ImportResultTest(unittest.TestCase):
 
     def test_import_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ArtifactStore(Path(tmp))
+            store = _store_with_revision(tmp)
             r1 = ri.import_result(make_task(), make_result(), store)
             self.assertEqual((1, 0), (r1["written"], r1["skipped"]))
             self.assertEqual((1, 0), (r1["attestations_written"], r1["attestations_skipped"]))
@@ -88,6 +109,14 @@ class ImportResultTest(unittest.TestCase):
             self.assertEqual((0, 1), (r2["attestations_written"], r2["attestations_skipped"]))
             self.assertEqual(r1["candidate_ids"], r2["candidate_ids"])
             self.assertEqual(r1["attestation_ids"], r2["attestation_ids"])
+
+    def test_missing_revision_quarantined_no_write(self):
+        # 没有先入 revision 的 store:integrity gate 拒绝,整批 quarantine,零落盘
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ArtifactStore(Path(tmp))  # 未 seed revision
+            report = ri.import_result(make_task(), make_result(), store)
+            self.assertTrue(report["quarantined"])
+            self.assertEqual([], list(Path(tmp).rglob("*.jsonl")))
 
     def test_stale_source_hash_quarantined_no_write(self):
         result = make_result()
@@ -106,7 +135,7 @@ class ImportResultTest(unittest.TestCase):
         result_b["producer"] = {"type": "api", "name": "openrouter", "model": "grok-4.1-fast"}
         result_b["completed_at"] = "2026-06-14T00:00:00Z"
         with tempfile.TemporaryDirectory() as tmp:
-            store = ArtifactStore(Path(tmp))
+            store = _store_with_revision(tmp)
             ra = ri.import_result(make_task(), result_a, store)
             rb = ri.import_result(make_task(), result_b, store)
             self.assertEqual(ra["candidate_ids"], rb["candidate_ids"])  # 文本等价去重

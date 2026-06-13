@@ -105,7 +105,7 @@ class PutManyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = astore.ArtifactStore(Path(tmp))
             cand = make_candidate()
-            store.put_many(DOC, [cand, make_attestation(cand["candidate_id"])])
+            store.put_many(DOC, [make_revision(), cand, make_attestation(cand["candidate_id"])])
             self.assertTrue(store.shard_path("candidate", DOC).exists())
             self.assertTrue(store.shard_path("attestation", DOC).exists())
             # 没有遗留临时文件
@@ -115,7 +115,7 @@ class PutManyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = astore.ArtifactStore(Path(tmp))
             cand = make_candidate()
-            store.put_many(DOC, [cand, make_attestation(cand["candidate_id"], "dir_bilingual")])
+            store.put_many(DOC, [make_revision(), cand, make_attestation(cand["candidate_id"], "dir_bilingual")])
             store.put_many(DOC, [cand, make_attestation(cand["candidate_id"], "dir_bilingual_v2")])
             self.assertEqual(1, len(store.list_shard("candidate", DOC)))
             self.assertEqual(2, len(store.list_shard("attestation", DOC)))
@@ -145,10 +145,38 @@ class PutManyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = astore.ArtifactStore(Path(tmp))
             cand = make_candidate()
-            store.put_many(DOC, [cand])
+            store.put_many(DOC, [make_revision(), cand])
             self.assertTrue(store.exists("candidate", DOC, cand["candidate_id"]))
             self.assertEqual(cand, store.get("candidate", DOC, cand["candidate_id"]))
             self.assertFalse(store.exists("candidate", DOC, "cand_" + "0" * 64))
+
+    def test_integrity_gate_rejects_candidate_without_revision(self):
+        # 写入边界强制 integrity:没有对应 DocumentRevision 的 candidate 整批拒绝,零落盘
+        with tempfile.TemporaryDirectory() as tmp:
+            store = astore.ArtifactStore(Path(tmp))
+            with self.assertRaises(astore.StoreIntegrityError):
+                store.put_many(DOC, [make_candidate()])
+            self.assertEqual([], list(Path(tmp).rglob("*.jsonl")))
+
+    def test_document_id_mismatch_rejected(self):
+        # 工件自带 document_id 与分片键不一致 → 拒绝(防污染错误文档 shard)
+        with tempfile.TemporaryDirectory() as tmp:
+            store = astore.ArtifactStore(Path(tmp))
+            with self.assertRaises(ValueError):
+                store.put_many("pixiv:999:888", [make_revision()])  # revision.document_id == DOC
+
+    def test_all_or_nothing_across_shards_on_conflict(self):
+        # 一批跨多 shard:某 shard 冲突时,不得留下其它 shard 的半批提交
+        with tempfile.TemporaryDirectory() as tmp:
+            store = astore.ArtifactStore(Path(tmp))
+            store.put_many(DOC, [make_revision()])  # 先有 revision
+            new_cand = make_candidate("另一句译文")           # 合法、身份自洽、revision 已在 store
+            corrupt_rev = make_revision()
+            corrupt_rev["metadata"] = {"title": "被改的标题"}  # 同 revision_id 不同内容 → 冲突
+            with self.assertRaises(astore.StoreConflictError):
+                store.put_many(DOC, [new_cand, corrupt_rev])
+            # candidate 不得因另一个 shard 冲突而落盘
+            self.assertFalse(store.exists("candidate", DOC, new_cand["candidate_id"]))
 
 
 class VerifyReferencesTest(unittest.TestCase):

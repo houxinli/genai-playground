@@ -17,6 +17,7 @@ SQLite 投影(#55)只读本 store,不作第二个写入真相源。
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import json
 import os
@@ -51,6 +52,14 @@ Resolver = Callable[[str, str], Optional[Dict[str, Any]]]
 
 class StoreConflictError(Exception):
     """同 id 不同 canonical payload:不可变工件被改/损坏/算法漂移,必须 fatal,不静默覆盖。"""
+
+
+class StoreIntegrityError(Exception):
+    """写入前 cross-artifact 引用完整性失败(悬空引用/source_hash 不符等),整批拒绝,不落盘。"""
+
+    def __init__(self, reasons: List[str]):
+        super().__init__("; ".join(reasons))
+        self.reasons = reasons
 
 
 def verify_references(artifact: Dict[str, Any], resolver: Resolver) -> List[str]:
@@ -191,33 +200,41 @@ class ArtifactStore:
             if id_errors:
                 raise ValueError(f"candidate identity invalid: {id_errors}")
 
-    def put_many(self, document_id: str, artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """把一批工件原子写入对应文档分片。按 kind 分组,每 shard 独立锁+原子批写。
-        返回每 kind 的 {written, skipped} 与 id 列表。先校验全部再写,避免半批落盘。"""
+    def put_many(
+        self, document_id: str, artifacts: List[Dict[str, Any]], verify: bool = True
+    ) -> Dict[str, Any]:
+        """把一批工件原子写入对应文档分片(写入边界唯一 gate)。两阶段保证"任一失败不落半批":
+        阶段A 锁住全部相关 shard → 校验(schema + candidate 身份 + document_id 一致) → 冲突预检 →
+              (verify 时)对全部 staged 工件跑 verify_references(resolver=现有∪本批 staged);
+        阶段B 全部预检通过后,再统一对有变更的 shard 原子提交。
+        verify=False 仅供测试纯机制(分片/冲突),生产路径默认强制 integrity。"""
         grouped: Dict[str, List[Dict[str, Any]]] = {}
         for artifact in artifacts:
             kind = kind_of(artifact)
-            self._validate(kind, artifact)  # 写前先校验全部(任一失败不落盘)
+            self._validate(kind, artifact)  # schema + candidate 身份
+            if "document_id" in artifact and artifact["document_id"] != document_id:
+                raise ValueError(
+                    f"{kind} 自带 document_id {artifact['document_id']} != 分片键 {document_id}"
+                    "(拒绝路由到错误文档 shard)"
+                )
             grouped.setdefault(kind, []).append(artifact)
 
-        report: Dict[str, Any] = {"document_id": document_id, "kinds": {}}
-        for kind, items in grouped.items():
-            report["kinds"][kind] = self._put_shard(kind, document_id, items)
-        return report
-
-    def _put_shard(self, kind: str, document_id: str, items: List[Dict[str, Any]]) -> Dict[str, Any]:
-        id_field = ID_FIELDS[kind]
-        path = self.shard_path(kind, document_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path = path.with_suffix(path.suffix + ".lock")
-        written_ids: List[str] = []
-        skipped_ids: List[str] = []
-        with lock_path.open("w") as lock_fh:
-            fcntl.flock(lock_fh, fcntl.LOCK_EX)
-            try:
+        # 固定按 kind 排序加锁,避免并发 put_many 因加锁顺序不同而死锁。
+        with contextlib.ExitStack() as stack:
+            shards: Dict[str, Dict[str, Any]] = {}
+            combined: Dict[Tuple[str, str], Dict[str, Any]] = {}  # (kind,id)->工件:现有∪staged
+            for kind in sorted(grouped):
+                id_field = ID_FIELDS[kind]
+                path = self.shard_path(kind, document_id)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                lock_fh = stack.enter_context(path.with_suffix(path.suffix + ".lock").open("w"))
+                fcntl.flock(lock_fh, fcntl.LOCK_EX)
                 existing = _read_shard(path)
+                for aid, art in existing.items():
+                    combined[(kind, aid)] = art
                 staged: Dict[str, Dict[str, Any]] = {}
-                for artifact in items:
+                skipped_ids: List[str] = []
+                for artifact in grouped[kind]:
                     aid = artifact[id_field]
                     prior = staged.get(aid) or existing.get(aid)
                     if prior is not None:
@@ -229,18 +246,37 @@ class ArtifactStore:
                             f"{kind} {aid} 已存在且内容不同({path});拒绝覆盖不可变工件"
                         )
                     staged[aid] = artifact
-                    written_ids.append(aid)
-                if staged:
-                    merged = list(existing.values()) + list(staged.values())
-                    _atomic_write_shard(path, merged)
-            finally:
-                fcntl.flock(lock_fh, fcntl.LOCK_UN)
-        return {"written": len(written_ids), "skipped": len(skipped_ids),
-                "written_ids": written_ids, "skipped_ids": skipped_ids}
+                    combined[(kind, aid)] = artifact
+                shards[kind] = {"path": path, "existing": existing,
+                                "staged": staged, "skipped_ids": skipped_ids}
 
-    def put(self, document_id: str, artifact: Dict[str, Any]) -> Dict[str, Any]:
+            if verify:
+                # 本批(现有∪staged)优先;不在本批的 kind(如更早入库的 revision)回落到已提交 shard。
+                def resolver(k: str, i: str) -> Optional[Dict[str, Any]]:
+                    if (k, i) in combined:
+                        return combined[(k, i)]
+                    return self.get(k, document_id, i)
+                errors: List[str] = []
+                for sh in shards.values():
+                    for artifact in sh["staged"].values():
+                        errors += verify_references(artifact, resolver)
+                if errors:
+                    raise StoreIntegrityError(errors)
+
+            # 阶段B:全部预检通过,统一提交(此后只剩物理写,不再有逻辑失败)。
+            report: Dict[str, Any] = {"document_id": document_id, "kinds": {}}
+            for kind, sh in shards.items():
+                if sh["staged"]:
+                    _atomic_write_shard(sh["path"], list(sh["existing"].values()) + list(sh["staged"].values()))
+                report["kinds"][kind] = {
+                    "written": len(sh["staged"]), "skipped": len(sh["skipped_ids"]),
+                    "written_ids": list(sh["staged"].keys()), "skipped_ids": sh["skipped_ids"],
+                }
+            return report
+
+    def put(self, document_id: str, artifact: Dict[str, Any], verify: bool = True) -> Dict[str, Any]:
         """单工件写入,委托给 put_many。"""
-        return self.put_many(document_id, [artifact])
+        return self.put_many(document_id, [artifact], verify=verify)
 
     def get(self, kind: str, document_id: str, artifact_id: str) -> Optional[Dict[str, Any]]:
         return _read_shard(self.shard_path(kind, document_id)).get(artifact_id)

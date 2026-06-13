@@ -95,7 +95,9 @@ source -> revision -> legacy/new candidates -> evaluations
 - 冲突保留：同 id 同 payload skip / 不同 payload `StoreConflictError`；幂等仅凭 JSONL，不依赖外部索引。
 - `verify_references(artifact, resolver)`：candidate↔revision.source_hash、attestation/evaluation→真 candidate、
   version selection 同 revision/segment；resolver 按 document 作用域，不替代 stale-envelope 校验。
-- legacy/result importer 迁移走 store（legacy 连 DocumentRevision 一并入库）；旧 flat write 移除。测试基线 208 → 220。
+- legacy/result importer 迁移走 store（legacy 连 DocumentRevision 一并入库）；旧 flat write 移除。
+- 写入边界强制 `verify_references`（resolver=现有∪本批∪已提交 shard），并先锁全部 shard 预检（冲突+integrity）
+  再统一提交（跨 shard 任一失败不落半批）；含 document_id 的 kind 强制与分片键一致（PR #69 review）。测试基线 208 → 224。
 
 2026-06-13 Candidate v3 + Attestation（#52，P1 第一步）：
 
