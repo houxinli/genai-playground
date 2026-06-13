@@ -29,7 +29,7 @@ try:
         validate_artifact,
         validate_candidate_identity,
     )
-    from .legacy_import import write_attestations, write_candidates
+    from .artifact_store import ArtifactStore, StoreConflictError, StoreIntegrityError
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.artifact_schemas import (
@@ -41,7 +41,7 @@ except ImportError:  # 作为脚本运行
         validate_artifact,
         validate_candidate_identity,
     )
-    from core.legacy_import import write_attestations, write_candidates
+    from core.artifact_store import ArtifactStore, StoreConflictError, StoreIntegrityError
 
 
 # Agent/API 的 Result 是不可信输入(system-design §16):限制大小与数量,防止内存/磁盘耗尽。
@@ -143,8 +143,8 @@ def build_candidates_from_result(
     return candidates, attestations
 
 
-def import_result(task: Dict[str, Any], result: Dict[str, Any], store_dir: Path) -> Dict[str, Any]:
-    """导入一份 Result。返回工件计数与 id 列表;stale 时返回 quarantined 报告。"""
+def import_result(task: Dict[str, Any], result: Dict[str, Any], store: ArtifactStore) -> Dict[str, Any]:
+    """导入一份 Result 到分片 ArtifactStore。返回工件计数与 id 列表;stale 时返回 quarantined 报告。"""
     try:
         candidates, attestations = build_candidates_from_result(task, result)
     except QuarantineError as exc:
@@ -153,15 +153,25 @@ def import_result(task: Dict[str, Any], result: Dict[str, Any], store_dir: Path)
             "written": 0, "skipped": 0, "candidate_ids": [],
             "attestations_written": 0, "attestations_skipped": 0,
         }
-    written, skipped = write_candidates(candidates, store_dir)
-    a_written, a_skipped = write_attestations(attestations, store_dir)
+    try:
+        # integrity gate 要求 revision 已在 store(result 导入前必有源 revision 入库);
+        # 悬空/损坏均整批拒绝,不落盘。
+        report = store.put_many(task["document_id"], [*candidates, *attestations])
+    except (StoreIntegrityError, StoreConflictError) as exc:
+        reasons = getattr(exc, "reasons", None) or [str(exc)]
+        return {
+            "quarantined": True, "reasons": reasons,
+            "written": 0, "skipped": 0, "candidate_ids": [],
+            "attestations_written": 0, "attestations_skipped": 0,
+        }
+    kinds = report["kinds"]
     return {
         "quarantined": False,
-        "written": written,
-        "skipped": skipped,
+        "written": kinds.get("candidate", {}).get("written", 0),
+        "skipped": kinds.get("candidate", {}).get("skipped", 0),
         "candidate_ids": [c["candidate_id"] for c in candidates],
-        "attestations_written": a_written,
-        "attestations_skipped": a_skipped,
+        "attestations_written": kinds.get("attestation", {}).get("written", 0),
+        "attestations_skipped": kinds.get("attestation", {}).get("skipped", 0),
         "attestation_ids": [a["attestation_id"] for a in attestations],
     }
 
@@ -177,7 +187,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", required=True, type=Path)
     parser.add_argument("--result", required=True, type=Path)
-    parser.add_argument("--store", required=True, type=Path)
+    parser.add_argument("--store", required=True, type=Path, help="ArtifactStore 根目录")
     args = parser.parse_args()
 
     try:
@@ -187,7 +197,7 @@ def main() -> int:
         for reason in exc.reasons:
             print(f"- {reason}", file=sys.stderr)
         return 1
-    report = import_result(task, result, args.store)
+    report = import_result(task, result, ArtifactStore(args.store))
     if report["quarantined"]:
         print("quarantined:", file=sys.stderr)
         for reason in report["reasons"]:

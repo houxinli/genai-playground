@@ -166,8 +166,20 @@ Attestation schema(append-only 来源)已进入主干;`artifact_schemas.candidat
 `normalize_text`(normalization_version=1:NFC + 去尾随空白,display-preserving)与 `attestation_id_for`/
 `build_attestation`(确定性派生)已实现;`legacy_import` / `result_import` 已迁移为产出 Candidate v3 + Attestation,
 **同译文跨 producer 去重 → 一个 Candidate + 多条 Attestation**。evaluation/document-version/annotation/task
-(`existing_candidate_ids`)的 `candidate_id` 引用模式同步收紧为 64-hex。**仍待 #54**:把当前 importer 的"一工件一 JSON 文件 + 调用方传
-`store_dir`"换成 sharded `ArtifactStore.put_many` + integrity gate(`verify_references`)。
+(`existing_candidate_ids`)的 `candidate_id` 引用模式同步收紧为 64-hex。**已落地(2026-06-13,#54)**:`artifact_store.ArtifactStore` 按
+`store/<kind>/<provider>/<creator_id>/<source_id>.jsonl` 分片;`put_many(document_id, artifacts)`
+按 kind 分组 → flock 锁 shard → 读一次建 id map → 校验(schema + candidate `validate_candidate_identity`)→
+冲突检测(同 id 同 payload skip / 不同 payload `StoreConflictError`)→ 写全量临时 + fsync + 原子
+rename + dir fsync;幂等仅凭 JSONL。`verify_references(artifact, resolver)` 做 cross-artifact 引用
+完整性(candidate↔revision.source_hash、attestation/evaluation→真 candidate、version selection 同
+revision/segment),**在写入边界强制执行**:put_many 先锁全部相关 shard、做冲突预检 + integrity
+(resolver=现有∪本批 staged∪已提交 shard),全通过后再提交 → **逻辑预检失败不落任何 shard**;含
+document_id 的 kind 强制与分片键一致。提交阶段按引用依赖序(被引用者先,COMMIT_ORDER:revision→
+candidate→attestation/...)写各 shard:POSIX 多文件 rename 非事务,无法做跨 shard 单原子提交,但
+依赖序保证任何物理崩溃前缀都**引用完整、无悬空引用**,缺失的后续工件可幂等重导补齐。不替代
+Task/Result stale-envelope 校验。legacy/result importer
+已迁移走 store(legacy 连同 DocumentRevision 一并入库;result 导入前要求源 revision 已入库,否则整批
+quarantine)。**仍待 #55**:SQLite 只读投影。
 
 ## 3. 系统总览
 

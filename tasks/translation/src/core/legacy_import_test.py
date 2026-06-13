@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,10 +12,12 @@ try:
     from . import legacy_import as li
     from . import source_identity as si
     from .artifact_schemas import validate_artifact
+    from .artifact_store import ArtifactStore
 except ImportError:  # core/ 在 sys.path 上
     import legacy_import as li
     import source_identity as si
     from artifact_schemas import validate_artifact
+    from artifact_store import ArtifactStore
 
 
 TESTDATA = Path(__file__).resolve().parent / "testdata"
@@ -70,28 +71,6 @@ class LegacyImportTest(unittest.TestCase):
         attestations = self._build()[1]
         self.assertTrue(all(a["created_at"] == "2026-01-01T09:00:00+09:00" for a in attestations))
 
-    def test_write_is_idempotent(self):
-        candidates, attestations, _ = self._build()
-        with tempfile.TemporaryDirectory() as tmp:
-            store = Path(tmp)
-            self.assertEqual((len(candidates), 0), li.write_candidates(candidates, store))
-            self.assertEqual((0, len(candidates)), li.write_candidates(candidates, store))
-            self.assertEqual((len(attestations), 0), li.write_attestations(attestations, store))
-            self.assertEqual((0, len(attestations)), li.write_attestations(attestations, store))
-            self.assertEqual(len(candidates), len(list(store.glob("cand_*.json"))))
-            self.assertEqual(len(attestations), len(list(store.glob("att_*.json"))))
-
-    def test_conflicting_existing_artifact_raises(self):
-        candidates, _, _ = self._build()
-        with tempfile.TemporaryDirectory() as tmp:
-            store = Path(tmp)
-            li.write_candidates(candidates, store)
-            # 篡改一个已存在工件 -> 同 id 不同内容必须报错
-            victim = next(store.glob("cand_*.json"))
-            victim.write_text(json.dumps({"corrupt": True}), encoding="utf-8")
-            with self.assertRaises(ValueError):
-                li.write_candidates(candidates, store)
-
     def test_distinct_labels_dedup_candidates_distinct_attestations(self):
         # 内容寻址:两个标签产出相同译文 → 同一 Candidate(去重),但来源各记一条 Attestation
         ca, aa, _ = self._build("dir_bilingual")
@@ -103,19 +82,6 @@ class LegacyImportTest(unittest.TestCase):
         att_b = {a["attestation_id"] for a in ab}
         self.assertEqual(set(), att_a & att_b)  # legacy_label 不同 → attestation 不同
 
-    def test_two_labels_same_store_dedup_on_disk(self):
-        # 落到同一 store:第二个 label 不新增 Candidate,只追加 Attestation(N Candidate + 2N Attestation)
-        ca, aa, _ = self._build("dir_bilingual")
-        cb, ab, _ = self._build("dir_bilingual_v2")
-        with tempfile.TemporaryDirectory() as tmp:
-            store = Path(tmp)
-            self.assertEqual((len(ca), 0), li.write_candidates(ca, store))
-            self.assertEqual((len(aa), 0), li.write_attestations(aa, store))
-            # 第二个 label:candidate 全部命中去重(0 写入),attestation 全部新增
-            self.assertEqual((0, len(cb)), li.write_candidates(cb, store))
-            self.assertEqual((len(ab), 0), li.write_attestations(ab, store))
-            self.assertEqual(len(ca), len(list(store.glob("cand_*.json"))))
-            self.assertEqual(len(aa) + len(ab), len(list(store.glob("att_*.json"))))
 
     def test_empty_translation_does_not_bleed_into_next_segment(self):
         # 合法的空译文(译文行为空)不应让下一段原文被当成上一段译文(基线含 112 个 empty)
@@ -157,22 +123,45 @@ class LegacyImportTest(unittest.TestCase):
             self.assertTrue(any("truncated" in m for m in issues), issues)
             self.assertTrue(any(c["text"] == "「早上好」" for c in candidates))
 
-    def test_import_directory_pairs_and_reports(self):
+    def test_import_directory_pairs_and_shards_into_store(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
-            srcdir, bildir, store = tmp / "src", tmp / "bil", tmp / "store"
+            srcdir, bildir = tmp / "src", tmp / "bil"
             srcdir.mkdir(); bildir.mkdir()
             (srcdir / "700001.txt").write_text(SRC.read_text(encoding="utf-8"), encoding="utf-8")
             (bildir / "700001.txt").write_text(BILINGUAL.read_text(encoding="utf-8"), encoding="utf-8")
             (bildir / "999999.txt").write_text("---\npost_id: 999999\n---\nx\ny\n", encoding="utf-8")
+            store = ArtifactStore(tmp / "store")
             report = li.import_directory("pixiv", srcdir, bildir, "dir_label", store)
             self.assertEqual(1, report["posts"])
             self.assertEqual(["999999.txt"], report["missing_source"])
             self.assertEqual(report["candidates"], report["candidates_written"])
             self.assertEqual(report["candidates"], report["attestations_written"])
             self.assertEqual([], report["posts_with_issues"])
-            self.assertEqual(report["candidates"], len(list(store.glob("cand_*.json"))))
-            self.assertEqual(report["candidates"], len(list(store.glob("att_*.json"))))
+            # 落到按文档分片的 shard:revision + candidate + attestation 各自一份
+            rev = si.build_document_revision("pixiv", SRC)
+            doc = rev["document_id"]
+            self.assertEqual(1, len(store.list_shard("document-revision", doc)))
+            self.assertEqual(report["candidates"], len(store.list_shard("candidate", doc)))
+            self.assertEqual(report["candidates"], len(store.list_shard("attestation", doc)))
+
+    def test_second_label_dedups_candidates_adds_attestations(self):
+        # 同源同译文、第二个 label 再导:candidate 全部命中去重,attestation 全部新增
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            srcdir, bildir = tmp / "src", tmp / "bil"
+            srcdir.mkdir(); bildir.mkdir()
+            (srcdir / "700001.txt").write_text(SRC.read_text(encoding="utf-8"), encoding="utf-8")
+            (bildir / "700001.txt").write_text(BILINGUAL.read_text(encoding="utf-8"), encoding="utf-8")
+            store = ArtifactStore(tmp / "store")
+            r1 = li.import_directory("pixiv", srcdir, bildir, "dir_bilingual", store)
+            r2 = li.import_directory("pixiv", srcdir, bildir, "dir_bilingual_v2", store)
+            self.assertEqual(0, r2["candidates_written"])  # 文本相同 → candidate 去重
+            self.assertEqual(r1["candidates"], r2["candidates_skipped"])
+            self.assertEqual(r2["candidates"], r2["attestations_written"])  # 来源各记一条
+            doc = si.build_document_revision("pixiv", SRC)["document_id"]
+            self.assertEqual(r1["candidates"], len(store.list_shard("candidate", doc)))
+            self.assertEqual(2 * r1["candidates"], len(store.list_shard("attestation", doc)))
 
 
 if __name__ == "__main__":
