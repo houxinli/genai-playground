@@ -27,6 +27,7 @@ try:
         candidate_id_v3,
         normalize_text,
         validate_artifact,
+        validate_candidate_identity,
     )
     from .source_identity import _PROVIDER_SPEC, build_document_revision
 except ImportError:  # 作为脚本运行:把 tasks/translation/src 加入 path,走 core.* 以解析 utils
@@ -36,6 +37,7 @@ except ImportError:  # 作为脚本运行:把 tasks/translation/src 加入 path,
         candidate_id_v3,
         normalize_text,
         validate_artifact,
+        validate_candidate_identity,
     )
     from core.source_identity import _PROVIDER_SPEC, build_document_revision
 
@@ -167,6 +169,9 @@ def build_legacy_candidates(
         errors = validate_artifact("candidate", candidate)
         if errors:
             raise ValueError(f"built legacy candidate invalid: {errors}")
+        id_errors = validate_candidate_identity(candidate)
+        if id_errors:
+            raise ValueError(f"built legacy candidate identity invalid: {id_errors}")
         candidates.append(candidate)
 
         attestation = build_attestation({

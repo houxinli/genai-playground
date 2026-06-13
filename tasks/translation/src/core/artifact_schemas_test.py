@@ -6,7 +6,10 @@ from __future__ import annotations
 
 import copy
 import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 try:
     from .artifact_schemas import (
@@ -17,8 +20,10 @@ try:
         canonical_digest,
         check_result_against_task,
         load_schema,
+        main,
         normalize_text,
         validate_artifact,
+        validate_candidate_identity,
     )
 except ImportError:  # unittest discover may import as top-level core.artifact_schemas_test
     from artifact_schemas import (
@@ -29,8 +34,10 @@ except ImportError:  # unittest discover may import as top-level core.artifact_s
         canonical_digest,
         check_result_against_task,
         load_schema,
+        main,
         normalize_text,
         validate_artifact,
+        validate_candidate_identity,
     )
 
 
@@ -304,11 +311,21 @@ class StaleResultTest(unittest.TestCase):
         self.assertEqual(2, len(errors), errors)
 
 
+# 钉死的已知向量(Codex 与 Claude Code 独立核算一致):canonical 字段/序列化口径被意外改动会立刻红。
+PINNED_CANDIDATE_ID = "cand_8b41fbda2bda4b1a34ff8c828d903e342916ff718ab90f66d8a9850539ca86eb"
+PINNED_ATTESTATION_ID = "att_04cca1ff478923a8e141c911657e33045dc74555ff02af036325f2b7e30f9eaf"
+
+
 class CandidateIdDerivationTest(unittest.TestCase):
     def test_content_address_is_stable_full_hex(self):
         cid = candidate_id_v3(REV, SEG, HASH, CAND_TEXT)
         self.assertRegex(cid, r"^cand_[0-9a-f]{64}$")
         self.assertEqual(cid, candidate_id_v3(REV, SEG, HASH, CAND_TEXT))
+
+    def test_pinned_known_vector(self):
+        # 不只是"两次调用相等",而是钉死具体摘要 → 抓 canonical 字段/序列化口径漂移
+        self.assertEqual(PINNED_CANDIDATE_ID, candidate_id_v3(REV, SEG, HASH, CAND_TEXT))
+        self.assertEqual(PINNED_ATTESTATION_ID, make_attestation()["attestation_id"])
 
     def test_same_text_dedup_across_producers(self):
         # 内容寻址:同 (revision, segment, source_hash, 归一化文本) → 同 id,与 producer 无关
@@ -365,6 +382,59 @@ class AttestationIdDerivationTest(unittest.TestCase):
         b_core = {k: v for k, v in b.items() if k not in ("attestation_id", "schema_version")}
         b_core["result_digest"] = "9" * 16
         self.assertNotEqual(a["attestation_id"], attestation_id_for(b_core))
+
+    def test_build_attestation_rejects_reserved_fields(self):
+        # 公共构造函数自洽:core 不得携带生成字段(否则污染身份派生)
+        for reserved in ("schema_version", "attestation_id", "attestation_identity_version"):
+            core = {k: v for k, v in make_attestation().items()
+                    if k not in ("attestation_id", "schema_version")}
+            core[reserved] = "x"
+            with self.assertRaises(ValueError, msg=reserved):
+                build_attestation(core)
+
+
+class CandidateIdentityValidationTest(unittest.TestCase):
+    def test_self_consistent_candidate_passes(self):
+        self.assertEqual([], validate_candidate_identity(make_candidate()))
+
+    def test_tampered_text_rejected(self):
+        # text 被改但 candidate_id 没变 → schema 仍过,身份校验必须抓住
+        doc = make_candidate()
+        doc["text"] = "完全不同的译文"
+        self.assertNotEqual([], validate_candidate_identity(doc))
+
+    def test_tampered_id_rejected(self):
+        doc = make_candidate()
+        doc["candidate_id"] = "cand_" + "0" * 64
+        self.assertNotEqual([], validate_candidate_identity(doc))
+
+    def test_unnormalized_text_rejected(self):
+        # 带尾随空白 = 未归一化:即便重算 id 与之匹配,也要因 text != normalized 被拒
+        text = CAND_TEXT + "   "
+        doc = make_candidate()
+        doc["text"] = text
+        doc["candidate_id"] = candidate_id_v3(REV, SEG, HASH, text)
+        errors = validate_candidate_identity(doc)
+        self.assertTrue(any("归一化" in e for e in errors), errors)
+
+    def test_normalization_version_other_than_1_rejected_by_schema(self):
+        doc = make_candidate()
+        doc["normalization_version"] = 2
+        self.assertNotEqual([], validate_artifact("candidate", doc))
+
+    def _run_cli(self, doc):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate.json"
+            path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+            with mock.patch("sys.argv", ["prog", "candidate", str(path)]):
+                return main()
+
+    def test_cli_enforces_candidate_identity(self):
+        # 校验 CLI 是独立入口:schema 合法但身份被篡改的 candidate 也必须非零退出
+        self.assertEqual(0, self._run_cli(make_candidate()))
+        tampered = make_candidate()
+        tampered["text"] = "完全不同的译文"  # id 没变 → schema 过、身份不过
+        self.assertEqual(1, self._run_cli(tampered))
 
 
 if __name__ == "__main__":

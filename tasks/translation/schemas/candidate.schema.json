@@ -40,8 +40,7 @@
       "pattern": "^[0-9a-f]{8,64}$"
     },
     "normalization_version": {
-      "type": "integer",
-      "minimum": 1
+      "const": 1
     },
     "text": {
       "type": "string"

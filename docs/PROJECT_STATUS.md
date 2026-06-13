@@ -68,8 +68,8 @@ source -> revision -> legacy/new candidates -> evaluations
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
 | candidate QA 评估 | 已完成 | 对 candidate 跑硬规则产出绑定 Evaluation；用于 gate/证据，不单独裁决语义优劣 | `tasks/translation/src/core/candidate_eval.py` |
 | translate task/result 协议 | 最小闭环完成 | export-job + import-result 已往返；context builder、review/repair job 和 instruction pack 待实现 | `tasks/translation/src/core/task_export.py` |
-| result 导入(import-result) | 已完成 | Task+Result → Candidate:§5.4 stale 校验进 quarantine、candidate_id_for 幂等、跨执行独立 | `tasks/translation/src/core/result_import.py` |
-| Legacy 导入 | 已完成 | bilingual 反解 → legacy Candidate(目录标签区分、确定性幂等、截断容错),真实 momizi813 跑通 | `tasks/translation/src/core/legacy_import.py` |
+| result 导入(import-result) | 已完成(v3) | Task+Result → Candidate v3 + Attestation:§5.4 stale 校验进 quarantine;内容寻址身份,同译文跨执行去重(一 Candidate + 多 Attestation),重放幂等 | `tasks/translation/src/core/result_import.py` |
+| Legacy 导入 | 已完成(v3) | bilingual 反解 → Candidate v3 + legacy Attestation:同译文跨目录代次去重为同一 Candidate,代次差异由 Attestation.legacy_label 区分;确定性幂等、截断容错,真实 momizi813 跑通 | `tasks/translation/src/core/legacy_import.py` |
 | Source adapter / renderer | 部分完成 | 目录→DocumentRevision 适配 + bilingual shadow renderer(与现格式逐字节一致,golden 验证);zh renderer 待做(#42) | `tasks/translation/src/core/source_adapter.py` |
 | Fixture/Golden 底座 | 已完成 | 合成脱敏 Pixiv/Fanbox fixture、golden document-revision/bilingual/zh、revision/segment ID pin 稳定性测试 | `tasks/translation/src/core/testdata/` |
 | 业务工件 Schema | 基础完成 | 八类工件 JSON Schema（新增 attestation）、validate/round-trip/stale-result 测试与 CLI 校验已落地；DocumentVersion v2 待 #50 | `tasks/translation/schemas/` |
@@ -94,7 +94,11 @@ source -> revision -> legacy/new candidates -> evaluations
 - 新增 append-only Attestation schema 承接来源（producer/task·result digest/key/legacy_label/knowledge/created_at），attestation_id 确定性派生。
 - `normalization_version=1` 冻结为 display-preserving（NFC + 去尾随空白，不折叠内部空白/不改标点）。
 - legacy/result importer 迁移产出 v3 + attestation，**同译文跨 producer 去重 → 一个 Candidate + 多条 Attestation**。
-- evaluation/document-version/annotation/task 的 candidate_id 引用同步收紧为 64-hex。测试基线 188 → 199。
+- evaluation/document-version/annotation/task 的 candidate_id 引用同步收紧为 64-hex。
+- review follow-up:`normalization_version` 收为 `const:1`;新增 `validate_candidate_identity`
+  (text 已归一化 + candidate_id 与内容重算一致),在 importer 构建边界与 candidate_eval 强制调用
+  (#54 的 `put_many` 也须调用);校验 CLI 对 candidate 也接身份强校验;pin 身份已知向量;
+  system-design §6.2 改 v3 + §6.2a Attestation。测试基线 188 → 208。
 
 2026-06-13 架构检查点：
 

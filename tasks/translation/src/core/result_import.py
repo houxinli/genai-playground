@@ -27,6 +27,7 @@ try:
         check_result_against_task,
         normalize_text,
         validate_artifact,
+        validate_candidate_identity,
     )
     from .legacy_import import write_attestations, write_candidates
 except ImportError:  # 作为脚本运行
@@ -38,6 +39,7 @@ except ImportError:  # 作为脚本运行
         check_result_against_task,
         normalize_text,
         validate_artifact,
+        validate_candidate_identity,
     )
     from core.legacy_import import write_attestations, write_candidates
 
@@ -111,6 +113,9 @@ def build_candidates_from_result(
         errors = validate_artifact("candidate", candidate)
         if errors:
             raise ValueError(f"built candidate invalid: {errors}")
+        id_errors = validate_candidate_identity(candidate)
+        if id_errors:
+            raise ValueError(f"built candidate identity invalid: {id_errors}")
         candidates.append(candidate)
 
         attestation = build_attestation({
