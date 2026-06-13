@@ -145,6 +145,10 @@
 
 ## Development Plan
 
+> 可调整层在 GitHub:[Roadmap 看板](https://github.com/users/houxinli/projects/1)
+> (P0 余项为 issue + `agent-ready`,P1–P3 为阶段占位卡;手机 App 可直接拖卡/改字段/建 issue)。
+> 本节是阶段快照,由 Agent 在"整理进展"时与看板对齐,不在手机上直接编辑。
+
 ### P0: 协议与数据基础
 
 1. ~~存量内容库盘点、QA 基线与坏产物隔离~~（#10，已完成 2026-06-12：`inventory_content.py` +
