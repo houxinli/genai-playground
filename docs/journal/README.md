@@ -18,6 +18,7 @@
 ## 📅 2026年
 
 ### 06月
+- [2026-06-13 最小 fixture 与 golden 稳定性底座(P0.4)](./2026-06-13-fixtures-golden.md)
 - [2026-06-13 业务工件 JSON Schema 落地(P0.3)](./2026-06-13-artifact-schemas.md)
 - [2026-06-12 Codex review follow-ups 批次(#15–#21)](./2026-06-12-review-followups.md)
 - [2026-06-12 QA 基线 v2:review 修正后的全库重跑](./2026-06-12-baseline-v2.md)
