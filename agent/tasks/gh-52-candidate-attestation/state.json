@@ -2,7 +2,7 @@
   "schema_version": 1,
   "task_id": "gh-52-candidate-attestation",
   "title": "Candidate v3 + Attestation(内容寻址身份拆分)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/candidate-attestation",
   "objective": "把 candidate 拆成纯内容、不可变、content-addressed 的 Candidate v3 与 append-only Attestation;统一身份、文本等价去重;legacy/result importer 迁移产出 v3+attestation。#50 与 #54 的前置。",
   "github": {
@@ -115,7 +115,7 @@
     {
       "id": "S5",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S4"
       ],
@@ -126,14 +126,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S5",
-    "instruction": "推送 feat/candidate-attestation,开 PR(closes #52),等 CI;按三通道核对 Codex review 并三联处理后合并。",
-    "acceptance": [
-      "CI tests 全绿",
-      "PR 合并、删除分支、main 拉回"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -152,16 +145,26 @@
         "status": "passed",
         "summary": "文档漂移检查通过(基线 198)",
         "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260613T213343Z-claude-code",
-    "timestamp": "2026-06-13T21:33:43Z",
+    "checkpoint_id": "cp-20260613T214252Z-claude-code",
+    "timestamp": "2026-06-13T21:42:52Z",
     "agent": "claude-code",
-    "summary": "Candidate v3(纯内容内容寻址 64-hex)+ Attestation(append-only 来源)schema 落地",
-    "observed_head": "c2c4988"
+    "summary": "任务完成:PR #64 squash 合并,issue #52 关闭,CI 全绿",
+    "observed_head": "efa0f80"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 54,
+    "task_id": "gh-54-sharded-artifact-store",
+    "branch": "feat/sharded-artifact-store"
+  }
 }
