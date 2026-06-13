@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""result 导入:Task+Result → Candidate(校验/幂等/stale 隔离/跨执行独立)。"""
+"""result 导入:Task+Result → Candidate v3 + Attestation(校验/幂等/stale 隔离/同文本跨执行去重)。"""
 
 from __future__ import annotations
 
