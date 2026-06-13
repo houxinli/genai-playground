@@ -57,6 +57,7 @@
 | 质量检测 | 可用 | 规则 QC + LLM QC 可工作；新增硬规则 QA gate，可检查双语配对、假名残留、拒绝模板、失败标记和人名坏别名 | `tasks/translation/src/core/qa_gate.py` |
 | 人名一致性 | 可用 | 支持人工规则优先、自动预读候选保存、正文 OpenRouter + 本地 vLLM/MLX 抽名的分离运行时 | `tasks/translation/src/core/translator.py` |
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
+| task/result 协议 | 已完成 | export-job(revision→Task+job bundle,task_id 确定性)+ import-result;agent 执行路线端到端往返通过 | `tasks/translation/src/core/task_export.py` |
 | result 导入(import-result) | 已完成 | Task+Result → Candidate:§5.4 stale 校验进 quarantine、candidate_id_for 幂等、跨执行独立 | `tasks/translation/src/core/result_import.py` |
 | Legacy 导入 | 已完成 | bilingual 反解 → legacy Candidate(目录标签区分、确定性幂等、截断容错),真实 momizi813 跑通 | `tasks/translation/src/core/legacy_import.py` |
 | Source adapter / renderer | 部分完成 | 目录→DocumentRevision 适配 + bilingual shadow renderer(与现格式逐字节一致,golden 验证);zh renderer 待做(#42) | `tasks/translation/src/core/source_adapter.py` |

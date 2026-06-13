@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-46-task-export",
+  "title": "export-job:从 revision+segments 生成 Task(供执行器消费)",
+  "status": "active",
+  "branch": "feat/task-export",
+  "objective": "从 DocumentRevision + 选定 segment 生成 schema 合法的 Task 与自包含 job bundle(含源文本),task_id 确定性、task_digest 与 import 端一致;export→(模拟 result)→import_result 往返通过。",
+  "github": {
+    "issue": 46,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/task_export.py(+test)",
+      "Makefile export-job",
+      "PROJECT_STATUS/journal"
+    ],
+    "out": [
+      "candidate QA 评估(#48)",
+      "selection/version(P1)",
+      "Grok 4 适配(P2.2)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "export_task/export_job + 确定性 task_id",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "schema 合法、task_id 确定性、bundle 含源文本"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "端到端往返 + make 入口",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "export→模拟 result→import_result 往返;make export-job;4 测试;全量 175"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "文档 + PR 收尾",
+      "status": "in_progress",
+      "depends_on": [
+        "S1",
+        "S2"
+      ],
+      "acceptance": [
+        "PROJECT_STATUS/journal;三渠道 triage;CI 绿;合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR,三渠道 triage,CI 绿后合并。",
+    "acceptance": [
+      "PR 合并,issue #46 关闭"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "175 passed(171+4)",
+        "timestamp": "2026-06-13T07:59:08Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260613T075908Z-claude-code",
+    "timestamp": "2026-06-13T07:59:08Z",
+    "agent": "claude-code",
+    "summary": "S1-S2 完成,待 PR 收尾",
+    "observed_head": "1150e9b"
+  },
+  "next_task": null
+}
