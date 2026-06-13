@@ -18,10 +18,12 @@ from typing import Any, Dict, List
 try:
     from .artifact_schemas import canonical_dumps, validate_artifact
     from .qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana
+    from .source_identity import _source_hash
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.artifact_schemas import canonical_dumps, validate_artifact
     from core.qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana
+    from core.source_identity import _source_hash
 
 EVALUATOR_NAME = "deterministic-qa"
 EVALUATOR_VERSION = "candidate-qa-v1"
@@ -53,7 +55,20 @@ def _findings(source_text: str, text: str) -> List[Dict[str, Any]]:
 def evaluate_candidate(
     candidate: Dict[str, Any], source_text: str, created_at: str = _FALLBACK_CREATED_AT
 ) -> Dict[str, Any]:
-    """对一个 Candidate 跑硬规则,返回 schema 合法的 Evaluation(verdict + findings)。"""
+    """对一个 Candidate 跑硬规则,返回 schema 合法的 Evaluation(verdict + findings)。
+
+    评估前校验 candidate schema 与 source_text 哈希:错配/旧 revision 的源文本会让评估绑错,
+    必须拒绝(防错误 pass 进入 compare/select)。
+    """
+    schema_errors = validate_artifact("candidate", candidate)
+    if schema_errors:
+        raise ValueError(f"candidate schema invalid: {schema_errors}")
+    if _source_hash(source_text) != candidate["source_hash"]:
+        raise ValueError(
+            f"source_text hash mismatch for candidate {candidate['candidate_id']}: "
+            "评估的源文本与 candidate.source_hash 不一致"
+        )
+
     findings = _findings(source_text, candidate["text"])
     verdict = "fail" if any(f["severity"] == "error" for f in findings) else "pass"
     evaluation_id = "eval_" + hashlib.sha256(
@@ -61,6 +76,7 @@ def evaluate_candidate(
             "candidate_id": candidate["candidate_id"],
             "evaluator": EVALUATOR_VERSION,
             "findings": findings,
+            "created_at": created_at,  # 纳入身份:同 id 必同内容(immutable 不变量)
         }).encode("utf-8")
     ).hexdigest()[:16]
     evaluation = {
