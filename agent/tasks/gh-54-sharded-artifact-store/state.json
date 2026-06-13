@@ -2,7 +2,7 @@
   "schema_version": 1,
   "task_id": "gh-54-sharded-artifact-store",
   "title": "Sharded ArtifactStore + integrity gate + importer 迁移",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/sharded-artifact-store",
   "objective": "统一 ArtifactStore:按 document path 分片 JSONL + 原子批写 + 冲突检测 + 身份硬 gate + cross-artifact verify_references;legacy/result importer 迁移到 store。解决文件过多(5.5万→按文档分片)。",
   "github": {
@@ -130,7 +130,7 @@
     {
       "id": "S5",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S4"
       ],
@@ -141,14 +141,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S5",
-    "instruction": "推送 feat/sharded-artifact-store,开 PR(closes #54),等 CI;按三通道核对 Codex review 并三联处理后合并。",
-    "acceptance": [
-      "CI tests 全绿",
-      "PR 合并、删除分支、main 拉回"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -159,13 +152,13 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "220 passed",
+        "summary": "229 passed",
         "timestamp": null
       },
       {
         "command": "conda run -n llm python scripts/check_docs_drift.py",
         "status": "passed",
-        "summary": "文档漂移检查通过(基线 220)",
+        "summary": "文档漂移检查通过(基线 229)",
         "timestamp": null
       },
       {
@@ -178,11 +171,15 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260613T231616Z-claude-code",
-    "timestamp": "2026-06-13T23:16:16Z",
+    "checkpoint_id": "cp-20260613T233917Z-claude-code",
+    "timestamp": "2026-06-13T23:39:17Z",
     "agent": "claude-code",
-    "summary": "ArtifactStore 落地:按文档分片 JSONL + put_many 原子批写(flock/全量临时/fsync/rename/dir-fsync)",
-    "observed_head": "6f81c35"
+    "summary": "任务完成:PR #69 squash 合并,issue #54 关闭,CI 全绿",
+    "observed_head": "3c7c952"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 50,
+    "task_id": "gh-50-conservative-select",
+    "branch": "feat/conservative-select"
+  }
 }
