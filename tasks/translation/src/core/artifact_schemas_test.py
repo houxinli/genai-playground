@@ -260,6 +260,17 @@ class SchemaValidationTest(unittest.TestCase):
         doc["segment_ids"] = ["not-a-segment-id"]
         self.assertNotEqual([], validate_artifact("task", doc))
 
+    def test_task_existing_candidate_ids_accept_v3_reject_legacy(self):
+        # Task.existing_candidate_ids 必须能引用本提交所产的 v3 candidate(64-hex),否则
+        # export_task 引用真实 candidate 会被判非法(Codex PR#64 P1)
+        v3 = candidate_id_v3(REV, SEG, HASH, CAND_TEXT)
+        ok = make_task()
+        ok["existing_candidate_ids"] = [v3]
+        self.assertEqual([], validate_artifact("task", ok))
+        bad = make_task()
+        bad["existing_candidate_ids"] = ["cand_" + "e" * 16]  # 旧 16-hex 不再合法
+        self.assertNotEqual([], validate_artifact("task", bad))
+
 
 class StaleResultTest(unittest.TestCase):
     def test_matching_result_passes(self):

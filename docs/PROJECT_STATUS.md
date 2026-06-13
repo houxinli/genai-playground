@@ -94,7 +94,7 @@ source -> revision -> legacy/new candidates -> evaluations
 - 新增 append-only Attestation schema 承接来源（producer/task·result digest/key/legacy_label/knowledge/created_at），attestation_id 确定性派生。
 - `normalization_version=1` 冻结为 display-preserving（NFC + 去尾随空白，不折叠内部空白/不改标点）。
 - legacy/result importer 迁移产出 v3 + attestation，**同译文跨 producer 去重 → 一个 Candidate + 多条 Attestation**。
-- evaluation/document-version/annotation 的 candidate_id 引用同步收紧为 64-hex。测试基线 188 → 198。
+- evaluation/document-version/annotation/task 的 candidate_id 引用同步收紧为 64-hex。测试基线 188 → 199。
 
 2026-06-13 架构检查点：
 
