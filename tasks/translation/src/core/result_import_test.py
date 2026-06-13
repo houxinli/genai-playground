@@ -57,24 +57,34 @@ def make_result(text="她转过身来。"):
 
 class ImportResultTest(unittest.TestCase):
     def test_happy_path_writes_valid_candidates(self):
-        candidates = ri.build_candidates_from_result(make_task(), make_result())
+        candidates, attestations = ri.build_candidates_from_result(make_task(), make_result())
         self.assertEqual(1, len(candidates))
-        c = candidates[0]
+        self.assertEqual(1, len(attestations))
+        c, a = candidates[0], attestations[0]
         self.assertEqual([], validate_artifact("candidate", c))
+        self.assertEqual([], validate_artifact("attestation", a))
         self.assertEqual(SEG, c["segment_id"])
         self.assertEqual("她转过身来。", c["text"])
-        self.assertEqual("codex", c["producer"]["harness"])
-        self.assertEqual(c["provenance"]["task_digest"], make_result()["task_digest"])
-        self.assertTrue(c["candidate_id"].startswith("cand_"))
+        self.assertEqual(3, c["schema_version"])
+        self.assertEqual(1, c["normalization_version"])
+        self.assertRegex(c["candidate_id"], r"^cand_[0-9a-f]{64}$")
+        # 来源落在 attestation,不在 candidate
+        self.assertNotIn("producer", c)
+        self.assertEqual("codex", a["producer"]["harness"])
+        self.assertEqual(a["candidate_id"], c["candidate_id"])
+        self.assertEqual(a["task_digest"], make_result()["task_digest"])
 
     def test_import_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = Path(tmp)
             r1 = ri.import_result(make_task(), make_result(), store)
             self.assertEqual((1, 0), (r1["written"], r1["skipped"]))
+            self.assertEqual((1, 0), (r1["attestations_written"], r1["attestations_skipped"]))
             r2 = ri.import_result(make_task(), make_result(), store)
             self.assertEqual((0, 1), (r2["written"], r2["skipped"]))
+            self.assertEqual((0, 1), (r2["attestations_written"], r2["attestations_skipped"]))
             self.assertEqual(r1["candidate_ids"], r2["candidate_ids"])
+            self.assertEqual(r1["attestation_ids"], r2["attestation_ids"])
 
     def test_stale_source_hash_quarantined_no_write(self):
         result = make_result()
@@ -86,6 +96,26 @@ class ImportResultTest(unittest.TestCase):
             self.assertTrue(any("stale source_hash" in r for r in report["reasons"]))
             self.assertEqual([], list(store.glob("*.json")))
 
+    def test_same_text_dedup_one_candidate_two_attestations(self):
+        # 两次不同执行(producer/完成时刻不同)产出相同译文 → 同一 Candidate + 两条 Attestation
+        result_a = make_result()
+        result_b = make_result()
+        result_b["producer"] = {"type": "api", "name": "openrouter", "model": "grok-4.1-fast"}
+        result_b["completed_at"] = "2026-06-14T00:00:00Z"
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp)
+            ra = ri.import_result(make_task(), result_a, store)
+            rb = ri.import_result(make_task(), result_b, store)
+            self.assertEqual(ra["candidate_ids"], rb["candidate_ids"])  # 文本等价去重
+            self.assertEqual((1, 0), (ra["written"], ra["skipped"]))
+            self.assertEqual((0, 1), (rb["written"], rb["skipped"]))  # candidate 已存在,跳过
+            self.assertNotEqual(ra["attestation_ids"], rb["attestation_ids"])  # 来源各记一条
+            self.assertEqual((1, 0), (rb["attestations_written"], rb["attestations_skipped"]))
+            cand_files = list(store.glob("cand_*.json"))
+            att_files = list(store.glob("att_*.json"))
+            self.assertEqual(1, len(cand_files))
+            self.assertEqual(2, len(att_files))
+
     def test_changed_task_digest_quarantined(self):
         result = make_result()
         result["task_digest"] = "0" * 16  # 与当前 task canonical digest 不符
@@ -93,14 +123,14 @@ class ImportResultTest(unittest.TestCase):
         self.assertTrue(report["quarantined"])
         self.assertTrue(any("task_digest mismatch" in r for r in report["reasons"]))
 
-    def test_different_execution_yields_independent_candidate(self):
-        a = ri.build_candidates_from_result(make_task(), make_result("译文甲"))[0]["candidate_id"]
-        b = ri.build_candidates_from_result(make_task(), make_result("译文乙"))[0]["candidate_id"]
-        self.assertNotEqual(a, b)  # 不同执行(result_digest 变)= 独立 candidate
+    def test_different_text_yields_independent_candidate(self):
+        a = ri.build_candidates_from_result(make_task(), make_result("译文甲"))[0][0]["candidate_id"]
+        b = ri.build_candidates_from_result(make_task(), make_result("译文乙"))[0][0]["candidate_id"]
+        self.assertNotEqual(a, b)  # 内容寻址:不同译文 = 独立 candidate
 
     def test_same_result_same_candidate_id(self):
-        a = ri.build_candidates_from_result(make_task(), make_result())[0]["candidate_id"]
-        b = ri.build_candidates_from_result(make_task(), make_result())[0]["candidate_id"]
+        a = ri.build_candidates_from_result(make_task(), make_result())[0][0]["candidate_id"]
+        b = ri.build_candidates_from_result(make_task(), make_result())[0][0]["candidate_id"]
         self.assertEqual(a, b)
 
 

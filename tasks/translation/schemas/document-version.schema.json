@@ -62,7 +62,7 @@
       },
       "additionalProperties": {
         "type": "string",
-        "pattern": "^cand_[0-9A-Za-z]{8,40}$"
+        "pattern": "^cand_[0-9a-f]{64}$"
       }
     },
     "decision": {

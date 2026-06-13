@@ -160,6 +160,15 @@ candidate。据此固定:
 落地拆为三步:**#52 Candidate v3 + Attestation → #54 Sharded ArtifactStore + integrity gate + importer 迁移
 → #55 SQLite 投影**（#55 在 vertical slice 之后，不作 DocumentVersion 硬前置）。#50 依赖 #52 的 Candidate v3。
 
+**已落地(2026-06-13,#52)**:Candidate v3 schema(纯内容,`schema_version:3`,字段
+`candidate_id/document_id/revision_id/segment_id/source_hash/normalization_version/text`)与
+Attestation schema(append-only 来源)已进入主干;`artifact_schemas.candidate_id_v3`(内容寻址 64-hex)、
+`normalize_text`(normalization_version=1:NFC + 去尾随空白,display-preserving)与 `attestation_id_for`/
+`build_attestation`(确定性派生)已实现;`legacy_import` / `result_import` 已迁移为产出 Candidate v3 + Attestation,
+**同译文跨 producer 去重 → 一个 Candidate + 多条 Attestation**。evaluation/document-version/annotation 的
+`candidate_id` 引用模式同步收紧为 64-hex。**仍待 #54**:把当前 importer 的"一工件一 JSON 文件 + 调用方传
+`store_dir`"换成 sharded `ArtifactStore.put_many` + integrity gate(`verify_references`)。
+
 ## 3. 系统总览
 
 ```mermaid

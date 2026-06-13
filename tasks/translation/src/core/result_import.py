@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""result 导入:把执行器(API/Agent)产出的 Result 落成 Candidate(import-result)。
+"""result 导入:把执行器(API/Agent)产出的 Result 落成 Candidate v3 + Attestation(import-result)。
 
 - 先做 §5.4 stale-result 校验(task_id/task_digest/schema/segment/source_hash);任一不匹配
-  整份 Result 进 quarantine,不写任何 candidate。
-- 通过后按 §9.2 的 candidate_id_for(task_digest, result_digest, key, segment_id) 派生 id,
-  写入 candidate store(复用 legacy_import 的幂等 + 冲突检测 + 原子写)。
-- 同一 Result 重复导入零新增;同一任务不同执行(result_digest 变)落独立 candidate。
+  整份 Result 进 quarantine,不写任何工件。
+- 通过后对每个候选:译文经 normalization_version=1 归一化 → 内容寻址 candidate_id(64-hex,
+  跨 producer 文本等价去重);来源(producer/task/result digest/key)落一条确定性 Attestation。
+- 同一 Result 重复导入零新增(candidate + attestation 均确定性);不同执行产出相同译文 →
+  同一 Candidate + 各自 Attestation(去重),产出不同译文 → 不同 Candidate。
 不写发布版本、不做 selection(那是 P1)。
 """
 
@@ -20,21 +21,25 @@ from typing import Any, Dict, List, Tuple
 
 try:
     from .artifact_schemas import (
+        build_attestation,
         canonical_digest,
-        candidate_id_for,
+        candidate_id_v3,
         check_result_against_task,
+        normalize_text,
         validate_artifact,
     )
-    from .legacy_import import write_candidates
+    from .legacy_import import write_attestations, write_candidates
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.artifact_schemas import (
+        build_attestation,
         canonical_digest,
-        candidate_id_for,
+        candidate_id_v3,
         check_result_against_task,
+        normalize_text,
         validate_artifact,
     )
-    from core.legacy_import import write_candidates
+    from core.legacy_import import write_attestations, write_candidates
 
 
 # Agent/API 的 Result 是不可信输入(system-design §16):限制大小与数量,防止内存/磁盘耗尽。
@@ -51,8 +56,10 @@ class QuarantineError(Exception):
         self.reasons = reasons
 
 
-def build_candidates_from_result(task: Dict[str, Any], result: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """校验 Result 对齐 Task 后,构建并校验 Candidate 列表。stale 抛 QuarantineError。"""
+def build_candidates_from_result(
+    task: Dict[str, Any], result: Dict[str, Any]
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """校验 Result 对齐 Task 后,构建并校验 (Candidate v3 列表, Attestation 列表)。stale 抛 QuarantineError。"""
     for kind, doc in (("task", task), ("result", result)):
         errors = validate_artifact(kind, doc)
         if errors:
@@ -83,56 +90,74 @@ def build_candidates_from_result(task: Dict[str, Any], result: Dict[str, Any]) -
     producer = result["producer"]
 
     candidates: List[Dict[str, Any]] = []
+    attestations: List[Dict[str, Any]] = []
     for entry in result["candidates"]:
         segment_id = entry["segment_id"]
+        source_hash = source_hashes[segment_id]
+        normalized = normalize_text(entry["text"])
+        candidate_id = candidate_id_v3(
+            task["revision_id"], segment_id, source_hash, normalized
+        )
         candidate = {
-            "schema_version": 2,
-            "candidate_id": candidate_id_for(
-                task_digest, result_digest, entry["result_candidate_key"], segment_id
-            ),
+            "schema_version": 3,
+            "candidate_id": candidate_id,
             "document_id": task["document_id"],
             "revision_id": task["revision_id"],
             "segment_id": segment_id,
-            "source_hash": source_hashes[segment_id],
-            "text": entry["text"],
-            "purpose": task["task_type"],
-            "parent_candidate_id": None,
+            "source_hash": source_hash,
+            "normalization_version": 1,
+            "text": normalized,
+        }
+        errors = validate_artifact("candidate", candidate)
+        if errors:
+            raise ValueError(f"built candidate invalid: {errors}")
+        candidates.append(candidate)
+
+        attestation = build_attestation({
+            "candidate_id": candidate_id,
             "producer": {
                 "type": producer["type"],
                 "name": producer["name"],
                 "model": producer.get("model"),
                 "harness": producer["name"] if producer["type"] == "harness" else None,
             },
-            "provenance": {
-                "task_id": task["task_id"],
-                "task_digest": task_digest,
-                "result_digest": result_digest,
-                "result_candidate_key": entry["result_candidate_key"],
-                "prompt_version": None,
-                "recipe_id": None,
-                "knowledge_snapshot_id": task.get("knowledge_snapshot_id"),
-            },
+            "purpose": task["task_type"],
+            "parent_candidate_id": None,
+            "task_id": task["task_id"],
+            "task_digest": task_digest,
+            "result_digest": result_digest,
+            "result_candidate_key": entry["result_candidate_key"],
+            "legacy_label": None,
+            "knowledge_snapshot_id": task.get("knowledge_snapshot_id"),
             "created_at": result["completed_at"],
-        }
-        errors = validate_artifact("candidate", candidate)
+        })
+        errors = validate_artifact("attestation", attestation)
         if errors:
-            raise ValueError(f"built candidate invalid: {errors}")
-        candidates.append(candidate)
-    return candidates
+            raise ValueError(f"built attestation invalid: {errors}")
+        attestations.append(attestation)
+    return candidates, attestations
 
 
 def import_result(task: Dict[str, Any], result: Dict[str, Any], store_dir: Path) -> Dict[str, Any]:
-    """导入一份 Result。返回 {written, skipped, candidate_ids};stale 时返回 quarantined 报告。"""
+    """导入一份 Result。返回工件计数与 id 列表;stale 时返回 quarantined 报告。"""
     try:
-        candidates = build_candidates_from_result(task, result)
+        candidates, attestations = build_candidates_from_result(task, result)
     except QuarantineError as exc:
-        return {"quarantined": True, "reasons": exc.reasons, "written": 0, "skipped": 0, "candidate_ids": []}
+        return {
+            "quarantined": True, "reasons": exc.reasons,
+            "written": 0, "skipped": 0, "candidate_ids": [],
+            "attestations_written": 0, "attestations_skipped": 0,
+        }
     written, skipped = write_candidates(candidates, store_dir)
+    a_written, a_skipped = write_attestations(attestations, store_dir)
     return {
         "quarantined": False,
         "written": written,
         "skipped": skipped,
         "candidate_ids": [c["candidate_id"] for c in candidates],
+        "attestations_written": a_written,
+        "attestations_skipped": a_skipped,
+        "attestation_ids": [a["attestation_id"] for a in attestations],
     }
 
 
@@ -163,7 +188,11 @@ def main() -> int:
         for reason in report["reasons"]:
             print(f"- {reason}", file=sys.stderr)
         return 1
-    print(f"written={report['written']} skipped={report['skipped']}")
+    print(
+        f"candidates_written={report['written']} candidates_skipped={report['skipped']} "
+        f"attestations_written={report['attestations_written']} "
+        f"attestations_skipped={report['attestations_skipped']}"
+    )
     return 0
 
 

@@ -11,19 +11,25 @@ import unittest
 try:
     from .artifact_schemas import (
         ARTIFACT_KINDS,
-        candidate_id_for,
+        attestation_id_for,
+        build_attestation,
+        candidate_id_v3,
         canonical_digest,
         check_result_against_task,
         load_schema,
+        normalize_text,
         validate_artifact,
     )
 except ImportError:  # unittest discover may import as top-level core.artifact_schemas_test
     from artifact_schemas import (
         ARTIFACT_KINDS,
-        candidate_id_for,
+        attestation_id_for,
+        build_attestation,
+        candidate_id_v3,
         canonical_digest,
         check_result_against_task,
         load_schema,
+        normalize_text,
         validate_artifact,
     )
 
@@ -58,36 +64,43 @@ def make_revision():
     }
 
 
+CAND_TEXT = "她转过身来。"
+
+
 def make_candidate():
     return {
-        "schema_version": 2,
-        "candidate_id": "cand_" + "e" * 16,
+        "schema_version": 3,
+        "candidate_id": candidate_id_v3(REV, SEG, HASH, CAND_TEXT),
         "document_id": "pixiv:50235390:12430834",
         "revision_id": REV,
         "segment_id": SEG,
         "source_hash": HASH,
-        "text": "她转过身来。",
-        "purpose": "initial",
-        "parent_candidate_id": None,
-        "producer": {"type": "api", "name": "openrouter", "model": "model-slug", "harness": None},
-        "provenance": {
-            "task_id": "task_" + "f" * 12,
-            "task_digest": "1" * 16,
-            "result_digest": "2" * 16,
-            "result_candidate_key": "option-a",
-            "prompt_version": "body-v3",
-            "recipe_id": "fanbox-default-v2",
-            "knowledge_snapshot_id": KNOW,
-        },
-        "created_at": "2026-06-12T00:00:00Z",
+        "normalization_version": 1,
+        "text": CAND_TEXT,
     }
+
+
+def make_attestation():
+    return build_attestation({
+        "candidate_id": candidate_id_v3(REV, SEG, HASH, CAND_TEXT),
+        "producer": {"type": "api", "name": "openrouter", "model": "model-slug", "harness": None},
+        "purpose": "translate",
+        "parent_candidate_id": None,
+        "task_id": "task_" + "f" * 12,
+        "task_digest": "1" * 16,
+        "result_digest": "2" * 16,
+        "result_candidate_key": "option-a",
+        "legacy_label": None,
+        "knowledge_snapshot_id": KNOW,
+        "created_at": "2026-06-12T00:00:00Z",
+    })
 
 
 def make_evaluation():
     return {
         "schema_version": 1,
         "evaluation_id": "eval_" + "a1" * 6,
-        "candidate_id": "cand_" + "e" * 16,
+        "candidate_id": candidate_id_v3(REV, SEG, HASH, CAND_TEXT),
         "evaluator": {"type": "rule", "name": "deterministic-qa", "version": "qa-v2"},
         "verdict": "fail",
         "findings": [
@@ -106,7 +119,7 @@ def make_version():
         "revision_id": REV,
         "parent_version_id": None,
         "knowledge_snapshot_id": KNOW,
-        "selections": {SEG: "cand_" + "e" * 16},
+        "selections": {SEG: candidate_id_v3(REV, SEG, HASH, CAND_TEXT)},
         "decision": {"selected_by": "user", "reason": "accepted after comparison"},
         "status": "reviewed",
         "created_at": "2026-06-12T00:10:00Z",
@@ -120,7 +133,7 @@ def make_annotation():
         "document_id": "pixiv:50235390:12430834",
         "revision_id": REV,
         "segment_id": SEG,
-        "target_candidate_id": "cand_" + "e" * 16,
+        "target_candidate_id": candidate_id_v3(REV, SEG, HASH, CAND_TEXT),
         "type": "wrong_reference",
         "comment": "这里的「彼女」指小雪,不是由纪。",
         "created_by": "user",
@@ -170,6 +183,7 @@ def make_result():
 FIXTURES = {
     "document-revision": make_revision,
     "candidate": make_candidate,
+    "attestation": make_attestation,
     "evaluation": make_evaluation,
     "document-version": make_version,
     "annotation": make_annotation,
@@ -214,22 +228,29 @@ class SchemaValidationTest(unittest.TestCase):
             doc["unexpected_field"] = 1
             self.assertNotEqual([], validate_artifact(kind, doc), kind)
 
-    def test_candidate_requires_idempotency_fields_present(self):
-        doc = make_candidate()
-        del doc["provenance"]["result_digest"]
-        errors = validate_artifact("candidate", doc)
-        self.assertTrue(any("result_digest" in e for e in errors), errors)
-        # 人工/遗留候选:字段必须存在但可为 null
-        doc = make_candidate()
-        doc["producer"]["type"] = "human"
+    def test_attestation_requires_idempotency_fields_present(self):
+        # api/harness 自动产出:task/result digest/key 必须存在且非 null
+        doc = make_attestation()
+        doc["task_digest"] = None
+        self.assertNotEqual([], validate_artifact("attestation", doc))
+        # 人工/遗留来源:幂等字段可为 null
+        doc = make_attestation()
+        doc["producer"]["type"] = "legacy"
         for key in ("task_id", "task_digest", "result_digest", "result_candidate_key"):
-            doc["provenance"][key] = None
-        self.assertEqual([], validate_artifact("candidate", doc))
-        # api/harness 自动生成候选:幂等字段不得为 null
+            doc[key] = None
+        doc["legacy_label"] = "dir_bilingual"
+        doc["attestation_id"] = attestation_id_for(
+            {k: v for k, v in doc.items() if k not in ("attestation_id", "schema_version")}
+        )
+        self.assertEqual([], validate_artifact("attestation", doc))
+
+    def test_candidate_has_no_provenance_fields(self):
+        # v3 candidate 是纯内容:不得再带 producer/provenance/purpose/parent/created_at
         doc = make_candidate()
-        doc["producer"]["type"] = "api"
-        doc["provenance"]["task_digest"] = None
-        self.assertNotEqual([], validate_artifact("candidate", doc))
+        for forbidden in ("producer", "provenance", "purpose", "parent_candidate_id", "created_at"):
+            tampered = dict(doc)
+            tampered[forbidden] = None
+            self.assertNotEqual([], validate_artifact("candidate", tampered), forbidden)
 
     def test_bad_identity_patterns_rejected(self):
         doc = make_revision()
@@ -273,20 +294,66 @@ class StaleResultTest(unittest.TestCase):
 
 
 class CandidateIdDerivationTest(unittest.TestCase):
-    def test_known_vector_is_stable(self):
-        cid = candidate_id_for("1" * 16, "2" * 16, "option-a", SEG)
-        self.assertRegex(cid, r"^cand_[0-9a-f]{16}$")
-        self.assertEqual(cid, candidate_id_for("1" * 16, "2" * 16, "option-a", SEG))
+    def test_content_address_is_stable_full_hex(self):
+        cid = candidate_id_v3(REV, SEG, HASH, CAND_TEXT)
+        self.assertRegex(cid, r"^cand_[0-9a-f]{64}$")
+        self.assertEqual(cid, candidate_id_v3(REV, SEG, HASH, CAND_TEXT))
 
-    def test_different_execution_yields_new_candidate(self):
-        a = candidate_id_for("1" * 16, "2" * 16, "option-a", SEG)
-        b = candidate_id_for("1" * 16, "3" * 16, "option-a", SEG)
+    def test_same_text_dedup_across_producers(self):
+        # 内容寻址:同 (revision, segment, source_hash, 归一化文本) → 同 id,与 producer 无关
+        a = candidate_id_v3(REV, SEG, HASH, CAND_TEXT)
+        b = candidate_id_v3(REV, SEG, HASH, CAND_TEXT)
+        self.assertEqual(a, b)
+
+    def test_different_text_yields_new_candidate(self):
+        a = candidate_id_v3(REV, SEG, HASH, "译文甲")
+        b = candidate_id_v3(REV, SEG, HASH, "译文乙")
         self.assertNotEqual(a, b)
+
+    def test_identity_depends_on_each_component(self):
+        base = candidate_id_v3(REV, SEG, HASH, CAND_TEXT)
+        other_seg = f"{REV}:000099:" + "b" * 8
+        self.assertNotEqual(base, candidate_id_v3(REV, other_seg, HASH, CAND_TEXT))
+        self.assertNotEqual(base, candidate_id_v3(REV, SEG, "9" * 16, CAND_TEXT))
+        self.assertNotEqual(base, candidate_id_v3("rev_" + "9" * 16, SEG, HASH, CAND_TEXT))
 
     def test_derived_id_passes_candidate_schema(self):
         doc = make_candidate()
-        doc["candidate_id"] = candidate_id_for("1" * 16, "2" * 16, "option-a", SEG)
+        doc["candidate_id"] = candidate_id_v3(REV, SEG, HASH, CAND_TEXT)
         self.assertEqual([], validate_artifact("candidate", doc))
+
+
+class NormalizationTest(unittest.TestCase):
+    def test_v1_strips_trailing_whitespace_only(self):
+        self.assertEqual("你好", normalize_text("你好   "))
+        self.assertEqual("你好", normalize_text("你好\t\n"))
+
+    def test_v1_preserves_internal_whitespace_and_punctuation(self):
+        # display-preserving:不折叠内部空白、不改标点/引号
+        self.assertEqual("「甲  乙」", normalize_text("「甲  乙」"))
+        self.assertEqual("a b\tc", normalize_text("a b\tc"))
+
+    def test_v1_applies_nfc(self):
+        decomposed = "ガ"  # カ + 浊音符 → ガ(NFC 合成)
+        self.assertEqual("ガ", normalize_text(decomposed))
+
+    def test_unsupported_version_raises(self):
+        with self.assertRaises(ValueError):
+            normalize_text("x", normalization_version=2)
+
+
+class AttestationIdDerivationTest(unittest.TestCase):
+    def test_deterministic_and_full_hex(self):
+        att = make_attestation()
+        self.assertRegex(att["attestation_id"], r"^att_[0-9a-f]{64}$")
+        self.assertEqual(att["attestation_id"], make_attestation()["attestation_id"])
+
+    def test_distinct_provenance_yields_distinct_attestation(self):
+        a = make_attestation()
+        b = make_attestation()
+        b_core = {k: v for k, v in b.items() if k not in ("attestation_id", "schema_version")}
+        b_core["result_digest"] = "9" * 16
+        self.assertNotEqual(a["attestation_id"], attestation_id_for(b_core))
 
 
 if __name__ == "__main__":

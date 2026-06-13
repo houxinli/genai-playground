@@ -72,8 +72,8 @@ source -> revision -> legacy/new candidates -> evaluations
 | Legacy 导入 | 已完成 | bilingual 反解 → legacy Candidate(目录标签区分、确定性幂等、截断容错),真实 momizi813 跑通 | `tasks/translation/src/core/legacy_import.py` |
 | Source adapter / renderer | 部分完成 | 目录→DocumentRevision 适配 + bilingual shadow renderer(与现格式逐字节一致,golden 验证);zh renderer 待做(#42) | `tasks/translation/src/core/source_adapter.py` |
 | Fixture/Golden 底座 | 已完成 | 合成脱敏 Pixiv/Fanbox fixture、golden document-revision/bilingual/zh、revision/segment ID pin 稳定性测试 | `tasks/translation/src/core/testdata/` |
-| 业务工件 Schema | 基础完成 | 七类工件 JSON Schema、validate/round-trip/stale-result 测试与 CLI 校验已落地；DocumentVersion v2 待 #50 | `tasks/translation/schemas/` |
-| Candidate 身份 / Artifact Store | 未实现 | 当前两套不一致 candidate ID + 一文件一 candidate（5.5万）。已定稿:#52 Candidate v3 + Attestation（内容寻址、文本去重）→ #54 Sharded ArtifactStore + integrity gate + importer 迁移 → #55 SQLite 投影 | Issue #52/#54/#55 / 系统设计 §2.7 |
+| 业务工件 Schema | 基础完成 | 八类工件 JSON Schema（新增 attestation）、validate/round-trip/stale-result 测试与 CLI 校验已落地；DocumentVersion v2 待 #50 | `tasks/translation/schemas/` |
+| Candidate 身份 / Artifact Store | 身份已统一,存储待 #54 | #52 已落地:Candidate v3（纯内容、内容寻址 64-hex）+ Attestation（append-only 来源），同译文跨 producer 去重；legacy/result importer 已迁移。仍待 #54 Sharded ArtifactStore + integrity gate（当前仍一工件一 JSON 文件）→ #55 SQLite 投影 | `tasks/translation/src/core/artifact_schemas.py` / 系统设计 §2.7 |
 | 目标系统设计 | 分阶段实施 | P0 基础与 translate job 最小闭环已落地；2026-06-13 已按真实实现重新校准 | `tasks/translation/docs/system-design.md` |
 | 开发 Agent 连续性 | 基础已落地 | 协议、Schema、validator、CI、GitHub 模板、`make agent-bootstrap`、`make docs-drift`(文档漂移闸门)与 PR 设计耦合检查已实现；GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
 | 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线（v2 含打包产物与截断检查）；1048 单元中 894 个含 error（v2.1 打包按章拆分），坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
@@ -86,6 +86,15 @@ source -> revision -> legacy/new candidates -> evaluations
 | Sunday Movies | 维护模式 | 仓库中保留，但当前不作为近期规划重点 | `tasks/sunday-movies/` |
 
 ## Recent Engineering Changes
+
+2026-06-13 Candidate v3 + Attestation（#52，P1 第一步）：
+
+- Candidate 升级为 v3 纯内容工件（移除 producer/provenance/purpose/parent/created_at），
+  `candidate_id = sha256({identity_version, revision_id, segment_id, source_hash, normalization_version, normalized_text})`，完整 64-hex。
+- 新增 append-only Attestation schema 承接来源（producer/task·result digest/key/legacy_label/knowledge/created_at），attestation_id 确定性派生。
+- `normalization_version=1` 冻结为 display-preserving（NFC + 去尾随空白，不折叠内部空白/不改标点）。
+- legacy/result importer 迁移产出 v3 + attestation，**同译文跨 producer 去重 → 一个 Candidate + 多条 Attestation**。
+- evaluation/document-version/annotation 的 candidate_id 引用同步收紧为 64-hex。测试基线 188 → 198。
 
 2026-06-13 架构检查点：
 
@@ -196,7 +205,7 @@ source -> revision -> legacy/new candidates -> evaluations
 
 实施顺序（2026-06-13 与 Codex 收敛）:**#52 → #54 → #50 →（#55 later）**。
 
-1. **#52** Candidate v3 + Attestation（内容寻址身份、文本等价去重）— #50 的前置。
+1. ~~**#52** Candidate v3 + Attestation（内容寻址身份、文本等价去重）~~（已完成 2026-06-13：Candidate v3 纯内容 schema + Attestation append-only schema + 内容寻址 64-hex 身份 + display-preserving 归一化；legacy/result importer 迁移并去重）— #50 的前置。
 2. **#54** Sharded ArtifactStore + integrity gate（`verify_references`）+ legacy/result importer 迁移。
 3. **#50** 保守 recommendation（按判定表，error 只做 gate 不排名）+ `DocumentVersion` v2 + 从版本渲染 bilingual。
 4. **#55** SQLite 可重建投影（vertical slice 之后，非硬前置）；zh renderer（#42）。

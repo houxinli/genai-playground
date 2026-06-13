@@ -37,13 +37,22 @@ class LegacyImportTest(unittest.TestCase):
 
     def test_round_trip_recovers_all_segments(self):
         rev = si.build_document_revision("pixiv", SRC)
-        candidates, issues = self._build()
+        candidates, attestations, issues = self._build()
         self.assertEqual([], issues)
         self.assertEqual(len(rev["segments"]), len(candidates))
+        self.assertEqual(len(candidates), len(attestations))
         for c in candidates:
             self.assertEqual([], validate_artifact("candidate", c))
-            self.assertEqual("legacy", c["producer"]["type"])
-            self.assertEqual("momizi-style", c["producer"]["name"])
+            self.assertEqual(3, c["schema_version"])
+            self.assertRegex(c["candidate_id"], r"^cand_[0-9a-f]{64}$")
+            self.assertNotIn("producer", c)  # 来源在 attestation
+        by_cand = {a["candidate_id"]: a for a in attestations}
+        for c in candidates:
+            a = by_cand[c["candidate_id"]]
+            self.assertEqual([], validate_artifact("attestation", a))
+            self.assertEqual("legacy", a["producer"]["type"])
+            self.assertEqual("momizi-style", a["producer"]["name"])
+            self.assertEqual("momizi-style", a["legacy_label"])
 
     def test_recovered_text_matches_source_translations(self):
         rev = si.build_document_revision("pixiv", SRC)
@@ -57,35 +66,42 @@ class LegacyImportTest(unittest.TestCase):
         self.assertEqual(EXPECTED_TEXT["body"], body_texts)
 
     def test_created_at_is_stable_published_at(self):
-        # created_at 取源 published_at,稳定可复现(不随导入时刻变)
-        for c in self._build():
-            pass
-        candidates, _ = self._build()
-        self.assertTrue(all(c["created_at"] == "2026-01-01T09:00:00+09:00" for c in candidates))
+        # attestation.created_at 取源 published_at,稳定可复现(不随导入时刻变)
+        attestations = self._build()[1]
+        self.assertTrue(all(a["created_at"] == "2026-01-01T09:00:00+09:00" for a in attestations))
 
     def test_write_is_idempotent(self):
-        candidates, _ = self._build()
+        candidates, attestations, _ = self._build()
         with tempfile.TemporaryDirectory() as tmp:
             store = Path(tmp)
             self.assertEqual((len(candidates), 0), li.write_candidates(candidates, store))
             self.assertEqual((0, len(candidates)), li.write_candidates(candidates, store))
-            self.assertEqual(len(candidates), len(list(store.glob("*.json"))))
+            self.assertEqual((len(attestations), 0), li.write_attestations(attestations, store))
+            self.assertEqual((0, len(attestations)), li.write_attestations(attestations, store))
+            self.assertEqual(len(candidates), len(list(store.glob("cand_*.json"))))
+            self.assertEqual(len(attestations), len(list(store.glob("att_*.json"))))
 
     def test_conflicting_existing_artifact_raises(self):
-        candidates, _ = self._build()
+        candidates, _, _ = self._build()
         with tempfile.TemporaryDirectory() as tmp:
             store = Path(tmp)
             li.write_candidates(candidates, store)
             # 篡改一个已存在工件 -> 同 id 不同内容必须报错
-            victim = next(store.glob("*.json"))
+            victim = next(store.glob("cand_*.json"))
             victim.write_text(json.dumps({"corrupt": True}), encoding="utf-8")
             with self.assertRaises(ValueError):
                 li.write_candidates(candidates, store)
 
-    def test_distinct_labels_yield_distinct_candidates(self):
-        a = {c["candidate_id"] for c in self._build("dir_bilingual")[0]}
-        b = {c["candidate_id"] for c in self._build("dir_bilingual_v2")[0]}
-        self.assertEqual(set(), a & b)
+    def test_distinct_labels_dedup_candidates_distinct_attestations(self):
+        # 内容寻址:两个标签产出相同译文 → 同一 Candidate(去重),但来源各记一条 Attestation
+        ca, aa, _ = self._build("dir_bilingual")
+        cb, ab, _ = self._build("dir_bilingual_v2")
+        cand_a = {c["candidate_id"] for c in ca}
+        cand_b = {c["candidate_id"] for c in cb}
+        self.assertEqual(cand_a, cand_b)  # 文本相同 → candidate 完全去重
+        att_a = {a["attestation_id"] for a in aa}
+        att_b = {a["attestation_id"] for a in ab}
+        self.assertEqual(set(), att_a & att_b)  # legacy_label 不同 → attestation 不同
 
     def test_empty_translation_does_not_bleed_into_next_segment(self):
         # 合法的空译文(译文行为空)不应让下一段原文被当成上一段译文(基线含 112 个 empty)
@@ -123,7 +139,7 @@ class LegacyImportTest(unittest.TestCase):
             full = BILINGUAL.read_text(encoding="utf-8")
             head = full.split("「早上好」")[0] + "「早上好」\n"
             truncated.write_text(head, encoding="utf-8")
-            candidates, issues = li.build_legacy_candidates("pixiv", SRC, truncated, "trunc")
+            candidates, _attestations, issues = li.build_legacy_candidates("pixiv", SRC, truncated, "trunc")
             self.assertTrue(any("truncated" in m for m in issues), issues)
             self.assertTrue(any(c["text"] == "「早上好」" for c in candidates))
 
@@ -138,8 +154,11 @@ class LegacyImportTest(unittest.TestCase):
             report = li.import_directory("pixiv", srcdir, bildir, "dir_label", store)
             self.assertEqual(1, report["posts"])
             self.assertEqual(["999999.txt"], report["missing_source"])
-            self.assertEqual(report["candidates"], report["written"])
+            self.assertEqual(report["candidates"], report["candidates_written"])
+            self.assertEqual(report["candidates"], report["attestations_written"])
             self.assertEqual([], report["posts_with_issues"])
+            self.assertEqual(report["candidates"], len(list(store.glob("cand_*.json"))))
+            self.assertEqual(report["candidates"], len(list(store.glob("att_*.json"))))
 
 
 if __name__ == "__main__":

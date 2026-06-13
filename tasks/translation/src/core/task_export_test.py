@@ -87,7 +87,8 @@ class TaskExportTest(unittest.TestCase):
             report = ri.import_result(task, result, store)
             self.assertFalse(report["quarantined"], report)
             self.assertEqual(len(bundle["segments"]), report["written"])
-            self.assertEqual(len(bundle["segments"]), len(list(store.glob("*.json"))))
+            self.assertEqual(len(bundle["segments"]), len(list(store.glob("cand_*.json"))))
+            self.assertEqual(len(bundle["segments"]), len(list(store.glob("att_*.json"))))
 
 
     def test_tampered_revision_rejected(self):

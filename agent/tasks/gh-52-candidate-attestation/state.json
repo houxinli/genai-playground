@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-52-candidate-attestation",
+  "title": "Candidate v3 + Attestation(内容寻址身份拆分)",
+  "status": "active",
+  "branch": "feat/candidate-attestation",
+  "objective": "把 candidate 拆成纯内容、不可变、content-addressed 的 Candidate v3 与 append-only Attestation;统一身份、文本等价去重;legacy/result importer 迁移产出 v3+attestation。#50 与 #54 的前置。",
+  "github": {
+    "issue": 52,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/schemas/candidate.schema.json 升级到 v3(纯内容)",
+      "tasks/translation/schemas/attestation.schema.json 新增(append-only 来源)",
+      "tasks/translation/src/core/artifact_schemas.py 内容寻址身份派生 + attestation id + 归一化",
+      "tasks/translation/src/core/legacy_import.py 改造产出 v3+attestation",
+      "tasks/translation/src/core/result_import.py 改造产出 v3+attestation",
+      "上述模块对应 *_test.py 更新与新增(去重/归一化/迁移)",
+      "system-design.md / PROJECT_STATUS.md 同 PR 更新(设计耦合 gate)"
+    ],
+    "out": [
+      "Sharded ArtifactStore + integrity gate(#54)",
+      "SQLite 投影(#55)",
+      "conservative selection / DocumentVersion v2(#50)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "§2.7 Candidate v3 + Attestation 收敛设计",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "candidate_id 内容寻址 64-hex",
+      "reason": "cand_ + sha256(canonical{identity_version, revision_id, segment_id, source_hash, normalization_version, normalized_text});同文本跨 producer 去重,符合 #52 与 system-design §2.7。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "normalization_version=1 display-preserving",
+      "reason": "仅 NFC + 去尾随空白,不折叠内部空白/不改标点引号,保证 normalized text == 可直接渲染译文。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "Candidate/Attestation 二分",
+      "reason": "Candidate 纯内容不可变;producer/provenance/purpose/parent/created_at 移入 append-only Attestation,attestation_id 确定性派生 → 重放不新增。同文本多 producer → 1 Candidate + N Attestation。",
+      "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "其它 schema candidate_id 引用收紧为 64-hex",
+      "reason": "evaluation/document-version/annotation 必须能引用真实 v3 candidate,否则系统内部不一致。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "Candidate v3 + Attestation schema",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "两个 schema 校验通过",
+        "fixture round-trip 绿"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "artifact_schemas 身份/归一化/attestation id 派生 + 测试",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "content-addressed id 稳定且 64-hex",
+        "归一化 display-preserving 测试绿"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "legacy_import / result_import 迁移产出 v3+attestation + 测试",
+      "status": "completed",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "去重测试:同文本不同 producer → 1 candidate + N attestation",
+        "幂等/迁移测试绿"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "docs 同步 + 全量 pytest + 基线对齐",
+      "status": "completed",
+      "depends_on": [
+        "S3"
+      ],
+      "acceptance": [
+        "pytest 全绿",
+        "AGENTS.md 基线与 docs-drift 一致"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S4"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三通道已三联",
+        "PR 合并、main 收敛"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S5",
+    "instruction": "推送 feat/candidate-attestation,开 PR(closes #52),等 CI;按三通道核对 Codex review 并三联处理后合并。",
+    "acceptance": [
+      "CI tests 全绿",
+      "PR 合并、删除分支、main 拉回"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "198 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 198)",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260613T213343Z-claude-code",
+    "timestamp": "2026-06-13T21:33:43Z",
+    "agent": "claude-code",
+    "summary": "Candidate v3(纯内容内容寻址 64-hex)+ Attestation(append-only 来源)schema 落地",
+    "observed_head": "c2c4988"
+  },
+  "next_task": null
+}
