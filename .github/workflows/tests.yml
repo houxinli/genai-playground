@@ -28,8 +28,25 @@ jobs:
 
       - name: Agent harness validation
         run: |
-          python -m unittest scripts.validate_agent_tasks_test scripts.bootstrap_agent_task_test
+          python -m unittest scripts.validate_agent_tasks_test scripts.bootstrap_agent_task_test scripts.check_docs_drift_test
           python scripts/validate_agent_tasks.py
+
+      - name: Docs drift gate
+        run: |
+          python scripts/check_docs_drift.py
+
+      - name: Design-doc coupling (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          NEEDS_DESIGN=$(echo "$CHANGED" | grep -E '^tasks/translation/schemas/|^tasks/translation/src/core/[^/]+\.py$' | grep -v '_test\.py' || true)
+          TOUCHED_DESIGN=$(echo "$CHANGED" | grep -E '^tasks/translation/docs/system-design\.md$|^docs/PROJECT_STATUS\.md$' || true)
+          if [ -n "$NEEDS_DESIGN" ] && [ -z "$TOUCHED_DESIGN" ]; then
+            echo "::error::改了 schema/core 模块却没更新 system-design.md 或 PROJECT_STATUS.md(设计跟代码同 PR 走):"
+            echo "$NEEDS_DESIGN"
+            exit 1
+          fi
 
       - name: Translation test suite
         # pytest 统跑:unittest discover 不执行 parser/prompt 下的 pytest 风格用例

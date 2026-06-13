@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-59-docs-drift-gate",
+  "title": "文档漂移 CI 闸门(check_docs_drift + PR 耦合)",
+  "status": "active",
+  "branch": "feat/docs-drift-gate",
+  "objective": "把文档跟上现实变成 CI 闸门:check_docs_drift(基线数字==实际计数、组件路径存在)+ make + CI + PR 耦合启发式 + 去重基线数字,根除文档滞后。",
+  "github": {
+    "issue": 59,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "scripts/check_docs_drift.py(+test)",
+      "Makefile docs-drift",
+      "CI(docs-drift + 设计耦合)",
+      "AGENTS/PR 模板规则",
+      "去重基线数字 + 修 186→188"
+    ],
+    "out": [
+      "组件已完成/未实现语义校验",
+      "journal 自动化"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "check_docs_drift + make + CI",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "基线==实际计数、组件路径存在;6 测试;make docs-drift 正反验证"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "PR 设计耦合 + 规则 + 去重 + 修滞后",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "CI 耦合 step;AGENTS/PR 模板;基线单一来源;186→188"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "文档 + PR 收尾",
+      "status": "in_progress",
+      "depends_on": [
+        "S1",
+        "S2"
+      ],
+      "acceptance": [
+        "三渠道 triage;CI 绿;合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR,三渠道 triage,CI 绿后合并。",
+    "acceptance": [
+      "PR 合并,issue #59 关闭"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "make docs-drift",
+      "conda run -n llm python -m unittest scripts.check_docs_drift_test"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "188 passed",
+        "timestamp": "2026-06-13T20:16:40Z"
+      },
+      {
+        "command": "make docs-drift",
+        "status": "passed",
+        "summary": "通过(基线 188==实际、路径存在)",
+        "timestamp": "2026-06-13T20:16:40Z"
+      },
+      {
+        "command": "conda run -n llm python -m unittest scripts.check_docs_drift_test",
+        "status": "passed",
+        "summary": "6 测试 OK",
+        "timestamp": "2026-06-13T20:16:40Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260613T201640Z-claude-code",
+    "timestamp": "2026-06-13T20:16:40Z",
+    "agent": "claude-code",
+    "summary": "S1-S2 完成,待 PR",
+    "observed_head": "261a4f3"
+  },
+  "next_task": null
+}
