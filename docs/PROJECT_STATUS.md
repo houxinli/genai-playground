@@ -57,6 +57,7 @@
 | 质量检测 | 可用 | 规则 QC + LLM QC 可工作；新增硬规则 QA gate，可检查双语配对、假名残留、拒绝模板、失败标记和人名坏别名 | `tasks/translation/src/core/qa_gate.py` |
 | 人名一致性 | 可用 | 支持人工规则优先、自动预读候选保存、正文 OpenRouter + 本地 vLLM/MLX 抽名的分离运行时 | `tasks/translation/src/core/translator.py` |
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
+| 业务工件 Schema | 已完成 | 七类工件 JSON Schema(candidate v2 含幂等键)、validate/round-trip/stale-result 测试、CLI 校验入口 | `tasks/translation/schemas/` |
 | 目标系统设计 | 已完成设计 | 已定义 JSON/SQLite 边界、candidate/version、API/Agent 协议、用户 annotation、跨文本知识与迁移顺序；尚未实现 | `tasks/translation/docs/system-design.md` |
 | 开发 Agent 连续性 | 基础已落地 | 协议、Schema、validator、CI、GitHub 模板与 `make agent-bootstrap` 已实现；GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
 | 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线（v2 含打包产物与截断检查）；1048 单元中 894 个含 error（v2.1 打包按章拆分），坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
@@ -154,7 +155,7 @@
 1. ~~存量内容库盘点、QA 基线与坏产物隔离~~（#10，已完成 2026-06-12：`inventory_content.py` +
    `qa_baseline.py`，3 个坏产物目录已隔离并记录 manifest）。
 2. 为 `agent/tasks` 增加 GitHub 状态同步（bootstrap 命令已完成，#9）。
-3. 固定 revision、candidate、evaluation、annotation、version、task、result 的 JSON Schema。
+3. ~~固定 revision、candidate、evaluation、annotation、version、task、result 的 JSON Schema~~（#35，已完成 2026-06-13：`tasks/translation/schemas/` 七类 schema + 校验入口 + 15 个测试）。
 4. 建立 Pixiv/Fanbox 最小 fixture、golden bilingual/zh 和 ID/hash 稳定性测试。
 5. 建立 source adapter、`DocumentRevision/Segment` 和 renderer 的 shadow path。
 6. 支持把现有 bilingual/fixed 文件导入为 legacy candidate，确保迁移不丢历史（以 1 的清单为输入）。

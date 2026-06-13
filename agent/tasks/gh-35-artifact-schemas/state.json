@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-35-artifact-schemas",
+  "title": "业务工件 JSON Schema(P0.3)",
+  "status": "active",
+  "branch": "feat/artifact-schemas",
+  "objective": "固定 revision/candidate/evaluation/annotation/version/task/result 七类工件的 JSON Schema(含 schema_version 与 candidate 幂等键),配 schema validation、round-trip、stale-result 测试,可被 CI 调用。",
+  "github": {
+    "issue": 35,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/schemas/",
+      "tasks/translation/src/core/artifact_schemas.py(+test)",
+      "PROJECT_STATUS/journal 同步"
+    ],
+    "out": [
+      "importer/renderer 实现(P0.5/P0.6)",
+      "SQLite 索引"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "七类工件 schema",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "与 system-design §5/§6/§9 一致,candidate v2 含幂等键"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "校验入口 + 测试",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "validation/round-trip/stale-result/幂等键测试全绿",
+        "CLI 入口可用"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "文档同步与 PR 收尾",
+      "status": "in_progress",
+      "depends_on": [
+        "S1",
+        "S2"
+      ],
+      "acceptance": [
+        "PROJECT_STATUS/journal 更新",
+        "review triage、CI 绿、合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR,三渠道 triage review,CI 绿后合并。",
+    "acceptance": [
+      "PR 合并,issue #35 关闭"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "130 passed(115+15)",
+        "timestamp": "2026-06-13T01:47:22Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260613T014722Z-claude-code",
+    "timestamp": "2026-06-13T01:47:22Z",
+    "agent": "claude-code",
+    "summary": "S1-S2 完成,待 PR 收尾",
+    "observed_head": "1b97782"
+  },
+  "next_task": null
+}
