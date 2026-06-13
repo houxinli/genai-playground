@@ -90,5 +90,26 @@ class TaskExportTest(unittest.TestCase):
             self.assertEqual(len(bundle["segments"]), len(list(store.glob("*.json"))))
 
 
+    def test_tampered_revision_rejected(self):
+        # source_text 被改但 source_hash 没同步 -> 导出必须拒绝(防绕过 stale 防护)
+        rev = _revision()
+        rev["segments"][-1]["source_text"] = "被篡改的原文。"
+        with self.assertRaises(ValueError):
+            te.export_task(rev, _body_ids(rev))
+
+    def test_task_id_covers_reference_fields(self):
+        rev = _revision(); ids = _body_ids(rev)
+        base = te.export_task(rev, ids)
+        with_ann = te.export_task(rev, ids, annotation_ids=["annotation_" + "a" * 12])
+        self.assertNotEqual(base["task_id"], with_ann["task_id"])  # 引用不同 -> id 不同
+
+    def test_export_job_rejects_unsupported_until_context_builder(self):
+        rev = _revision(); ids = _body_ids(rev)
+        with self.assertRaises(ValueError):
+            te.export_job(rev, ids, task_type="repair")
+        with self.assertRaises(ValueError):
+            te.export_job(rev, ids, annotation_ids=["annotation_" + "a" * 12])
+
+
 if __name__ == "__main__":
     unittest.main()

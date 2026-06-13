@@ -19,11 +19,26 @@ from typing import Any, Dict, List, Optional
 
 try:
     from .artifact_schemas import canonical_digest, canonical_dumps, validate_artifact
+    from .source_identity import _source_hash
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.artifact_schemas import canonical_digest, canonical_dumps, validate_artifact
+    from core.source_identity import _source_hash
 
 DEFAULT_CONSTRAINTS = {"output_language": "zh-CN", "preserve_line_count": True}
+
+
+def _verify_segment_integrity(seg: Dict[str, Any]) -> None:
+    """导出前核对 segment 自洽:source_hash 与 source_text 一致、segment_id 内嵌 hash 前缀匹配。
+    防止被篡改/损坏的 revision(改了 source_text 却没更新 hash)绕过 stale-result 防护。"""
+    expected = _source_hash(seg["source_text"])
+    if seg["source_hash"] != expected:
+        raise ValueError(
+            f"segment {seg['segment_id']}: source_hash {seg['source_hash']} != sha256(source_text) {expected}"
+        )
+    prefix = seg["segment_id"].rsplit(":", 1)[1]
+    if not seg["source_hash"].startswith(prefix):
+        raise ValueError(f"segment {seg['segment_id']}: id hash prefix does not match source_hash")
 
 
 def _segments_by_id(revision: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -47,8 +62,12 @@ def export_task(
     if unknown:
         raise ValueError(f"segment_ids not in revision: {unknown}")
     ordered = sorted(segment_ids)
+    for sid in ordered:
+        _verify_segment_integrity(segs[sid])
     source_hashes = {sid: segs[sid]["source_hash"] for sid in ordered}
     constraints = dict(constraints or DEFAULT_CONSTRAINTS)
+    existing = sorted(existing_candidate_ids or [])
+    annotations = sorted(annotation_ids or [])
 
     # context_digest:覆盖参与本 task 的源内容与约束,内容变即新 task。
     context_digest = canonical_digest({
@@ -58,7 +77,7 @@ def export_task(
         "constraints": constraints,
         "knowledge_snapshot_id": knowledge_snapshot_id,
     })
-    # task_id:由身份内容确定性派生 → 同一 job 重复导出稳定。
+    # task_id:由身份内容确定性派生 → 同一 job 重复导出稳定;覆盖所有影响执行语义的引用字段。
     task_id = "task_" + hashlib.sha256(
         canonical_dumps({
             "document_id": revision["document_id"],
@@ -66,6 +85,9 @@ def export_task(
             "segment_ids": ordered,
             "task_type": task_type,
             "context_digest": context_digest,
+            "knowledge_snapshot_id": knowledge_snapshot_id,
+            "existing_candidate_ids": existing,
+            "annotation_ids": annotations,
         }).encode("utf-8")
     ).hexdigest()[:24]
 
@@ -80,8 +102,8 @@ def export_task(
         "context_digest": context_digest,
         "knowledge_snapshot_id": knowledge_snapshot_id,
         "constraints": constraints,
-        "existing_candidate_ids": sorted(existing_candidate_ids or []),
-        "annotation_ids": sorted(annotation_ids or []),
+        "existing_candidate_ids": existing,
+        "annotation_ids": annotations,
         "expected_result_schema": 1,
     }
     errors = validate_artifact("task", task)
@@ -94,7 +116,15 @@ def export_job(revision: Dict[str, Any], segment_ids: List[str], **kwargs: Any) 
     """自包含 job bundle:Task + 每个 segment 的源文本(执行器据此翻译)。
 
     task_digest 在 bundle 内给出,供执行器原样回填到 Result.task_digest,避免重算口径不一致。
+    目前只支持无外部引用的 translate task:review/compare/repair 及 knowledge_snapshot /
+    existing_candidate / annotation 需要把被引用工件的只读内容打进 bundle,待 context builder
+    (P1)完成后再开放——否则隔离执行器拿不到这些内容,bundle 并不自包含。
     """
+    if kwargs.get("task_type", "translate") != "translate":
+        raise ValueError("export_job 目前只支持 translate task(其它类型需 context builder)")
+    for ref in ("knowledge_snapshot_id", "existing_candidate_ids", "annotation_ids"):
+        if kwargs.get(ref):
+            raise ValueError(f"export_job 暂不支持带 {ref} 的 job(需 context builder 打包被引用内容)")
     task = export_task(revision, segment_ids, **kwargs)
     segs = _segments_by_id(revision)
     return {
