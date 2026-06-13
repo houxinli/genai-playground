@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 """把存量 bilingual 目录按显式标签导入为 legacy Candidate(迁移不丢历史)。
 
-- 以 source_identity 从源构建 DocumentRevision;反解 bilingual 得到逐 segment 译文。
+- 以 source_identity 从源构建 DocumentRevision;以源 segment 作锚点反解 bilingual
+  逐 segment 译文(锚点法不依赖 bilingual 空行布局,且保留空译文槽、不串段)。
 - 每个 (目录标签, segment) 生成一个 producer.type=legacy 的 Candidate,
   candidate_id 由 (标签, segment_id, 译文) 确定性派生 → 重复导入幂等、零新增。
-- 不按目录名猜质量;隔离目录由调用方(基于盘点报告)跳过。
+- created_at 取源 published_at(稳定),保证同 id 工件内容可复现。
+- 写入做冲突检测(同 id 不同内容报错)与原子 rename。
 不写发布版本,不切主路径(那是 P1)。
 """
 
@@ -14,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -25,6 +28,8 @@ except ImportError:  # 作为脚本运行:把 tasks/translation/src 加入 path,
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.artifact_schemas import validate_artifact
     from core.source_identity import _PROVIDER_SPEC, build_document_revision
+
+_FALLBACK_CREATED_AT = "1970-01-01T00:00:00Z"
 
 
 def legacy_candidate_id(label: str, segment_id: str, text: str) -> str:
@@ -43,11 +48,22 @@ def _split_front_matter(text: str) -> Tuple[List[str], List[str]]:
     return [], lines
 
 
+def _raw_body(text: str) -> List[str]:
+    """正文行(含空行,保留布局)。"""
+    _, body = _split_front_matter(text)
+    return body
+
+
 def parse_bilingual_translations(
     revision: Dict[str, Any], bilingual_text: str
 ) -> Tuple[Dict[str, str], List[str]]:
-    """反解 bilingual,返回 (segment_id -> 译文, issues)。well-formed 文件可完整恢复;
-    错位或截断只恢复能对齐的部分并在 issues 记录。"""
+    """以源 segment 作锚点反解 bilingual,返回 (segment_id -> 译文, issues)。
+
+    正文用 revision 的 body segment 顺序在 bilingual 非空行里定位:每个源锚点后的非空行即译文,
+    但若它正好等于"下一个源锚点"则说明该句译文为空(基线含 112 个 empty)——既不依赖 bilingual
+    的空行布局(真实流水线与源不一致),又不会因空译文串段。metadata 源值若与 segment 不一致
+    (bilingual 生成后源被改)报 issue 不导入。
+    """
     provider = revision["source"]["provider"]
     caption_key = _PROVIDER_SPEC[provider]["caption_key"]
     top_keys = {"title": "metadata.title", caption_key: "metadata.caption", "tags": "metadata.tags"}
@@ -59,54 +75,71 @@ def parse_bilingual_translations(
 
     translations: Dict[str, str] = {}
     issues: List[str] = []
-    front, body = _split_front_matter(bilingual_text)
 
-    # front matter:源键行后紧跟同键译文行
+    def _pair_meta(seg: Dict[str, Any], src_value: str, tr_line: str) -> None:
+        if src_value != seg["source_text"]:
+            issues.append(f"metadata {seg['kind']} source changed; skipped")
+            return
+        translations[seg["segment_id"]] = tr_line.split(":", 1)[1].strip()
+
+    bil_front = _split_front_matter(bilingual_text)[0]
     in_series = False
     i = 0
-    while i < len(front):
-        line = front[i]
+    while i < len(bil_front):
+        line = bil_front[i]
         stripped = line.lstrip()
         indent = line[: len(line) - len(stripped)]
         key = stripped.split(":", 1)[0] if ":" in stripped else ""
-        nxt = front[i + 1] if i + 1 < len(front) else ""
+        nxt = bil_front[i + 1] if i + 1 < len(bil_front) else ""
         if not indent:
             in_series = key == "series"
             kind = top_keys.get(key)
-            if kind and kind in segs_by_kind and nxt.startswith(f"{key}:") and nxt.lstrip() == nxt:
-                translations[segs_by_kind[kind]["segment_id"]] = nxt.split(":", 1)[1].strip()
+            if kind and kind in segs_by_kind and nxt == nxt.lstrip() and nxt.startswith(f"{key}:"):
+                _pair_meta(segs_by_kind[kind], stripped.split(":", 1)[1].strip(), nxt)
                 i += 2
                 continue
         elif in_series and key == "title" and "metadata.series_title" in segs_by_kind and nxt.lstrip().startswith("title:"):
-            translations[segs_by_kind["metadata.series_title"]["segment_id"]] = nxt.split(":", 1)[1].strip()
+            _pair_meta(segs_by_kind["metadata.series_title"], stripped.split(":", 1)[1].strip(), nxt)
             i += 2
             continue
         i += 1
 
-    # body:非空行成对(源, 译)
-    nonblank = [l for l in body if l.strip()]
-    for k, seg in enumerate(body_segs):
-        src_idx = k * 2
-        if src_idx >= len(nonblank):
+    # 正文:源 segment 作锚点,在 bilingual 非空行里逐句定位译文(空行布局不参与)
+    nonblank = [l for l in _raw_body(bilingual_text) if l.strip()]
+    k = 0
+    for seg_idx, seg in enumerate(body_segs):
+        if k >= len(nonblank):
             issues.append(f"body truncated at segment {seg['segment_id']}")
             break
-        if nonblank[src_idx].strip() != seg["source_text"]:
+        if nonblank[k] != seg["source_text"]:
             issues.append(f"body misaligned at segment {seg['segment_id']}")
             break
-        if src_idx + 1 < len(nonblank):
-            translations[seg["segment_id"]] = nonblank[src_idx + 1]
+        nxt_seg = body_segs[seg_idx + 1] if seg_idx + 1 < len(body_segs) else None
+        if k + 1 >= len(nonblank):
+            translations[seg["segment_id"]] = ""  # 末句无译文行 = 空译文
+            k += 1
+        elif nxt_seg is not None and nonblank[k + 1] == nxt_seg["source_text"]:
+            translations[seg["segment_id"]] = ""  # 下一非空行已是下一个源锚点 = 本句空译文
+            k += 1
         else:
-            issues.append(f"missing translation for segment {seg['segment_id']}")
+            translations[seg["segment_id"]] = nonblank[k + 1]
+            k += 2
     return translations, issues
 
 
+def _legacy_created_at(revision: Dict[str, Any]) -> str:
+    """稳定 created_at:取源 published_at,缺失则用固定迁移 epoch。"""
+    return revision.get("metadata", {}).get("published_at") or _FALLBACK_CREATED_AT
+
+
 def build_legacy_candidates(
-    provider: str, source_path: Path, bilingual_path: Path, label: str, created_at: str
+    provider: str, source_path: Path, bilingual_path: Path, label: str
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     """对一个 bilingual 文件构建 legacy Candidate 列表(schema 已校验)。"""
     revision = build_document_revision(provider, Path(source_path))
     bilingual_text = Path(bilingual_path).read_text(encoding="utf-8", errors="ignore")
     translations, issues = parse_bilingual_translations(revision, bilingual_text)
+    created_at = _legacy_created_at(revision)
 
     segs = {s["segment_id"]: s for s in revision["segments"]}
     candidates: List[Dict[str, Any]] = []
@@ -138,22 +171,35 @@ def build_legacy_candidates(
 
 
 def write_candidates(candidates: List[Dict[str, Any]], store_dir: Path) -> Tuple[int, int]:
-    """写入 candidate 工件;按 candidate_id 幂等(已存在则跳过),返回 (written, skipped)。"""
+    """幂等写入 candidate 工件。已存在且内容一致则跳过;同 id 不同内容报错(损坏)。
+    写入走同目录临时文件 + fsync + 原子 rename,避免中断留下截断 JSON。"""
     store = Path(store_dir)
     store.mkdir(parents=True, exist_ok=True)
     written = skipped = 0
     for candidate in candidates:
         path = store / f"{candidate['candidate_id']}.json"
+        payload = json.dumps(candidate, ensure_ascii=False, indent=2) + "\n"
         if path.exists():
-            skipped += 1
-            continue
-        path.write_text(json.dumps(candidate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            existing = path.read_text(encoding="utf-8")
+            if json.loads(existing) == candidate:
+                skipped += 1
+                continue
+            raise ValueError(
+                f"candidate {candidate['candidate_id']} already exists with different content "
+                f"({path}); refusing to overwrite immutable artifact"
+            )
+        tmp = path.with_suffix(".json.tmp")
+        with tmp.open("w", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
         written += 1
     return written, skipped
 
 
 def import_directory(
-    provider: str, source_dir: Path, bilingual_dir: Path, label: str, store_dir: Path, created_at: str
+    provider: str, source_dir: Path, bilingual_dir: Path, label: str, store_dir: Path
 ) -> Dict[str, Any]:
     """把一个 bilingual 目录整体导入(按文件名配对源),返回导入报告。"""
     source_dir, bilingual_dir = Path(source_dir), Path(bilingual_dir)
@@ -167,9 +213,7 @@ def import_directory(
             report["missing_source"].append(bilingual_path.name)
             continue
         report["posts"] += 1
-        candidates, issues = build_legacy_candidates(
-            provider, source_path, bilingual_path, label, created_at
-        )
+        candidates, issues = build_legacy_candidates(provider, source_path, bilingual_path, label)
         written, skipped = write_candidates(candidates, store_dir)
         report["candidates"] += len(candidates)
         report["written"] += written
@@ -180,8 +224,6 @@ def import_directory(
 
 
 def main() -> int:
-    from datetime import datetime, timezone
-
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider", required=True, choices=tuple(_PROVIDER_SPEC))
     parser.add_argument("--source", required=True, type=Path, help="源 .txt")
@@ -190,10 +232,7 @@ def main() -> int:
     parser.add_argument("--store", required=True, type=Path, help="candidate 工件输出目录")
     args = parser.parse_args()
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    candidates, issues = build_legacy_candidates(
-        args.provider, args.source, args.bilingual, args.label, now
-    )
+    candidates, issues = build_legacy_candidates(args.provider, args.source, args.bilingual, args.label)
     written, skipped = write_candidates(candidates, args.store)
     print(f"candidates={len(candidates)} written={written} skipped={skipped} issues={len(issues)}")
     for issue in issues:
