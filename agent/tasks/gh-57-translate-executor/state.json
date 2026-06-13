@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-57-translate-executor",
   "title": "翻译执行器 harness:共享 instruction pack + 自然语言 translate-job 适配",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/translate-executor",
   "objective": "agent 中立 instruction pack + Claude/Cursor 薄适配 + make translate-bundle,让编码 agent(SFW=Claude,NSFW=Cursor+Grok)读 job→翻→写 result→import,同一协议。",
   "github": {
     "issue": 57,
-    "pull_request": null
+    "pull_request": 58
   },
   "scope": {
     "in": [
@@ -46,7 +46,7 @@
     {
       "id": "S2",
       "title": "文档 + PR 收尾",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1"
       ],
@@ -55,13 +55,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S2",
-    "instruction": "开 PR,三渠道 triage,CI 绿后合并。",
-    "acceptance": [
-      "PR 合并,issue #57 关闭"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q"
@@ -70,18 +64,22 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "187 passed",
-        "timestamp": "2026-06-13T19:50:40Z"
+        "summary": "188 passed(review 修复后)",
+        "timestamp": "2026-06-13T20:00:08Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260613T195040Z-claude-code",
-    "timestamp": "2026-06-13T19:50:40Z",
+    "checkpoint_id": "cp-20260613T200008Z-claude-code",
+    "timestamp": "2026-06-13T20:00:08Z",
     "agent": "claude-code",
-    "summary": "S1 完成,待 PR",
-    "observed_head": "153d9d3"
+    "summary": "任务完成,PR #58 待合并",
+    "observed_head": "761478e"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 52,
+    "task_id": "gh-52-candidate-attestation",
+    "branch": "feat/candidate-attestation"
+  }
 }
