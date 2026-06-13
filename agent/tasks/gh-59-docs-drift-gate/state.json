@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-59-docs-drift-gate",
   "title": "文档漂移 CI 闸门(check_docs_drift + PR 耦合)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/docs-drift-gate",
   "objective": "把文档跟上现实变成 CI 闸门:check_docs_drift(基线数字==实际计数、组件路径存在)+ make + CI + PR 耦合启发式 + 去重基线数字,根除文档滞后。",
   "github": {
     "issue": 59,
-    "pull_request": null
+    "pull_request": 60
   },
   "scope": {
     "in": [
@@ -56,7 +56,7 @@
     {
       "id": "S3",
       "title": "文档 + PR 收尾",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1",
         "S2"
@@ -66,13 +66,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR,三渠道 triage,CI 绿后合并。",
-    "acceptance": [
-      "PR 合并,issue #59 关闭"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -83,8 +77,8 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "188 passed",
-        "timestamp": "2026-06-13T20:16:40Z"
+        "summary": "188 passed(review 修复后)",
+        "timestamp": "2026-06-13T20:25:36Z"
       },
       {
         "command": "make docs-drift",
@@ -102,11 +96,15 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260613T201640Z-claude-code",
-    "timestamp": "2026-06-13T20:16:40Z",
+    "checkpoint_id": "cp-20260613T202536Z-claude-code",
+    "timestamp": "2026-06-13T20:25:36Z",
     "agent": "claude-code",
-    "summary": "S1-S2 完成,待 PR",
-    "observed_head": "261a4f3"
+    "summary": "任务完成,PR #60 待合并",
+    "observed_head": "ae71e85"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 52,
+    "task_id": "gh-52-candidate-attestation",
+    "branch": "feat/candidate-attestation"
+  }
 }
