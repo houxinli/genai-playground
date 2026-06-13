@@ -150,7 +150,7 @@ def make_result():
     return {
         "schema_version": 1,
         "task_id": "task_" + "f" * 12,
-        "task_digest": "1" * 16,
+        "task_digest": canonical_digest(make_task()),
         "producer": {"type": "harness", "name": "codex", "model": "reported-model"},
         "candidates": [
             {
@@ -225,6 +225,11 @@ class SchemaValidationTest(unittest.TestCase):
         for key in ("task_id", "task_digest", "result_digest", "result_candidate_key"):
             doc["provenance"][key] = None
         self.assertEqual([], validate_artifact("candidate", doc))
+        # api/harness 自动生成候选:幂等字段不得为 null
+        doc = make_candidate()
+        doc["producer"]["type"] = "api"
+        doc["provenance"]["task_digest"] = None
+        self.assertNotEqual([], validate_artifact("candidate", doc))
 
     def test_bad_identity_patterns_rejected(self):
         doc = make_revision()
@@ -251,6 +256,13 @@ class StaleResultTest(unittest.TestCase):
         result["candidates"][0]["segment_id"] = other_seg
         errors = check_result_against_task(make_task(), result)
         self.assertTrue(any("not in task.segment_ids" in e for e in errors), errors)
+
+    def test_changed_task_content_invalidates_result_digest(self):
+        # task 内容变化(如 context_digest)时,旧 result 的 task_digest 必须失配进 quarantine
+        task = make_task()
+        task["context_digest"] = "9" * 16
+        errors = check_result_against_task(task, make_result())
+        self.assertTrue(any("task_digest mismatch" in e for e in errors), errors)
 
     def test_task_id_and_schema_mismatch(self):
         result = make_result()

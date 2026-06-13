@@ -75,6 +75,12 @@ def check_result_against_task(task: Dict[str, Any], result: Dict[str, Any]) -> L
     errors: List[str] = []
     if result.get("task_id") != task.get("task_id"):
         errors.append(f"task_id mismatch: result={result.get('task_id')} task={task.get('task_id')}")
+    expected_digest = canonical_digest(task)
+    if result.get("task_digest") != expected_digest:
+        errors.append(
+            f"task_digest mismatch: result={result.get('task_digest')} expected={expected_digest} "
+            "(task 内容已变化,旧 result 必须 quarantine)"
+        )
     if result.get("schema_version") != task.get("expected_result_schema"):
         errors.append(
             "result schema_version "
