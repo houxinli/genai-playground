@@ -18,6 +18,7 @@
 ## 📅 2026年
 
 ### 06月
+- [2026-06-13 export-job:task/result 协议生成端](./2026-06-13-task-export.md)
 - [2026-06-13 result 导入(import-result)](./2026-06-13-result-import.md)
 - [2026-06-13 legacy candidate 导入(P0.6)](./2026-06-13-legacy-import.md)
 - [2026-06-13 source adapter 与 bilingual renderer shadow path(P0.5 部分)](./2026-06-13-adapter-renderer.md)

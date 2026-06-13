@@ -230,7 +230,11 @@ agent-bootstrap:
 
 
 # ============ 候选导入(新架构) ============
-.PHONY: legacy-import import-result
+.PHONY: legacy-import import-result export-job
+
+# revision → job bundle(供执行器消费)。用法: make export-job REVISION=rev.json OUT=job.json
+export-job:
+	$(PY) tasks/translation/src/core/task_export.py --revision "$(REVISION)" --out "$(OUT)" $(if $(TASK_TYPE),--task-type $(TASK_TYPE))
 
 # 存量 bilingual → legacy candidate。用法: make legacy-import PROVIDER=fanbox SOURCE=... BILINGUAL=... LABEL=... STORE=...
 legacy-import:
