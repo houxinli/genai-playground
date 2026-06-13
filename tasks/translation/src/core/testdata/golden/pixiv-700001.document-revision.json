@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "document_id": "pixiv:700000:700001",
-  "revision_id": "rev_17eed95790c6425841e5976b4de316e08ab389698a11d9f85e9ebf04119c890f",
+  "revision_id": "rev_181a86db92a9a11b3026ffe05b66902222cb79ce3c80427ad112c42188fb53af",
   "source": {
     "provider": "pixiv",
     "creator_id": "700000",
@@ -11,33 +11,41 @@
   "metadata": {
     "title": "朝の挨拶",
     "caption": "テスト用の短い文章です。",
+    "tags": "[テスト, 日常]",
     "published_at": "2026-01-01T09:00:00+09:00"
   },
   "segments": [
     {
-      "segment_id": "rev_17eed95790c6425841e5976b4de316e08ab389698a11d9f85e9ebf04119c890f:000000:2f55b0ba",
+      "segment_id": "rev_181a86db92a9a11b3026ffe05b66902222cb79ce3c80427ad112c42188fb53af:000000:2f55b0ba",
       "ordinal": 0,
       "kind": "metadata.title",
       "source_text": "朝の挨拶",
       "source_hash": "2f55b0bac552f76b0d9768174b304197bafa330c69b82ba5805f882d749527f4"
     },
     {
-      "segment_id": "rev_17eed95790c6425841e5976b4de316e08ab389698a11d9f85e9ebf04119c890f:000001:8ce83e78",
+      "segment_id": "rev_181a86db92a9a11b3026ffe05b66902222cb79ce3c80427ad112c42188fb53af:000001:8ce83e78",
       "ordinal": 1,
       "kind": "metadata.caption",
       "source_text": "テスト用の短い文章です。",
       "source_hash": "8ce83e78d9d7b4aee57a7c1d2b656bae0fa7d759e88e78df61bafc3e08eb5986"
     },
     {
-      "segment_id": "rev_17eed95790c6425841e5976b4de316e08ab389698a11d9f85e9ebf04119c890f:000002:4bca08cc",
+      "segment_id": "rev_181a86db92a9a11b3026ffe05b66902222cb79ce3c80427ad112c42188fb53af:000002:4aa315b8",
       "ordinal": 2,
+      "kind": "metadata.tags",
+      "source_text": "[テスト, 日常]",
+      "source_hash": "4aa315b81f384780e7e9428a3a676994f570bbeb0d8e71846a35666a1b0ef706"
+    },
+    {
+      "segment_id": "rev_181a86db92a9a11b3026ffe05b66902222cb79ce3c80427ad112c42188fb53af:000003:4bca08cc",
+      "ordinal": 3,
       "kind": "body",
       "source_text": "「おはよう」",
       "source_hash": "4bca08cc80fa469be516acd1b0d5fd02f29e94d393fbc769a285039953e70387"
     },
     {
-      "segment_id": "rev_17eed95790c6425841e5976b4de316e08ab389698a11d9f85e9ebf04119c890f:000003:0679d1bd",
-      "ordinal": 3,
+      "segment_id": "rev_181a86db92a9a11b3026ffe05b66902222cb79ce3c80427ad112c42188fb53af:000004:0679d1bd",
+      "ordinal": 4,
       "kind": "body",
       "source_text": "今日はいい天気だ。",
       "source_hash": "0679d1bdfe386e2ba7d5726dc5e8d205e8ac89f8da9860aae17308421d443f9b"

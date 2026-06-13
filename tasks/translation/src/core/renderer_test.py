@@ -22,6 +22,8 @@ GOLDEN = TESTDATA / "golden"
 TRANSLATIONS = {
     "朝の挨拶": "早晨的问候",
     "テスト用の短い文章です。": "用于测试的简短文章。",
+    "[テスト, 日常]": "[テスト / 测试, 日常 / 日常]",
+    "[テスト, 散歩]": "[テスト / 测试, 散歩 / 散步]",
     "「おはよう」": "「早上好」",
     "今日はいい天気だ。": "今天天气真好。",
     "散歩": "散步",
@@ -65,6 +67,21 @@ class RendererGoldenTest(unittest.TestCase):
         self.assertIn("「おはよう」", lines)
         self.assertEqual("「早上好」", lines[lines.index("「おはよう」") + 1])
         self.assertIn("", lines)  # 段间空行
+
+    def test_tags_are_paired(self):
+        out = _render("pixiv-700001")
+        lines = out.splitlines()
+        i = lines.index("tags: [テスト, 日常]")
+        self.assertEqual("tags: [テスト / 测试, 日常 / 日常]", lines[i + 1])
+
+    def test_source_text_mismatch_raises(self):
+        # 传入与 revision 不一致的源文本(正文被改),必须报错而非错配译文
+        provider, path = CASES["pixiv-700001"]
+        rev = si.build_document_revision(provider, path)
+        translations = {s["segment_id"]: TRANSLATIONS[s["source_text"]] for s in rev["segments"]}
+        tampered = path.read_text(encoding="utf-8").replace("「おはよう」", "「こんばんは」")
+        with self.assertRaises(ValueError):
+            render_bilingual(rev, tampered, translations)
 
     def test_missing_translation_raises(self):
         provider, path = CASES["pixiv-700001"]

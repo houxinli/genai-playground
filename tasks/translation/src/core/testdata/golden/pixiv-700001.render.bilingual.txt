@@ -13,6 +13,7 @@ series:
   title: 
   order: None
 tags: [テスト, 日常]
+tags: [テスト / 测试, 日常 / 日常]
 x_restrict: 0
 create_date: 2026-01-01T09:00:00+09:00
 update_date: 

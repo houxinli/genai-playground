@@ -29,12 +29,12 @@ CASES = {
     "pixiv-700001": {
         "provider": "pixiv",
         "source": FIXTURES / "pixiv" / "700001" / "700001.txt",
-        "revision_id": "rev_17eed95790c6425841e5976b4de316e08ab389698a11d9f85e9ebf04119c890f",
+        "revision_id": "rev_181a86db92a9a11b3026ffe05b66902222cb79ce3c80427ad112c42188fb53af",
     },
     "fanbox-800001": {
         "provider": "fanbox",
         "source": FIXTURES / "fanbox" / "800001" / "800001.txt",
-        "revision_id": "rev_1a7aa0769861d62f6a38c9c2fdff02c94aa323871c3c632e1584275bc0638aca",
+        "revision_id": "rev_d153b812e796af3766ab91837dd7eabe408efdfcd533548f17cc5a0a0cb82da4",
     },
 }
 

@@ -36,6 +36,14 @@ class SourceAdapterTest(unittest.TestCase):
             files = iter_source_files(root)
             self.assertEqual(["a.txt", "b.txt"], [p.name for p in files])
 
+    def test_iter_source_excludes_derived_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("123.txt", "123_bilingual.txt", "123_bilingual_fixed.txt",
+                         "123_zh.txt", "123_bilingual_v2_namefix.txt"):
+                (root / name).write_text("x", encoding="utf-8")
+            self.assertEqual(["123.txt"], [p.name for p in iter_source_files(root)])
+
     def test_adapt_fanbox_reads_creator_identity(self):
         revisions = adapt_directory("fanbox", FIXTURES / "fanbox" / "800001")
         self.assertEqual("fanbox:800000:800001", revisions[0]["document_id"])
