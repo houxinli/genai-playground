@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-44-result-import",
+  "title": "result 导入:Task+Result → Candidate(validate-result / import-result)",
+  "status": "active",
+  "branch": "feat/result-import",
+  "objective": "给定 schema 合法的 Task 与 Result,做 §5.4 stale 校验后按 candidate_id_for 派生幂等 candidate 写入 store;stale 进 quarantine 不导入;同 result 重复零新增、不同执行落独立 candidate。",
+  "github": {
+    "issue": 44,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/result_import.py(+test)",
+      "PROJECT_STATUS/journal"
+    ],
+    "out": [
+      "export-job(#46)",
+      "QA/selection 闭环(P1)",
+      "agent 适配(P2.2)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "import-result + stale 隔离",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "§5.4 校验进 quarantine;candidate_id_for 幂等;跨执行独立;6 测试"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "文档 + PR 收尾",
+      "status": "in_progress",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "PROJECT_STATUS/journal;三渠道 triage;CI 绿;合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S2",
+    "instruction": "开 PR,三渠道 triage,CI 绿后合并。",
+    "acceptance": [
+      "PR 合并,issue #44 关闭"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "168 passed(162+6)",
+        "timestamp": "2026-06-13T06:28:47Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260613T062847Z-claude-code",
+    "timestamp": "2026-06-13T06:28:47Z",
+    "agent": "claude-code",
+    "summary": "S1 完成,待 PR 收尾",
+    "observed_head": "589e565"
+  },
+  "next_task": null
+}

@@ -57,6 +57,7 @@
 | 质量检测 | 可用 | 规则 QC + LLM QC 可工作；新增硬规则 QA gate，可检查双语配对、假名残留、拒绝模板、失败标记和人名坏别名 | `tasks/translation/src/core/qa_gate.py` |
 | 人名一致性 | 可用 | 支持人工规则优先、自动预读候选保存、正文 OpenRouter + 本地 vLLM/MLX 抽名的分离运行时 | `tasks/translation/src/core/translator.py` |
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
+| result 导入(import-result) | 已完成 | Task+Result → Candidate:§5.4 stale 校验进 quarantine、candidate_id_for 幂等、跨执行独立 | `tasks/translation/src/core/result_import.py` |
 | Legacy 导入 | 已完成 | bilingual 反解 → legacy Candidate(目录标签区分、确定性幂等、截断容错),真实 momizi813 跑通 | `tasks/translation/src/core/legacy_import.py` |
 | Source adapter / renderer | 部分完成 | 目录→DocumentRevision 适配 + bilingual shadow renderer(与现格式逐字节一致,golden 验证);zh renderer 待做(#42) | `tasks/translation/src/core/source_adapter.py` |
 | Fixture/Golden 底座 | 已完成 | 合成脱敏 Pixiv/Fanbox fixture、golden document-revision/bilingual/zh、revision/segment ID pin 稳定性测试 | `tasks/translation/src/core/testdata/` |
@@ -154,6 +155,8 @@
 > 本节是阶段快照,由 Agent 在"整理进展"时与看板对齐,不在手机上直接编辑。
 
 ### P0: 协议与数据基础
+
+> P0 主链(schema/fixture/adapter+renderer/legacy 导入)已全部完成;import-result keystone 亦就位。
 
 1. ~~存量内容库盘点、QA 基线与坏产物隔离~~（#10，已完成 2026-06-12：`inventory_content.py` +
    `qa_baseline.py`，3 个坏产物目录已隔离并记录 manifest）。
