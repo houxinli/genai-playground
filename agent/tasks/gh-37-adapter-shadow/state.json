@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-37-adapter-shadow",
   "title": "source adapter + DocumentRevision/Segment + renderer shadow path(P0.5)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/adapter-shadow",
   "objective": "把现有源转成 DocumentRevision/Segment(ID 稳定),renderer 从 revision+译文渲染 bilingual/zh 并与旧 writer 字节一致(golden 验证);旧 make translate-* 不受影响。",
   "github": {
     "issue": 37,
-    "pull_request": null
+    "pull_request": 43
   },
   "scope": {
     "in": [
@@ -56,7 +56,7 @@
     {
       "id": "S3",
       "title": "zh 拆 follow-up + 文档 + PR 收尾",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1",
         "S2"
@@ -66,13 +66,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR(注明 zh 拆 #42 的 reconcile),三渠道 triage,CI 绿后合并。",
-    "acceptance": [
-      "PR 合并,issue #37 关闭"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q"
@@ -81,18 +75,22 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "149 passed(142+7)",
-        "timestamp": "2026-06-13T04:46:34Z"
+        "summary": "152 passed(review 修复后)",
+        "timestamp": "2026-06-13T04:57:18Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260613T044634Z-claude-code",
-    "timestamp": "2026-06-13T04:46:34Z",
+    "checkpoint_id": "cp-20260613T045718Z-claude-code",
+    "timestamp": "2026-06-13T04:57:18Z",
     "agent": "claude-code",
-    "summary": "S1-S2 完成,待 PR 收尾",
-    "observed_head": "6786681"
+    "summary": "任务完成,PR #43 待合并",
+    "observed_head": "a586688"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 38,
+    "task_id": "gh-38-legacy-import",
+    "branch": "feat/legacy-import"
+  }
 }
