@@ -75,24 +75,35 @@ def check_component_paths(status_text: str, root: Path) -> List[str]:
     return errors
 
 
+def parse_collect(returncode: int, output: str) -> int:
+    """从 pytest --collect-only 输出取用例数;收集失败(非零退出)直接报错,不吞错误。"""
+    if returncode != 0:
+        raise RuntimeError(
+            f"pytest --collect-only 失败(returncode={returncode}),不能据此判定基线: ...{output[-300:]}"
+        )
+    m = re.search(r"(\d+) tests? collected", output)
+    if m:
+        return int(m.group(1))
+    return len([line for line in output.splitlines() if "::" in line])
+
+
 def _actual_test_count(root: Path) -> int:
     """pytest --collect-only 的用例数(只收集不执行)。"""
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "tasks/translation/src", "--collect-only", "-q"],
         cwd=root, capture_output=True, text=True,
     )
-    m = re.search(r"(\d+) tests? collected", proc.stdout + proc.stderr)
-    if m:
-        return int(m.group(1))
-    # 老版 pytest 回退:数 collected 行
-    return len([l for l in proc.stdout.splitlines() if "::" in l])
+    return parse_collect(proc.returncode, proc.stdout + proc.stderr)
 
 
 def run(root: Path) -> List[str]:
     errors: List[str] = []
     agents = (root / "AGENTS.md").read_text(encoding="utf-8")
     status = (root / "docs" / "PROJECT_STATUS.md").read_text(encoding="utf-8")
-    errors += check_test_baseline(agents, _actual_test_count(root))
+    try:
+        errors += check_test_baseline(agents, _actual_test_count(root))
+    except RuntimeError as exc:
+        errors.append(str(exc))
     errors += check_component_paths(status, root)
     return errors
 
