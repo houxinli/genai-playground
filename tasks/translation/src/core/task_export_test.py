@@ -111,5 +111,15 @@ class TaskExportTest(unittest.TestCase):
             te.export_job(rev, ids, annotation_ids=["annotation_" + "a" * 12])
 
 
+    def test_revision_from_source(self):
+        # 从 fixture 源目录适配出指定 document 的 revision
+        rev = te.revision_from_source(
+            "pixiv", SRC.parent, "pixiv:700000:700001")
+        self.assertEqual("pixiv:700000:700001", rev["document_id"])
+        self.assertEqual([], validate_artifact("document-revision", rev))
+        with self.assertRaises(ValueError):
+            te.revision_from_source("pixiv", SRC.parent, "pixiv:0:0")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -236,6 +236,10 @@ agent-bootstrap:
 export-job:
 	$(PY) tasks/translation/src/core/task_export.py --revision "$(REVISION)" --out "$(OUT)" $(if $(TASK_TYPE),--task-type $(TASK_TYPE))
 
+# 源目录+document → job bundle(一步)。用法: make translate-bundle SOURCE=dir PROVIDER=pixiv DOCUMENT=pixiv:18330282:27466576 OUT=job.json
+translate-bundle:
+	$(PY) tasks/translation/src/core/task_export.py --source-dir "$(SOURCE)" --provider "$(PROVIDER)" --document "$(DOCUMENT)" --out "$(OUT)"
+
 # 存量 bilingual → legacy candidate。用法: make legacy-import PROVIDER=fanbox SOURCE=... BILINGUAL=... LABEL=... STORE=...
 legacy-import:
 	$(PY) tasks/translation/src/core/legacy_import.py --provider "$(PROVIDER)" \

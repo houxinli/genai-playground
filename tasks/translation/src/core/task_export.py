@@ -137,15 +137,36 @@ def export_job(revision: Dict[str, Any], segment_ids: List[str], **kwargs: Any) 
     }
 
 
+def revision_from_source(provider: str, source_dir: Path, document_id: str) -> Dict[str, Any]:
+    """从源目录适配出指定 document 的 DocumentRevision(包装 source_adapter)。"""
+    try:
+        from .source_adapter import adapt_directory
+    except ImportError:
+        from core.source_adapter import adapt_directory
+    for rev in adapt_directory(provider, source_dir):
+        if rev["document_id"] == document_id:
+            return rev
+    raise ValueError(f"document {document_id} not found under {source_dir}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--revision", required=True, type=Path, help="document-revision.json")
+    parser.add_argument("--revision", type=Path, help="document-revision.json(与 --source-dir 二选一)")
+    parser.add_argument("--source-dir", type=Path, help="源目录,配合 --provider/--document 现场适配 revision")
+    parser.add_argument("--provider", choices=("pixiv", "fanbox"))
+    parser.add_argument("--document", help="document_id,如 pixiv:18330282:27466576")
     parser.add_argument("--segment", action="append", default=None, help="repeatable;默认全部 body segment")
     parser.add_argument("--task-type", default="translate")
     parser.add_argument("--out", required=True, type=Path, help="job bundle 输出 json")
     args = parser.parse_args()
 
-    revision = json.loads(args.revision.read_text(encoding="utf-8"))
+    if args.revision:
+        revision = json.loads(args.revision.read_text(encoding="utf-8"))
+    elif args.source_dir and args.provider and args.document:
+        revision = revision_from_source(args.provider, args.source_dir, args.document)
+    else:
+        parser.error("需 --revision,或 --source-dir + --provider + --document")
+
     segment_ids = args.segment or [s["segment_id"] for s in revision["segments"] if s["kind"] == "body"]
     bundle = export_job(revision, segment_ids, task_type=args.task_type)
     args.out.write_text(json.dumps(bundle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
