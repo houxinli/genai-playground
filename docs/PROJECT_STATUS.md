@@ -75,14 +75,14 @@ source -> revision -> legacy/new candidates -> evaluations
 | 业务工件 Schema | 基础完成 | 七类工件 JSON Schema、validate/round-trip/stale-result 测试与 CLI 校验已落地；DocumentVersion v2 待 #50 | `tasks/translation/schemas/` |
 | Candidate 身份 / Artifact Store | 未实现 | 当前两套不一致 candidate ID + 一文件一 candidate（5.5万）。已定稿:#52 Candidate v3 + Attestation（内容寻址、文本去重）→ #54 Sharded ArtifactStore + integrity gate + importer 迁移 → #55 SQLite 投影 | Issue #52/#54/#55 / 系统设计 §2.7 |
 | 目标系统设计 | 分阶段实施 | P0 基础与 translate job 最小闭环已落地；2026-06-13 已按真实实现重新校准 | `tasks/translation/docs/system-design.md` |
-| 开发 Agent 连续性 | 基础已落地 | 协议、Schema、validator、CI、GitHub 模板与 `make agent-bootstrap` 已实现；GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
+| 开发 Agent 连续性 | 基础已落地 | 协议、Schema、validator、CI、GitHub 模板、`make agent-bootstrap`、`make docs-drift`(文档漂移闸门)与 PR 设计耦合检查已实现；GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
 | 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线（v2 含打包产物与截断检查）；1048 单元中 894 个含 error（v2.1 打包按章拆分），坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
 | 多候选与版本 | 部分完成 | candidate 已可导入/评估；DocumentVersion v2、保守选择和 current ref 未实现 | Issue #50 / 系统设计 |
 | 翻译 Agent harness | 执行器就绪 | 共享 instruction pack + Claude skill / Cursor rule 薄适配 + `make translate-bundle`;SFW=Claude、NSFW=Cursor+Grok,同协议;context adapter(review/repair/knowledge)待实现 | `tasks/translation/docs/executor-instructions.md` |
 | 用户句级反馈 | 未实现 | 尚不能持久化“某句话有问题”并触发定向修复 | 目标见系统设计 |
 | 跨文本知识库 | 未实现 | 当前主要依赖人工规则文件和单篇自动预读 | 目标见系统设计 |
 | 并发调度 | 缺口明显 | 当前仍主要依赖手工并行，没有内建 worker 调度器 | `tasks/translation/src/core/pipeline.py` |
-| 测试 | 基线健康 | pytest 统跑当前为 186 个测试全绿（unittest discover 会漏 pytest 风格用例） | `tasks/translation/src/**/*_test.py` |
+| 测试 | 基线健康 | pytest 统跑全绿；基线数字唯一来源在 `AGENTS.md` §2，CI `docs-drift` 强制一致（unittest discover 会漏 pytest 风格用例） | `tasks/translation/src/**/*_test.py` |
 | Sunday Movies | 维护模式 | 仓库中保留，但当前不作为近期规划重点 | `tasks/sunday-movies/` |
 
 ## Recent Engineering Changes

@@ -39,7 +39,8 @@
   ```bash
   conda run -n llm python -m pytest tasks/translation/src -q
   ```
-  当前 baseline 是 186 测试全绿，PR 合入前必须保持 ≥ 此基线。
+  当前 baseline 是 188 测试全绿，PR 合入前必须保持 ≥ 此基线。**此处是基线数字的唯一来源**
+  （`make docs-drift` 在 CI 强制它 == 实际 `pytest --collect-only` 计数；改动测试数必须同 PR 更新这里）。
   （必须用 pytest 统跑：`unittest discover` 不执行 parser/prompt 下的 pytest 风格用例，会假绿。）
 
 ## 3. 编码风格
@@ -128,6 +129,9 @@
 - **每个合并的 PR 配一条 journal**（`docs/journal/YYYY-MM-DD.md` + 索引），记录动机、改动、验证、后续。
 - 连续完成 3–5 个同一架构链路 PR 或跨越 Phase 边界时，必须单独做一次
   `system-design` / `PROJECT_STATUS` / GitHub issue reconcile，不能只追加 journal。
+- **改契约/schema/架构决策的 PR，必须在同一个 PR 内更新 `system-design.md` 或 `PROJECT_STATUS.md`**——
+  设计跟着改它的代码走,不留到批量 reconcile。CI `Design-doc coupling` 步骤强制:改了 `schemas/` 或新增
+  `core/*.py` 却没动设计文档会 fail。文档里机械可查的事实(测试基线数字、组件路径)由 `make docs-drift` 在 CI 守护。
 
 ### Commit
 

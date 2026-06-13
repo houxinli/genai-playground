@@ -220,6 +220,10 @@ monitor-translation:
 agent-validate:
 	$(PY) scripts/validate_agent_tasks.py
 
+# 文档漂移闸门:基线数字==实际计数、组件路径存在
+docs-drift:
+	$(PY) scripts/check_docs_drift.py
+
 agent-validator-test:
 	$(PY) -m unittest scripts.validate_agent_tasks_test scripts.bootstrap_agent_task_test
 
