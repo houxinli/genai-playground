@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "document_id": "fanbox:800000:800001",
+  "revision_id": "rev_399e1d2cc9ffffc9f12f3ae10f4e9c1a26c6dea0b6cbe5b8722f706e58f3abe7",
+  "source": {
+    "provider": "fanbox",
+    "creator_id": "800000",
+    "source_id": "800001",
+    "url": "https://www.fanbox.cc/@user_testfanbox/posts/800001"
+  },
+  "metadata": {
+    "title": "散歩",
+    "caption": "フィクスチャ用のサンプル。",
+    "published_at": "2026-02-02T10:00:00+09:00"
+  },
+  "segments": [
+    {
+      "segment_id": "rev_399e1d2cc9ffffc9f12f3ae10f4e9c1a26c6dea0b6cbe5b8722f706e58f3abe7:000000:39f6833d",
+      "ordinal": 0,
+      "kind": "metadata.title",
+      "source_text": "散歩",
+      "source_hash": "39f6833d3a96a5b1fb813e364044312a009984441f1cd3d31cf78c815a3e4dca"
+    },
+    {
+      "segment_id": "rev_399e1d2cc9ffffc9f12f3ae10f4e9c1a26c6dea0b6cbe5b8722f706e58f3abe7:000001:784ff18d",
+      "ordinal": 1,
+      "kind": "metadata.caption",
+      "source_text": "フィクスチャ用のサンプル。",
+      "source_hash": "784ff18de2351b106c052484e17e5eb673a4b8d41ee5fd3807d38950e974013b"
+    },
+    {
+      "segment_id": "rev_399e1d2cc9ffffc9f12f3ae10f4e9c1a26c6dea0b6cbe5b8722f706e58f3abe7:000002:04772e4c",
+      "ordinal": 2,
+      "kind": "body",
+      "source_text": "公園を歩いた。",
+      "source_hash": "04772e4c4e0262af1665b3c807bbf7e8f8f2631ec6a5efd78e22314541c7d192"
+    },
+    {
+      "segment_id": "rev_399e1d2cc9ffffc9f12f3ae10f4e9c1a26c6dea0b6cbe5b8722f706e58f3abe7:000003:c09f2ac0",
+      "ordinal": 3,
+      "kind": "body",
+      "source_text": "犬がいた。",
+      "source_hash": "c09f2ac01931c97772433b62a57e6bf4460501507c69d8bca9d1cf0385dbb8d4"
+    }
+  ]
+}

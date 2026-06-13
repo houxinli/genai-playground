@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "document_id": "pixiv:700000:700001",
+  "revision_id": "rev_17eed95790c6425841e5976b4de316e08ab389698a11d9f85e9ebf04119c890f",
+  "source": {
+    "provider": "pixiv",
+    "creator_id": "700000",
+    "source_id": "700001",
+    "url": "https://www.pixiv.net/novel/show.php?id=700001"
+  },
+  "metadata": {
+    "title": "朝の挨拶",
+    "caption": "テスト用の短い文章です。",
+    "published_at": "2026-01-01T09:00:00+09:00"
+  },
+  "segments": [
+    {
+      "segment_id": "rev_17eed95790c6425841e5976b4de316e08ab389698a11d9f85e9ebf04119c890f:000000:2f55b0ba",
+      "ordinal": 0,
+      "kind": "metadata.title",
+      "source_text": "朝の挨拶",
+      "source_hash": "2f55b0bac552f76b0d9768174b304197bafa330c69b82ba5805f882d749527f4"
+    },
+    {
+      "segment_id": "rev_17eed95790c6425841e5976b4de316e08ab389698a11d9f85e9ebf04119c890f:000001:8ce83e78",
+      "ordinal": 1,
+      "kind": "metadata.caption",
+      "source_text": "テスト用の短い文章です。",
+      "source_hash": "8ce83e78d9d7b4aee57a7c1d2b656bae0fa7d759e88e78df61bafc3e08eb5986"
+    },
+    {
+      "segment_id": "rev_17eed95790c6425841e5976b4de316e08ab389698a11d9f85e9ebf04119c890f:000002:4bca08cc",
+      "ordinal": 2,
+      "kind": "body",
+      "source_text": "「おはよう」",
+      "source_hash": "4bca08cc80fa469be516acd1b0d5fd02f29e94d393fbc769a285039953e70387"
+    },
+    {
+      "segment_id": "rev_17eed95790c6425841e5976b4de316e08ab389698a11d9f85e9ebf04119c890f:000003:0679d1bd",
+      "ordinal": 3,
+      "kind": "body",
+      "source_text": "今日はいい天気だ。",
+      "source_hash": "0679d1bdfe386e2ba7d5726dc5e8d205e8ac89f8da9860aae17308421d443f9b"
+    }
+  ]
+}

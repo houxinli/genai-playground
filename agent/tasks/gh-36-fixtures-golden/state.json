@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-36-fixtures-golden",
+  "title": "Pixiv/Fanbox 最小 fixture 与 golden 稳定性测试(P0.4)",
+  "status": "active",
+  "branch": "feat/fixtures-golden",
+  "objective": "建立脱敏最小 Pixiv/Fanbox fixture、golden document-revision 与 bilingual/zh 快照,以及 revision/segment ID 稳定性测试,为迁移提供回归底座;不调用真实模型。",
+  "github": {
+    "issue": 36,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/testdata/(fixtures+golden)",
+      "tasks/translation/src/core/source_identity.py(+test)",
+      "PROJECT_STATUS/journal"
+    ],
+    "out": [
+      "源格式适配器/renderer(P0.5)",
+      "legacy 导入(P0.6)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "合成 fixture + source_identity 模块",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "Pixiv/Fanbox 脱敏 fixture;revision/segment ID 计算与 document-revision 构建(schema 合法)"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "golden 与稳定性测试",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "golden document-revision/bilingual/zh;9 测试含 ID pin、确定性、版本敏感、golden 一致;全量 140 绿"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "文档同步与 PR 收尾",
+      "status": "in_progress",
+      "depends_on": [
+        "S1",
+        "S2"
+      ],
+      "acceptance": [
+        "PROJECT_STATUS/journal 更新;三渠道 review triage;CI 绿;合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR(说明 data/test→src/core/testdata 的 reconcile),三渠道 triage,CI 绿后合并。",
+    "acceptance": [
+      "PR 合并,issue #36 关闭"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "140 passed(131+9)",
+        "timestamp": "2026-06-13T02:07:19Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260613T020719Z-claude-code",
+    "timestamp": "2026-06-13T02:07:19Z",
+    "agent": "claude-code",
+    "summary": "S1-S2 完成,待 PR 收尾",
+    "observed_head": "2e18536"
+  },
+  "next_task": null
+}
