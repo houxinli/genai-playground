@@ -46,6 +46,13 @@ ID_FIELDS = {
     "annotation": "annotation_id",
 }
 
+# 提交顺序按引用依赖拓扑:被引用者先落盘。跨多 shard 无法做单事务原子提交(POSIX 多文件 rename
+# 非事务),但按此序提交可保证任何崩溃前缀都引用完整(只会少写后续工件,可幂等重导补齐),不会
+# 留下悬空引用。
+COMMIT_ORDER = (
+    "document-revision", "candidate", "attestation", "evaluation", "document-version", "annotation",
+)
+
 # 解析 (kind, artifact_id) → artifact 的作用域解析器。
 Resolver = Callable[[str, str], Optional[Dict[str, Any]]]
 
@@ -96,11 +103,32 @@ def verify_references(artifact: Dict[str, Any], resolver: Resolver) -> List[str]
             errors.append(f"evaluation {artifact['evaluation_id']}: candidate {artifact['candidate_id']} 不可解析")
 
     elif kind == "annotation":
+        revision = resolver("document-revision", artifact["revision_id"])
+        if revision is None:
+            errors.append(f"annotation {artifact['annotation_id']}: revision {artifact['revision_id']} 不可解析")
+        elif _segment_by_id(revision, artifact["segment_id"]) is None:
+            errors.append(f"annotation {artifact['annotation_id']}: segment {artifact['segment_id']} 不在 revision")
         target = artifact.get("target_candidate_id")
-        if target is not None and resolver("candidate", target) is None:
-            errors.append(f"annotation {artifact['annotation_id']}: target candidate {target} 不可解析")
+        if target is not None:
+            cand = resolver("candidate", target)
+            if cand is None:
+                errors.append(f"annotation {artifact['annotation_id']}: target candidate {target} 不可解析")
+            else:
+                if cand.get("revision_id") != artifact["revision_id"]:
+                    errors.append(
+                        f"annotation {artifact['annotation_id']}: target candidate revision "
+                        f"{cand.get('revision_id')} != {artifact['revision_id']}"
+                    )
+                if cand.get("segment_id") != artifact["segment_id"]:
+                    errors.append(
+                        f"annotation {artifact['annotation_id']}: target candidate segment "
+                        f"{cand.get('segment_id')} != {artifact['segment_id']}"
+                    )
 
     elif kind == "document-version":
+        parent = artifact.get("parent_version_id")
+        if parent is not None and resolver("document-version", parent) is None:
+            errors.append(f"version {artifact['version_id']}: parent version {parent} 不可解析")
         for segment_id, candidate_id in artifact.get("selections", {}).items():
             cand = resolver("candidate", candidate_id)
             if cand is None:
@@ -263,9 +291,11 @@ class ArtifactStore:
                 if errors:
                     raise StoreIntegrityError(errors)
 
-            # 阶段B:全部预检通过,统一提交(此后只剩物理写,不再有逻辑失败)。
+            # 阶段B:全部预检通过后提交。逻辑失败已在阶段A排除;此处仅剩物理写。按引用依赖序
+            # (被引用者先,见 COMMIT_ORDER)提交,使任何物理中断的崩溃前缀都引用完整、无悬空引用。
             report: Dict[str, Any] = {"document_id": document_id, "kinds": {}}
-            for kind, sh in shards.items():
+            for kind in sorted(shards, key=COMMIT_ORDER.index):
+                sh = shards[kind]
                 if sh["staged"]:
                     _atomic_write_shard(sh["path"], list(sh["existing"].values()) + list(sh["staged"].values()))
                 report["kinds"][kind] = {

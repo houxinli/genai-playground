@@ -233,6 +233,62 @@ class VerifyReferencesTest(unittest.TestCase):
         errors = astore.verify_references(version, store.resolver_for(DOC))
         self.assertTrue(any("segment" in e for e in errors), errors)
 
+    def test_version_dangling_parent_detected(self):
+        store, cand = self._seeded_store()
+        version = {
+            "schema_version": 1, "version_id": "version_" + "a2" * 6,
+            "document_id": DOC, "revision_id": REV,
+            "parent_version_id": "version_" + "9" * 12,  # 不存在的父版本
+            "knowledge_snapshot_id": None,
+            "selections": {SEG: cand["candidate_id"]},
+            "decision": {"selected_by": "user", "reason": "x"},
+            "status": "reviewed", "created_at": "2026-01-01T00:00:00Z",
+        }
+        errors = astore.verify_references(version, store.resolver_for(DOC))
+        self.assertTrue(any("parent" in e for e in errors), errors)
+
+    def _annotation(self, target, segment_id=SEG):
+        return {
+            "schema_version": 1, "annotation_id": "annotation_" + "a3" * 6,
+            "document_id": DOC, "revision_id": REV, "segment_id": segment_id,
+            "target_candidate_id": target, "type": "wrong_reference",
+            "comment": "x", "created_by": "user", "created_at": "2026-01-01T00:00:00Z",
+        }
+
+    def test_annotation_consistent_passes(self):
+        store, cand = self._seeded_store()
+        self.assertEqual([], astore.verify_references(self._annotation(cand["candidate_id"]), store.resolver_for(DOC)))
+
+    def test_annotation_target_segment_mismatch_detected(self):
+        # target candidate 真实存在,但 annotation 声明的 segment 与其不符 → 必须抓住(防反馈应用到错句)
+        store, cand = self._seeded_store()
+        other_seg = f"{REV}:000009:" + SRC_HASH[:8]
+        errors = astore.verify_references(self._annotation(cand["candidate_id"], other_seg), store.resolver_for(DOC))
+        self.assertTrue(any("segment" in e for e in errors), errors)
+
+    def test_annotation_null_target_still_checks_segment(self):
+        store, _ = self._seeded_store()
+        other_seg = f"{REV}:000009:" + SRC_HASH[:8]
+        errors = astore.verify_references(self._annotation(None, other_seg), store.resolver_for(DOC))
+        self.assertTrue(any("segment" in e for e in errors), errors)
+
+
+class CommitOrderTest(unittest.TestCase):
+    def test_full_batch_commits_referenced_before_referencing(self):
+        # 依赖序提交:被引用者(revision)先于引用方(candidate/attestation)。校验全批一次落盘且自洽。
+        with tempfile.TemporaryDirectory() as tmp:
+            store = astore.ArtifactStore(Path(tmp))
+            cand = make_candidate()
+            report = store.put_many(DOC, [make_attestation(cand["candidate_id"]), cand, make_revision()])
+            self.assertEqual(1, report["kinds"]["document-revision"]["written"])
+            self.assertEqual(1, report["kinds"]["candidate"]["written"])
+            self.assertEqual(1, report["kinds"]["attestation"]["written"])
+            # 提交顺序固定(被引用者先),与传入顺序无关
+            self.assertLess(
+                astore.COMMIT_ORDER.index("document-revision"),
+                astore.COMMIT_ORDER.index("candidate"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

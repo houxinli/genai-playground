@@ -51,10 +51,22 @@
 - **P2 document_id 与分片键不一致**:调用方把 A 文档工件传给 B 的 document_id 会污染 B 的 shard。
   → 对含 document_id 的 kind,写入前强制其值 == 分片键参数。
 
+### 第二轮（PR #69 re-review）
+
+- **P1 跨 shard 真正原子性**:两阶段只挡了逻辑预检失败;提交阶段第二个 shard 物理失败(磁盘满/崩溃)
+  仍会留下前一个已 `os.replace` 的 shard。POSIX 多文件 rename 非事务,完整跨 shard 事务超出 #54 范围。
+  → 折中:提交按引用依赖序(`COMMIT_ORDER`:revision→candidate→attestation/evaluation/version/annotation),
+  使任何崩溃前缀都引用完整(只会少写后续工件,可幂等重导补齐),不产生悬空引用;并把"原子性"措辞
+  诚实修正为"逻辑预检失败不落盘 + 物理崩溃前缀引用完整"。
+- **P2 annotation 一致性**:原只查 target candidate 存在 → 现解析 revision/segment,且 target 非 null 时
+  校验其 revision_id/segment_id 与 annotation 一致(防反馈应用到错句);target 为 null 也校验 segment 存在。
+- **P2 document-version 父版本悬空**:`parent_version_id` 非 null 时解析校验,拒绝悬空版本链。
+
 ## 验证
 
-`pytest tasks/translation/src -q` 全绿;基线 208 → 224(store 测试含 integrity-at-write/跨 shard 原子/
-document_id 一致 + importer 迁移与 revision 预置)。`check_docs_drift` / `validate_agent_tasks` 通过。
+`pytest tasks/translation/src -q` 全绿;基线 208 → 229(store 测试含 integrity-at-write/跨 shard 半批/
+document_id 一致/依赖序提交/annotation 与 version 引用完整性 + importer 迁移与 revision 预置)。
+`check_docs_drift` / `validate_agent_tasks` 通过。
 
 ## 仍待
 
