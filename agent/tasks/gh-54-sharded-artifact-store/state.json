@@ -7,7 +7,7 @@
   "objective": "统一 ArtifactStore:按 document path 分片 JSONL + 原子批写 + 冲突检测 + 身份硬 gate + cross-artifact verify_references;legacy/result importer 迁移到 store。解决文件过多(5.5万→按文档分片)。",
   "github": {
     "issue": 54,
-    "pull_request": null
+    "pull_request": 69
   },
   "scope": {
     "in": [
