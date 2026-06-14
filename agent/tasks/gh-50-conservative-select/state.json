@@ -2,7 +2,7 @@
   "schema_version": 1,
   "task_id": "gh-50-conservative-select",
   "title": "保守择优 + DocumentVersion v2 + bilingual render",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/conservative-select",
   "objective": "按 system-design §2.5/§2.6/§6.4 与 issue #50 收敛判定表实现保守择优:recommend_selection 纯函数逐 segment 产出建议(select_challenger/keep_incumbent/review_required),build_document_version 创建不可变 DocumentVersion v2(selections 唯一选择源 + selection_decisions 逐 segment 审计),render_version 复用 #37 renderer 渲染 bilingual。硬规则 QA 只做 gate/证据,不作质量排名;无法证明 challenger 严格改善时保留 incumbent。",
   "github": {
@@ -166,7 +166,7 @@
     {
       "id": "S6",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S5"
       ],
@@ -177,15 +177,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S6",
-    "instruction": "已修 PR #71 的 3 个 review finding(P1.1 evaluation 绑定、P1.2 version_id 覆盖全 payload、P2.a/P2.b 候选身份核对)并 push;等 CI 复绿与 review 三联后 squash 合并。P1.3(translate-bundle→import-result 的 Revision 入库闭环)属 #54/#57 scope,另开 issue,不扩 #50。",
-    "acceptance": [
-      "CI 全绿",
-      "3 个 review finding 已 resolve",
-      "PR 合并、main 收敛"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -215,11 +207,15 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260614T015000Z-claude-code",
-    "timestamp": "2026-06-14T01:50:00Z",
+    "checkpoint_id": "cp-20260614T020500Z-claude-code",
+    "timestamp": "2026-06-14T02:05:00Z",
     "agent": "claude-code",
-    "summary": "PR #71 review 修复:evaluation 绑定强校验 + version_id 覆盖全 payload + 渲染/store 候选身份核对;253 全绿",
-    "observed_head": "5784e63"
+    "summary": "任务完成:PR #71 squash 合并,issue #50 关闭,CI 全绿;P1.3 另开 #72",
+    "observed_head": "670873d"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 72,
+    "task_id": "gh-72-revision-ingest-loop",
+    "branch": "feat/revision-ingest-loop"
+  }
 }
