@@ -67,10 +67,17 @@ def _evaluation(tag: str, verdict: str, error_codes=(), name="rule-qa", version=
     }
 
 
-def _candidate(text: str, verdict: str, error_codes=(), **kw) -> dict:
+def _candidate(text: str, verdict: str, error_codes=(), *, revision_id="rev_" + "a" * 8,
+               segment_id="rev_" + "a" * 8 + ":000001:dead", **kw) -> dict:
     ev = _evaluation(text, verdict, error_codes, **kw)
     ev["candidate_id"] = _cand_id(text)
-    return {"candidate_id": _cand_id(text), "text": text, "evaluations": [ev]}
+    return {
+        "candidate_id": _cand_id(text),
+        "revision_id": revision_id,
+        "segment_id": segment_id,
+        "text": text,
+        "evaluations": [ev],
+    }
 
 
 def _seg(incumbent=None, challengers=()):
@@ -182,6 +189,16 @@ class ComparabilityGateTest(unittest.TestCase):
         second = _only([_seg(inc, [b, a])])
         self.assertEqual(first, second)
 
+    def test_misbound_evaluation_is_incomparable(self):
+        # 失败候选借用别的候选的 pass evaluation(candidate_id 不匹配)→ 不可比较,不被自动选中
+        inc = _candidate("旧译", "fail", ["same_as_source"])
+        ch = _candidate("新译", "pass")
+        ch["evaluations"][0]["candidate_id"] = _cand_id("别的候选")
+        rec = _only([_seg(inc, [ch])])
+        self.assertEqual("review_required", rec["outcome"])
+        self.assertEqual("incomparable_evaluations", rec["reason_code"])
+        self.assertEqual(_cand_id("旧译"), rec["selected_candidate_id"])  # 保留 incumbent,未误选
+
 
 def _revision():
     return si.build_document_revision("pixiv", FIXTURES / "pixiv" / "700001" / "700001.txt")
@@ -192,8 +209,7 @@ def _initial_recommendations(revision):
     segments, candidates_by_id = [], {}
     for seg in revision["segments"]:
         text = TRANSLATIONS[seg["source_text"]]
-        cand = _candidate(text, "pass")
-        cand["evaluations"][0]["candidate_id"] = cand["candidate_id"]
+        cand = _candidate(text, "pass", revision_id=revision["revision_id"], segment_id=seg["segment_id"])
         candidates_by_id[cand["candidate_id"]] = cand
         segments.append({"segment_id": seg["segment_id"], "incumbent": None, "challengers": [cand]})
     return recommend_selection(segments), candidates_by_id
@@ -218,6 +234,17 @@ class BuildAndRenderTest(unittest.TestCase):
         v1 = build_document_version(rev, recs, "workflow", "2026-06-13T00:00:00Z")
         v2 = build_document_version(rev, recs, "workflow", "2026-06-13T00:00:00Z")
         self.assertEqual(v1["version_id"], v2["version_id"])
+
+    def test_build_version_id_covers_metadata(self):
+        # created_at/policy_id/created_by 不同 → 不同 payload 必须给出不同 version_id(否则写 Store 冲突)
+        rev = _revision()
+        recs, _ = _initial_recommendations(rev)
+        base = build_document_version(rev, recs, "workflow", "2026-06-13T00:00:00Z")
+        other_time = build_document_version(rev, recs, "workflow", "2026-06-14T00:00:00Z")
+        other_by = build_document_version(rev, recs, "agent", "2026-06-13T00:00:00Z")
+        other_policy = build_document_version(rev, recs, "workflow", "2026-06-13T00:00:00Z", policy_id="other-v9")
+        ids = {base["version_id"], other_time["version_id"], other_by["version_id"], other_policy["version_id"]}
+        self.assertEqual(4, len(ids))
 
     def test_unresolved_segment_refuses_build(self):
         rev = _revision()
@@ -248,6 +275,17 @@ class BuildAndRenderTest(unittest.TestCase):
         version["revision_id"] = "rev_" + "f" * 16
         with self.assertRaises(ValueError):
             render_version(rev, version, candidates_by_id, "irrelevant")
+
+    def test_render_rejects_candidate_segment_mismatch(self):
+        # candidates_by_id 装错候选(segment 不符)→ 渲染拒绝,不把错译渲染进该句
+        rev = _revision()
+        recs, candidates_by_id = _initial_recommendations(rev)
+        version = build_document_version(rev, recs, "workflow", "2026-06-13T00:00:00Z")
+        path = FIXTURES / "pixiv" / "700001" / "700001.txt"
+        for cand in candidates_by_id.values():
+            cand["segment_id"] = "rev_" + "b" * 8 + ":000099:beef"
+        with self.assertRaises(ValueError):
+            render_version(rev, version, candidates_by_id, path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

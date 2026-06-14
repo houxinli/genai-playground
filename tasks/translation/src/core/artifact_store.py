@@ -149,19 +149,40 @@ def verify_references(artifact: Dict[str, Any], resolver: Resolver) -> List[str]
             errors.append(
                 f"version {artifact['version_id']}: selection_decisions key 与 selections 不一致"
             )
+        version_revision = artifact.get("revision_id")
+
+        def _candidate_in_segment(candidate_id: str, segment_id: str, label: str) -> None:
+            cand = resolver("candidate", candidate_id)
+            if cand is None:
+                errors.append(f"version {artifact['version_id']}: {label} {candidate_id} 不可解析")
+                return
+            if cand.get("revision_id") != version_revision:
+                errors.append(
+                    f"version {artifact['version_id']}: {label} {candidate_id} 属于 revision "
+                    f"{cand.get('revision_id')} != {version_revision}"
+                )
+            if cand.get("segment_id") != segment_id:
+                errors.append(
+                    f"version {artifact['version_id']}: {label} {candidate_id} segment "
+                    f"{cand.get('segment_id')} != {segment_id}"
+                )
+
         for segment_id, decision in decisions.items():
             incumbent = decision.get("incumbent_candidate_id")
-            if incumbent is not None and resolver("candidate", incumbent) is None:
-                errors.append(
-                    f"version {artifact['version_id']}: decision[{segment_id}] incumbent "
-                    f"{incumbent} 不可解析"
-                )
+            if incumbent is not None:
+                _candidate_in_segment(incumbent, segment_id, f"decision[{segment_id}] incumbent")
             for eval_id in decision.get("evaluation_ids", []):
-                if resolver("evaluation", eval_id) is None:
+                evaluation = resolver("evaluation", eval_id)
+                if evaluation is None:
                     errors.append(
                         f"version {artifact['version_id']}: decision[{segment_id}] evaluation "
                         f"{eval_id} 不可解析"
                     )
+                    continue
+                # 证据必须确实评的是本 segment/revision 的候选,不能借用别处的 evaluation。
+                _candidate_in_segment(
+                    evaluation.get("candidate_id"), segment_id, f"decision[{segment_id}] evaluation {eval_id} candidate"
+                )
 
     return errors
 

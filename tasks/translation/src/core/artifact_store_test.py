@@ -238,6 +238,43 @@ class VerifyReferencesTest(unittest.TestCase):
         errors = astore.verify_references(version, store.resolver_for(DOC))
         self.assertTrue(any("segment" in e for e in errors), errors)
 
+    def test_version_decision_evaluation_for_other_segment_detected(self):
+        # decision 引用的 evaluation 评的是别的 segment 的候选 → 借用证据,必须报错
+        _, cand = self._seeded_store()
+        other_seg = f"{REV}:000009:" + SRC_HASH[:8]
+        other_cand = dict(make_candidate(text="另一句"))
+        other_cand["segment_id"] = other_seg
+        other_cand["candidate_id"] = candidate_id_v3(REV, other_seg, SRC_HASH, normalize_text("另一句"))
+        evaluation = {
+            "schema_version": 1, "evaluation_id": "eval_" + "c7" * 6,
+            "candidate_id": other_cand["candidate_id"],
+            "evaluator": {"type": "rule", "name": "deterministic-qa", "version": "qa-v1"},
+            "verdict": "pass", "findings": [], "scores": {},
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        artifacts = {
+            ("candidate", cand["candidate_id"]): cand,
+            ("candidate", other_cand["candidate_id"]): other_cand,
+            ("evaluation", evaluation["evaluation_id"]): evaluation,
+        }
+        resolver = lambda kind, art_id: artifacts.get((kind, art_id))  # noqa: E731
+        version = {
+            "schema_version": 2, "version_id": "version_" + "a2" * 6,
+            "document_id": DOC, "revision_id": REV, "parent_version_id": None,
+            "knowledge_snapshot_id": None,
+            "selections": {SEG: cand["candidate_id"]},
+            "selection_decisions": {SEG: {
+                "selected_by": "policy", "outcome": "select_challenger",
+                "reason_code": "initial_single_passing_candidate",
+                "incumbent_candidate_id": None,
+                "evaluation_ids": [evaluation["evaluation_id"]],  # 评的是 other_seg 的候选
+            }},
+            "decision": {"policy_id": "conservative-select-v1", "created_by": "workflow"},
+            "status": "draft", "created_at": "2026-01-01T00:00:00Z",
+        }
+        errors = astore.verify_references(version, resolver)
+        self.assertTrue(any("segment" in e for e in errors), errors)
+
     def test_version_dangling_parent_detected(self):
         store, cand = self._seeded_store()
         version = {

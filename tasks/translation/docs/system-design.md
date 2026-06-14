@@ -1,9 +1,9 @@
 # Translation System Design
 
 > 状态：分阶段实施中。DocumentRevision/Segment、业务 Schema、fixture/golden、source adapter、
-> bilingual shadow renderer、legacy candidate import、translate task export/result import 和
-> candidate deterministic QA 已进入主干；Artifact Store、DocumentVersion、保守选择策略、
-> repair 闭环、knowledge 和 SQLite 尚未完成。
+> bilingual shadow renderer、legacy candidate import、translate task export/result import、
+> candidate deterministic QA、Sharded Artifact Store(#54)、DocumentVersion v2 + 保守选择策略(#50)
+> 已进入主干；current ref 发布、repair 闭环、knowledge 和 SQLite 尚未完成。
 >
 > 当前可执行命令仍以 [`../README.md`](../README.md) 为准；近期实现顺序与组件状态以
 > [`../../../docs/PROJECT_STATUS.md`](../../../docs/PROJECT_STATUS.md) 为准。

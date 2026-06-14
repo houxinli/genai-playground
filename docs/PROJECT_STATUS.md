@@ -179,7 +179,7 @@ source -> revision -> legacy/new candidates -> evaluations
 ## Known Gaps
 
 - DocumentRevision/Segment 已有 shadow path，但生产入口仍以 TXT 目录为主。
-- candidate 已有 schema/import/evaluation；DocumentVersion、per-segment 选择证据和 current ref 未实现。
+- candidate 已有 schema/import/evaluation；DocumentVersion v2 与 per-segment 选择证据已实现(#50)；current ref 发布未实现。
 - translate Task/Result 最小闭环已完成，但 review/compare/repair context bundle 和 harness instruction pack 未实现。
 - Artifact Store 未实现，当前写入路径仍由 CLI 调用方传入。
 - 开发任务的跨 Agent 协议还没有 GitHub 状态同步（bootstrap 命令已完成，#9）。

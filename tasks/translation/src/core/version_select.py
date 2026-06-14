@@ -34,8 +34,15 @@ class UnresolvedSelectionError(Exception):
 
 
 def _rule_evaluation(candidate: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """取候选唯一的 deterministic rule evaluation;0 条或多于 1 条 → None(不可比较)。"""
-    rules = [e for e in candidate.get("evaluations", []) if e.get("evaluator", {}).get("type") == "rule"]
+    """取候选唯一的、确实绑定到该候选的 deterministic rule evaluation;0 条或多于 1 条 → None
+    (不可比较)。强校验 evaluation.candidate_id == candidate.candidate_id,杜绝失败候选借用其它
+    候选的 pass evaluation 被错误自动替换。"""
+    cid = candidate["candidate_id"]
+    rules = [
+        e
+        for e in candidate.get("evaluations", [])
+        if e.get("evaluator", {}).get("type") == "rule" and e.get("candidate_id") == cid
+    ]
     return rules[0] if len(rules) == 1 else None
 
 
@@ -196,16 +203,8 @@ def build_document_version(
             "evaluation_ids": rec["evaluation_ids"],
         }
 
-    identity = {
-        "revision_id": revision["revision_id"],
-        "selections": selections,
-        "selection_decisions": selection_decisions,
-        "parent_version_id": parent_version_id,
-        "knowledge_snapshot_id": knowledge_snapshot_id,
-    }
-    version = {
+    content = {
         "schema_version": 2,
-        "version_id": _version_id(identity),
         "document_id": revision["document_id"],
         "revision_id": revision["revision_id"],
         "parent_version_id": parent_version_id,
@@ -216,6 +215,9 @@ def build_document_version(
         "status": "draft",
         "created_at": created_at,
     }
+    # version_id 覆盖除自身外的全部不可变 payload(含 created_at/policy_id/created_by),保证
+    # id ↔ payload 一一对应,杜绝同 ID 不同 payload 写 ArtifactStore 时的 fatal 冲突。
+    version = {"version_id": _version_id(content), **content}
     errors = validate_artifact("document-version", version)
     if errors:
         raise ValueError(f"DocumentVersion v2 校验失败: {errors}")
@@ -241,5 +243,16 @@ def render_version(
         candidate = candidates_by_id.get(candidate_id)
         if candidate is None:
             raise KeyError(f"missing candidate {candidate_id} for segment {segment_id}")
+        # 绕过 Store 时 candidates_by_id 可能装错候选;核对身份字段,杜绝把别的 revision/segment
+        # 的译文渲染进该句。
+        if candidate["revision_id"] != revision["revision_id"]:
+            raise ValueError(
+                f"candidate {candidate_id} revision {candidate['revision_id']} "
+                f"!= revision {revision['revision_id']}"
+            )
+        if candidate["segment_id"] != segment_id:
+            raise ValueError(
+                f"candidate {candidate_id} segment {candidate['segment_id']} != selection key {segment_id}"
+            )
         translations[segment_id] = candidate["text"]
     return render_bilingual(revision, source_text, translations)
