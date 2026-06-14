@@ -142,7 +142,16 @@ def ingest_revision(revision: Dict[str, Any], store: Any) -> Dict[str, Any]:
 
     import_result 的 integrity gate 要求同文档 revision shard 已存在;构 bundle 的 orchestrator
     本就持有 revision,故在此入库(store 仍是唯一真相源)。put_many 幂等:同 revision 重复 export 跳过。
+    写库前对完整 revision 做 schema + 身份自洽校验(store._validate 不重算 revision 身份),拒绝把被
+    编辑/损坏但仍过 schema 的 revision 落盘——否则坏 payload 入库或日后同 ID 冲突。
     """
+    try:
+        from .source_identity import verify_revision_identity
+    except ImportError:
+        from source_identity import verify_revision_identity
+    errors = validate_artifact("document-revision", revision) + verify_revision_identity(revision)
+    if errors:
+        raise ValueError(f"refusing to ingest invalid revision: {errors}")
     return store.put_many(revision["document_id"], [revision])
 
 
@@ -172,10 +181,14 @@ def main() -> int:
     parser.add_argument("--task-type", default="translate")
     parser.add_argument("--out", required=True, type=Path, help="job bundle 输出 json")
     parser.add_argument(
-        "--store", type=Path, default=None,
+        "--store", type=str, default=None,
         help="ArtifactStore 根目录;给定则把源 revision 幂等入库(import-result 闭环前置)",
     )
     args = parser.parse_args()
+
+    # 区分"未传"(None,不入库)与"传了空串"(明显误用,如 Make 漏传 STORE=)——空串不能静默落到 cwd。
+    if args.store is not None and not args.store.strip():
+        parser.error("--store 不能为空路径")
 
     if args.revision:
         revision = json.loads(args.revision.read_text(encoding="utf-8"))
@@ -189,7 +202,7 @@ def main() -> int:
             from .artifact_store import ArtifactStore
         except ImportError:
             from core.artifact_store import ArtifactStore
-        ingest_revision(revision, ArtifactStore(args.store))
+        ingest_revision(revision, ArtifactStore(Path(args.store)))
 
     # 默认导出全部可翻译段(body + metadata.*),否则 metadata 无候选会导致渲染缺译文
     segment_ids = args.segment or [s["segment_id"] for s in revision["segments"]]

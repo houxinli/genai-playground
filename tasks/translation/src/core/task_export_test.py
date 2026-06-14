@@ -139,6 +139,28 @@ class TaskExportTest(unittest.TestCase):
             self.assertEqual(1, second["kinds"]["document-revision"]["skipped"])
             self.assertEqual(1, len(store.list_shard("document-revision", rev["document_id"])))
 
+    def test_ingest_rejects_tampered_revision_before_write(self):
+        # schema 仍合法但 source_text 被改、id 未更新 → 入库前拒绝,store 不被污染
+        rev = _revision()
+        rev["segments"][-1]["source_text"] = "被篡改的原文。"  # source_hash/segment_id/revision_id 都不再自洽
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ArtifactStore(Path(tmp))
+            with self.assertRaises(ValueError):
+                te.ingest_revision(rev, store)
+            self.assertEqual([], store.list_shard("document-revision", rev["document_id"]))
+
+    def test_ingest_rejects_stale_revision_id(self):
+        # metadata 漂移但 revision_id 保持旧值 → 必须拒绝(否则日后正确 revision 同 ID 冲突)
+        rev = _revision()
+        rev["metadata"]["title"] = (rev["metadata"].get("title") or "") + "X"
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ArtifactStore(Path(tmp))
+            with self.assertRaises(ValueError):
+                te.ingest_revision(rev, store)
+
+    def test_verify_revision_identity_passes_for_built_revision(self):
+        self.assertEqual([], si.verify_revision_identity(_revision()))
+
     def test_tampered_revision_rejected(self):
         # source_text 被改但 source_hash 没同步 -> 导出必须拒绝(防绕过 stale 防护)
         rev = _revision()

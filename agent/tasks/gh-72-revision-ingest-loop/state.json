@@ -7,7 +7,7 @@
   "objective": "让全新文档走 translate-bundle → 执行器 → import-result 不再 quarantine:在 bundle 生成时把源 DocumentRevision 幂等写入分片 ArtifactStore(Option 1),import-result 后续即可解析到同文档 revision shard。Makefile/executor-instructions 文档化闭环。",
   "github": {
     "issue": 72,
-    "pull_request": null
+    "pull_request": 75
   },
   "scope": {
     "in": [
@@ -124,11 +124,11 @@
   ],
   "next_action": {
     "step_id": "S5",
-    "instruction": "提交并开 PR closes #72,过 CI,处理 review 三联,squash 合并到 main。",
+    "instruction": "已修 PR #75 的 P1(ingest 前 revision 身份校验)+P2(空 STORE 快失败)并 push;等 CI 复绿与 review 后合并。",
     "acceptance": [
       "CI 全绿",
-      "review resolve",
-      "PR 合并、main 收敛"
+      "2 个 review finding resolve",
+      "PR 合并"
     ]
   },
   "validation": {
@@ -141,13 +141,13 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "255 passed",
+        "summary": "258 passed",
         "timestamp": null
       },
       {
         "command": "conda run -n llm python scripts/check_docs_drift.py",
         "status": "passed",
-        "summary": "文档漂移检查通过(基线 255)",
+        "summary": "文档漂移检查通过(基线 258)",
         "timestamp": null
       },
       {
@@ -160,11 +160,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260614T213000Z-claude-code",
-    "timestamp": "2026-06-14T21:30:00Z",
+    "checkpoint_id": "cp-20260614T220000Z-claude-code",
+    "timestamp": "2026-06-14T22:00:00Z",
     "agent": "claude-code",
-    "summary": "ingest_revision + --store 闭环 + Makefile/doc + 测试,255 全绿,docs 同步",
-    "observed_head": "d4c08e2"
+    "summary": "PR #75 review 修复:ingest 前 revision 身份强校验 + 空 STORE 快速失败;258 全绿",
+    "observed_head": "ab6f55d"
   },
   "next_task": null
 }
