@@ -172,3 +172,35 @@ def build_document_revision(provider: str, path: Path) -> Dict[str, Any]:
     if errors:
         raise ValueError(f"built document-revision is invalid: {errors}")
     return artifact
+
+
+def verify_revision_identity(revision: Dict[str, Any]) -> List[str]:
+    """核对 revision 工件身份自洽:revision_id 与各 segment 的 source_hash/segment_id/ordinal 均由内容重算一致。
+
+    Schema 合法但被编辑过的 revision(改了 source_text/metadata 却没更新 id)不可写入唯一真相源:
+    否则坏 payload 落盘,且日后正确 revision 因同 revision_id 不同 payload 被 StoreConflictError 永久拒绝。
+    """
+    errors: List[str] = []
+    body_lines = [s["source_text"] for s in revision.get("segments", []) if s.get("kind") == "body"]
+    payload = {
+        "adapter_version": ADAPTER_VERSION,
+        "segmentation_version": SEGMENTATION_VERSION,
+        "document_id": revision.get("document_id"),
+        "source": revision.get("source"),
+        "metadata": revision.get("metadata"),
+        "body": body_lines,
+    }
+    expected_rev = "rev_" + _sha256(canonical_dumps(payload))
+    if revision.get("revision_id") != expected_rev:
+        errors.append(f"revision_id {revision.get('revision_id')} != 由内容重算 {expected_rev}")
+    declared_rev = revision.get("revision_id")
+    for ordinal, seg in enumerate(revision.get("segments", [])):
+        expected_hash = _source_hash(seg.get("source_text", ""))
+        if seg.get("source_hash") != expected_hash:
+            errors.append(f"segment {seg.get('segment_id')}: source_hash != sha256(source_text)")
+        expected_sid = f"{declared_rev}:{ordinal:06d}:{expected_hash[:8]}"
+        if seg.get("segment_id") != expected_sid:
+            errors.append(f"segment[{ordinal}] segment_id {seg.get('segment_id')} != {expected_sid}")
+        if seg.get("ordinal") != ordinal:
+            errors.append(f"segment {seg.get('segment_id')}: ordinal {seg.get('ordinal')} != {ordinal}")
+    return errors

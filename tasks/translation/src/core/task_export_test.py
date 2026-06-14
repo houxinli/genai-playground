@@ -95,6 +95,72 @@ class TaskExportTest(unittest.TestCase):
             self.assertEqual(len(bundle["segments"]), len(store.list_shard("attestation", doc)))
 
 
+    def test_ingest_revision_closes_loop_for_new_document(self):
+        # 全新文档:仅靠 export 端的 ingest_revision 入库(无手动 seed),import_result 即不再 quarantine
+        rev = _revision()
+        bundle = te.export_job(rev, _body_ids(rev))
+        task = bundle["task"]
+        fake_tr = {"「おはよう」": "「早上好」", "今日はいい天気だ。": "今天天气真好。"}
+        result = {
+            "schema_version": 1,
+            "task_id": task["task_id"],
+            "task_digest": bundle["task_digest"],
+            "producer": {"type": "harness", "name": "claude-code", "model": None},
+            "candidates": [
+                {
+                    "result_candidate_key": "option-a",
+                    "segment_id": s["segment_id"],
+                    "source_hash": task["source_hashes"][s["segment_id"]],
+                    "text": fake_tr[s["source_text"]],
+                }
+                for s in bundle["segments"]
+            ],
+            "findings": [],
+            "recommended_candidate_keys": ["option-a"],
+            "completed_at": "2026-06-13T00:00:00Z",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ArtifactStore(Path(tmp))
+            te.ingest_revision(rev, store)  # 生产入库点,取代手动 seed
+            report = ri.import_result(task, result, store)
+            self.assertFalse(report["quarantined"], report)
+            doc = task["document_id"]
+            self.assertEqual(1, len(store.list_shard("document-revision", doc)))
+            self.assertEqual(len(bundle["segments"]), len(store.list_shard("candidate", doc)))
+            self.assertEqual(len(bundle["segments"]), len(store.list_shard("attestation", doc)))
+
+    def test_ingest_revision_is_idempotent(self):
+        rev = _revision()
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ArtifactStore(Path(tmp))
+            first = te.ingest_revision(rev, store)
+            second = te.ingest_revision(rev, store)
+            self.assertEqual(1, first["kinds"]["document-revision"]["written"])
+            self.assertEqual(1, second["kinds"]["document-revision"]["skipped"])
+            self.assertEqual(1, len(store.list_shard("document-revision", rev["document_id"])))
+
+    def test_ingest_rejects_tampered_revision_before_write(self):
+        # schema 仍合法但 source_text 被改、id 未更新 → 入库前拒绝,store 不被污染
+        rev = _revision()
+        rev["segments"][-1]["source_text"] = "被篡改的原文。"  # source_hash/segment_id/revision_id 都不再自洽
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ArtifactStore(Path(tmp))
+            with self.assertRaises(ValueError):
+                te.ingest_revision(rev, store)
+            self.assertEqual([], store.list_shard("document-revision", rev["document_id"]))
+
+    def test_ingest_rejects_stale_revision_id(self):
+        # metadata 漂移但 revision_id 保持旧值 → 必须拒绝(否则日后正确 revision 同 ID 冲突)
+        rev = _revision()
+        rev["metadata"]["title"] = (rev["metadata"].get("title") or "") + "X"
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ArtifactStore(Path(tmp))
+            with self.assertRaises(ValueError):
+                te.ingest_revision(rev, store)
+
+    def test_verify_revision_identity_passes_for_built_revision(self):
+        self.assertEqual([], si.verify_revision_identity(_revision()))
+
     def test_tampered_revision_rejected(self):
         # source_text 被改但 source_hash 没同步 -> 导出必须拒绝(防绕过 stale 防护)
         rev = _revision()
