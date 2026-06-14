@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/houxinli/genai-playground/tasks/translation/schemas/document-version.schema.json",
   "title": "document-version",
+  "description": "DocumentVersion v2:selection manifest。selections 为唯一选择源;selection_decisions 逐 segment 审计(key 必须与 selections 完全一致)。",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,13 +13,14 @@
     "parent_version_id",
     "knowledge_snapshot_id",
     "selections",
+    "selection_decisions",
     "decision",
     "status",
     "created_at"
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "version_id": {
       "type": "string",
@@ -65,24 +67,85 @@
         "pattern": "^cand_[0-9a-f]{64}$"
       }
     },
+    "selection_decisions": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^rev_[0-9a-f]{8,64}:[0-9]{6}:[0-9a-f]{4,64}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "selected_by",
+          "outcome",
+          "reason_code",
+          "incumbent_candidate_id",
+          "evaluation_ids"
+        ],
+        "properties": {
+          "selected_by": {
+            "enum": [
+              "user",
+              "policy",
+              "agent"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "select_challenger",
+              "keep_incumbent",
+              "review_required"
+            ]
+          },
+          "reason_code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "incumbent_candidate_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "pattern": "^cand_[0-9a-f]{64}$"
+              }
+            ]
+          },
+          "evaluation_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^eval_[0-9A-Za-z]{8,40}$"
+            }
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
     "decision": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "selected_by",
-        "reason"
+        "policy_id",
+        "created_by"
       ],
       "properties": {
-        "selected_by": {
+        "policy_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_by": {
           "enum": [
             "user",
             "policy",
-            "agent"
+            "agent",
+            "workflow"
           ]
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1
         }
       }
     },
