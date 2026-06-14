@@ -72,12 +72,12 @@ source -> revision -> legacy/new candidates -> evaluations
 | Legacy 导入 | 已完成(v3+store) | bilingual 反解 → Candidate v3 + legacy Attestation + DocumentRevision,写入分片 ArtifactStore:同译文跨目录代次去重为同一 Candidate,代次差异由 Attestation.legacy_label 区分;确定性幂等、截断容错 | `tasks/translation/src/core/legacy_import.py` |
 | Source adapter / renderer | 部分完成 | 目录→DocumentRevision 适配 + bilingual shadow renderer(与现格式逐字节一致,golden 验证);zh renderer 待做(#42) | `tasks/translation/src/core/source_adapter.py` |
 | Fixture/Golden 底座 | 已完成 | 合成脱敏 Pixiv/Fanbox fixture、golden document-revision/bilingual/zh、revision/segment ID pin 稳定性测试 | `tasks/translation/src/core/testdata/` |
-| 业务工件 Schema | 基础完成 | 八类工件 JSON Schema（新增 attestation）、validate/round-trip/stale-result 测试与 CLI 校验已落地；DocumentVersion v2 待 #50 | `tasks/translation/schemas/` |
+| 业务工件 Schema | 基础完成 | 八类工件 JSON Schema（新增 attestation）、validate/round-trip/stale-result 测试与 CLI 校验已落地；DocumentVersion 已升 v2(#50) | `tasks/translation/schemas/` |
 | Candidate 身份 / Artifact Store | 已落地(#52+#54) | Candidate v3 内容寻址 + Attestation；Sharded `ArtifactStore`（按文档分片 JSONL + put_many 原子批写 + 冲突/身份硬 gate + `verify_references`）；legacy/result importer 已走 store。仍待 #55 SQLite 只读投影 | `tasks/translation/src/core/artifact_store.py` / 系统设计 §2.7 |
 | 目标系统设计 | 分阶段实施 | P0 基础与 translate job 最小闭环已落地；2026-06-13 已按真实实现重新校准 | `tasks/translation/docs/system-design.md` |
 | 开发 Agent 连续性 | 基础已落地 | 协议、Schema、validator、CI、GitHub 模板、`make agent-bootstrap`、`make docs-drift`(文档漂移闸门)与 PR 设计耦合检查已实现；GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
 | 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线（v2 含打包产物与截断检查）；1048 单元中 894 个含 error（v2.1 打包按章拆分），坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
-| 多候选与版本 | 部分完成 | candidate 已可导入/评估；DocumentVersion v2、保守选择和 current ref 未实现 | Issue #50 / 系统设计 |
+| 多候选与版本 | 已完成保守择优(#50) | `version_select.py`:recommend_selection 判定表 + build_document_version v2 + render_version 渲染 bilingual;硬规则只做 gate,未证明严格改善则保留 incumbent。current ref 发布与自动 repair/Annotation 仍未做 | `tasks/translation/src/core/version_select.py` / Issue #50 |
 | 翻译 Agent harness | 执行器就绪 | 共享 instruction pack + Claude skill / Cursor rule 薄适配 + `make translate-bundle`;SFW=Claude、NSFW=Cursor+Grok,同协议;context adapter(review/repair/knowledge)待实现 | `tasks/translation/docs/executor-instructions.md` |
 | 用户句级反馈 | 未实现 | 尚不能持久化“某句话有问题”并触发定向修复 | 目标见系统设计 |
 | 跨文本知识库 | 未实现 | 当前主要依赖人工规则文件和单篇自动预读 | 目标见系统设计 |

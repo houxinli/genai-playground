@@ -1,0 +1,223 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-50-conservative-select",
+  "title": "保守择优 + DocumentVersion v2 + bilingual render",
+  "status": "active",
+  "branch": "feat/conservative-select",
+  "objective": "按 system-design §2.5/§2.6/§6.4 与 issue #50 收敛判定表实现保守择优:recommend_selection 纯函数逐 segment 产出建议(select_challenger/keep_incumbent/review_required),build_document_version 创建不可变 DocumentVersion v2(selections 唯一选择源 + selection_decisions 逐 segment 审计),render_version 复用 #37 renderer 渲染 bilingual。硬规则 QA 只做 gate/证据,不作质量排名;无法证明 challenger 严格改善时保留 incumbent。",
+  "github": {
+    "issue": 50,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/version_select.py 新增(recommend_selection/build_document_version/render_version + version_id 派生 + selections/decisions 一致校验)",
+      "tasks/translation/src/core/version_select_test.py 新增(覆盖判定表每一行 + 版本审计完整 + 渲染)",
+      "tasks/translation/schemas/document-version.schema.json 升级到 v2(selection_decisions + decision.policy_id/created_by)",
+      "tasks/translation/src/core/artifact_schemas.py document-version v2 引用(若需 verify_references 适配)",
+      "system-design.md §6.4 / PROJECT_STATUS.md 同 PR 更新(设计耦合 gate)"
+    ],
+    "out": [
+      "Artifact Store 落库(#52/#54 已完成)",
+      "自动 repair 重译 / 自动 Annotation 生成(annotation 任务)",
+      "current ref 发布 / SQLite 投影(#55)",
+      "zh renderer(#42)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "§2.5 保守原则 / §2.6 推荐与提交分离 / §6.4 DocumentVersion v2",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/candidate_eval.py",
+      "purpose": "Evaluation 结构:verdict=fail iff 任一 error finding;复用 blocking 语义",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/renderer.py",
+      "purpose": "render_bilingual(revision, source_text, translations) #37 renderer",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/artifact_schemas.py",
+      "purpose": "canonical_digest 派生 version_id;validate_artifact('document-version')",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "比较键 (evaluator.name, version, severity, code);v1 仅比较同 (name,version) 的 rule evaluation",
+      "reason": "evaluator 升级后同名 finding 不应被当同一证据;不同 evaluator/version 或一候选缺/多于一条 rule evaluation → review_required(incomparable),不绕过集合关系。Codex round1。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "recommender 重算 blocking set(severity==error)并校验 verdict 自洽,不只信输入 verdict",
+      "reason": "fail 但 blocking 为空(或反之)视为不合法/不可比较 → review_required(verdict_blocking_inconsistent)。Codex:不能只信输入 verdict。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "自动 select 必须 challenger.verdict=pass;两者都 fail 一律 review_required(保留 incumbent)",
+      "reason": "硬规则 QA 不作质量排名;只有 challenger 通过全部 blocking gate 才可自动替换。两者都 fail 即使 challenger blocking ⊊ incumbent 也不自动选(仍有 error)。",
+      "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "聚合判定、对候选顺序无关;content-addressed 后 challenger 天然去重(distinct candidate_id = distinct text)",
+      "reason": "多 challenger 一次性聚合,不按输入顺序 pairwise 覆盖,否则结果随候选顺序变化。",
+      "status": "active"
+    },
+    {
+      "id": "D5",
+      "summary": "selections[segment_id] 为唯一选择源;selection_decisions 记 selected_by/outcome/reason_code/incumbent_candidate_id/evaluation_ids/可选 note;key 与 selections 完全一致",
+      "reason": "不在 decision 内重复 selected_candidate_id 避免漂移;reason_code 稳定可测;evaluation_ids 仅记本次决策实际用到的证据。Codex round1+#50 round2。",
+      "status": "active"
+    },
+    {
+      "id": "D6",
+      "summary": "version_id 内容寻址 version_ + sha256(canonical{revision_id, selections, selection_decisions, parent_version_id, knowledge_snapshot_id}) 前 40-hex;created_at 由调用方传入",
+      "reason": "确定性可复现、可测、同选择幂等;build 不调时间源保持纯函数。status 一律建为 draft(版本创建≠发布,§2.6)。",
+      "status": "active"
+    },
+    {
+      "id": "D7",
+      "summary": "render_version(revision, version, candidates_by_id, source_text):从 version.selections 取候选文本建 translations 后委托 render_bilingual",
+      "reason": "revision 不存原始 source_text(renderer 固有需要),issue 三参签名为示意;source_text 透传是 #37 renderer 的既有必需输入。",
+      "status": "active"
+    },
+    {
+      "id": "D8",
+      "summary": "无 incumbent 且未决(0 或 多个 pass)→ 该 segment 无 selection;build_document_version 遇任一未决 segment 拒绝建版,返回/抛出由调用方取 recommendation report",
+      "reason": "review_required 有 incumbent → 保留 incumbent、draft 可渲染;无 incumbent unresolved → 不建 version(#50 acceptance)。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "document-version schema 升 v2(selection_decisions + decision.policy_id/created_by)",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "schema_version const 2",
+        "selection_decisions 逐 segment 审计字段齐全",
+        "validate_artifact round-trip 绿"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "version_select.recommend_selection 纯函数 + 判定表",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "逐 segment 聚合判定、对候选顺序无关",
+        "重算 blocking + verdict 自洽校验",
+        "判定表每一行有测试"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "build_document_version v2 + selections/decisions 一致 + version_id 派生",
+      "status": "completed",
+      "depends_on": [
+        "S1",
+        "S2"
+      ],
+      "acceptance": [
+        "selections key == selection_decisions key",
+        "未决 segment(无 incumbent)拒绝建版",
+        "schema 校验绿、version_id 确定性幂等"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "render_version 复用 #37 + 测试",
+      "status": "completed",
+      "depends_on": [
+        "S3"
+      ],
+      "acceptance": [
+        "从 version.selections 渲染 bilingual",
+        "review_required 保留 incumbent 仍可渲染"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "docs 同步(§6.4/PROJECT_STATUS) + 全量 pytest + 基线对齐",
+      "status": "completed",
+      "depends_on": [
+        "S3",
+        "S4"
+      ],
+      "acceptance": [
+        "pytest 全绿",
+        "AGENTS.md 基线与 docs-drift 一致",
+        "validate_agent_tasks 绿"
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S5"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三通道三联",
+        "PR 合并、main 收敛"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S6",
+    "instruction": "提交并开 PR closes #50,过 CI,处理 review 三联,squash 合并到 main。",
+    "acceptance": [
+      "CI 全绿",
+      "review 三通道三联",
+      "PR 合并、main 收敛"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "249 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 249)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260614T001500Z-claude-code",
+    "timestamp": "2026-06-14T00:15:00Z",
+    "agent": "claude-code",
+    "summary": "version_select 三段 + DocumentVersion v2 + 判定表测试落地,249 全绿,docs 同步",
+    "observed_head": "998fb9d"
+  },
+  "next_task": null
+}

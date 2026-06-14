@@ -144,6 +144,24 @@ def verify_references(artifact: Dict[str, Any], resolver: Resolver) -> List[str]
                     f"version {artifact['version_id']}: selection key segment {segment_id} "
                     f"!= candidate segment {cand.get('segment_id')}"
                 )
+        decisions = artifact.get("selection_decisions", {})
+        if set(decisions) != set(artifact.get("selections", {})):
+            errors.append(
+                f"version {artifact['version_id']}: selection_decisions key 与 selections 不一致"
+            )
+        for segment_id, decision in decisions.items():
+            incumbent = decision.get("incumbent_candidate_id")
+            if incumbent is not None and resolver("candidate", incumbent) is None:
+                errors.append(
+                    f"version {artifact['version_id']}: decision[{segment_id}] incumbent "
+                    f"{incumbent} 不可解析"
+                )
+            for eval_id in decision.get("evaluation_ids", []):
+                if resolver("evaluation", eval_id) is None:
+                    errors.append(
+                        f"version {artifact['version_id']}: decision[{segment_id}] evaluation "
+                        f"{eval_id} 不可解析"
+                    )
 
     return errors
 

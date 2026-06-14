@@ -223,11 +223,16 @@ class VerifyReferencesTest(unittest.TestCase):
         store, cand = self._seeded_store()
         other_seg = f"{REV}:000009:" + SRC_HASH[:8]
         version = {
-            "schema_version": 1, "version_id": "version_" + "a2" * 6,
+            "schema_version": 2, "version_id": "version_" + "a2" * 6,
             "document_id": DOC, "revision_id": REV, "parent_version_id": None,
             "knowledge_snapshot_id": None,
             "selections": {other_seg: cand["candidate_id"]},  # key segment 与 candidate.segment 不符
-            "decision": {"selected_by": "user", "reason": "x"},
+            "selection_decisions": {other_seg: {
+                "selected_by": "policy", "outcome": "select_challenger",
+                "reason_code": "initial_single_passing_candidate",
+                "incumbent_candidate_id": None, "evaluation_ids": [],
+            }},
+            "decision": {"policy_id": "conservative-select-v1", "created_by": "workflow"},
             "status": "reviewed", "created_at": "2026-01-01T00:00:00Z",
         }
         errors = astore.verify_references(version, store.resolver_for(DOC))
@@ -236,12 +241,17 @@ class VerifyReferencesTest(unittest.TestCase):
     def test_version_dangling_parent_detected(self):
         store, cand = self._seeded_store()
         version = {
-            "schema_version": 1, "version_id": "version_" + "a2" * 6,
+            "schema_version": 2, "version_id": "version_" + "a2" * 6,
             "document_id": DOC, "revision_id": REV,
             "parent_version_id": "version_" + "9" * 12,  # 不存在的父版本
             "knowledge_snapshot_id": None,
             "selections": {SEG: cand["candidate_id"]},
-            "decision": {"selected_by": "user", "reason": "x"},
+            "selection_decisions": {SEG: {
+                "selected_by": "policy", "outcome": "select_challenger",
+                "reason_code": "initial_single_passing_candidate",
+                "incumbent_candidate_id": None, "evaluation_ids": [],
+            }},
+            "decision": {"policy_id": "conservative-select-v1", "created_by": "workflow"},
             "status": "reviewed", "created_at": "2026-01-01T00:00:00Z",
         }
         errors = astore.verify_references(version, store.resolver_for(DOC))

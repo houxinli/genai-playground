@@ -119,15 +119,25 @@ def make_evaluation():
 
 
 def make_version():
+    cand_id = candidate_id_v3(REV, SEG, HASH, CAND_TEXT)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "version_id": "version_" + "a2" * 6,
         "document_id": "pixiv:50235390:12430834",
         "revision_id": REV,
         "parent_version_id": None,
         "knowledge_snapshot_id": KNOW,
-        "selections": {SEG: candidate_id_v3(REV, SEG, HASH, CAND_TEXT)},
-        "decision": {"selected_by": "user", "reason": "accepted after comparison"},
+        "selections": {SEG: cand_id},
+        "selection_decisions": {
+            SEG: {
+                "selected_by": "policy",
+                "outcome": "select_challenger",
+                "reason_code": "initial_single_passing_candidate",
+                "incumbent_candidate_id": None,
+                "evaluation_ids": ["eval_" + "b4" * 6],
+            }
+        },
+        "decision": {"policy_id": "conservative-select-v1", "created_by": "workflow"},
         "status": "reviewed",
         "created_at": "2026-06-12T00:10:00Z",
     }
