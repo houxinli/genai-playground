@@ -236,13 +236,15 @@ agent-bootstrap:
 # ============ 候选导入(新架构) ============
 .PHONY: legacy-import import-result export-job
 
-# revision → job bundle(供执行器消费)。用法: make export-job REVISION=rev.json OUT=job.json
+# revision → job bundle(供执行器消费)。用法: make export-job REVISION=rev.json OUT=job.json STORE=...
+# STORE 必传(闭环前置):同步把源 revision 幂等入库,import-result 才解析得到 revision shard。
 export-job:
-	$(PY) tasks/translation/src/core/task_export.py --revision "$(REVISION)" --out "$(OUT)" $(if $(TASK_TYPE),--task-type $(TASK_TYPE))
+	$(PY) tasks/translation/src/core/task_export.py --revision "$(REVISION)" --out "$(OUT)" --store "$(STORE)" $(if $(TASK_TYPE),--task-type $(TASK_TYPE))
 
-# 源目录+document → job bundle(一步)。用法: make translate-bundle SOURCE=dir PROVIDER=pixiv DOCUMENT=pixiv:18330282:27466576 OUT=job.json
+# 源目录+document → job bundle(一步)。用法: make translate-bundle SOURCE=dir PROVIDER=pixiv DOCUMENT=pixiv:18330282:27466576 OUT=job.json STORE=...
+# STORE 必传(闭环前置):同步把源 revision 幂等入库,import-result 才解析得到 revision shard。
 translate-bundle:
-	$(PY) tasks/translation/src/core/task_export.py --source-dir "$(SOURCE)" --provider "$(PROVIDER)" --document "$(DOCUMENT)" --out "$(OUT)"
+	$(PY) tasks/translation/src/core/task_export.py --source-dir "$(SOURCE)" --provider "$(PROVIDER)" --document "$(DOCUMENT)" --out "$(OUT)" --store "$(STORE)"
 
 # 存量 bilingual → legacy candidate。用法: make legacy-import PROVIDER=fanbox SOURCE=... BILINGUAL=... LABEL=... STORE=...
 legacy-import:

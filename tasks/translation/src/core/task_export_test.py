@@ -95,6 +95,50 @@ class TaskExportTest(unittest.TestCase):
             self.assertEqual(len(bundle["segments"]), len(store.list_shard("attestation", doc)))
 
 
+    def test_ingest_revision_closes_loop_for_new_document(self):
+        # 全新文档:仅靠 export 端的 ingest_revision 入库(无手动 seed),import_result 即不再 quarantine
+        rev = _revision()
+        bundle = te.export_job(rev, _body_ids(rev))
+        task = bundle["task"]
+        fake_tr = {"「おはよう」": "「早上好」", "今日はいい天気だ。": "今天天气真好。"}
+        result = {
+            "schema_version": 1,
+            "task_id": task["task_id"],
+            "task_digest": bundle["task_digest"],
+            "producer": {"type": "harness", "name": "claude-code", "model": None},
+            "candidates": [
+                {
+                    "result_candidate_key": "option-a",
+                    "segment_id": s["segment_id"],
+                    "source_hash": task["source_hashes"][s["segment_id"]],
+                    "text": fake_tr[s["source_text"]],
+                }
+                for s in bundle["segments"]
+            ],
+            "findings": [],
+            "recommended_candidate_keys": ["option-a"],
+            "completed_at": "2026-06-13T00:00:00Z",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ArtifactStore(Path(tmp))
+            te.ingest_revision(rev, store)  # 生产入库点,取代手动 seed
+            report = ri.import_result(task, result, store)
+            self.assertFalse(report["quarantined"], report)
+            doc = task["document_id"]
+            self.assertEqual(1, len(store.list_shard("document-revision", doc)))
+            self.assertEqual(len(bundle["segments"]), len(store.list_shard("candidate", doc)))
+            self.assertEqual(len(bundle["segments"]), len(store.list_shard("attestation", doc)))
+
+    def test_ingest_revision_is_idempotent(self):
+        rev = _revision()
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ArtifactStore(Path(tmp))
+            first = te.ingest_revision(rev, store)
+            second = te.ingest_revision(rev, store)
+            self.assertEqual(1, first["kinds"]["document-revision"]["written"])
+            self.assertEqual(1, second["kinds"]["document-revision"]["skipped"])
+            self.assertEqual(1, len(store.list_shard("document-revision", rev["document_id"])))
+
     def test_tampered_revision_rejected(self):
         # source_text 被改但 source_hash 没同步 -> 导出必须拒绝(防绕过 stale 防护)
         rev = _revision()

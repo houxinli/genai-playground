@@ -1147,7 +1147,7 @@ src/core/render/       # bilingual/zh/package renderers
 | DocumentRevision / Segment | 已完成 shadow path | 尚未替换生产 TXT 主路径 |
 | Renderer | 部分完成 | bilingual 已完成；zh 见 Issue #42 |
 | Legacy Candidate Import | 已完成 | 可幂等导入存量 bilingual（产出 v3 + attestation，写分片 store） |
-| Translate Task Export / Result Import | 已完成最小闭环 | 只支持无外部 context 的 translate job；新文档 revision 入库闭环见 Issue #72 |
+| Translate Task Export / Result Import | 已完成最小闭环 | 只支持无外部 context 的 translate job；export 时把源 revision 幂等入库,新文档 translate→import 闭环(#72) |
 | Candidate Deterministic QA | 已完成 | 只提供机械证据，不承担语义排名 |
 | Candidate 身份 / Artifact Store | 已完成(#52+#54) | Candidate v3 内容寻址 + Attestation；Sharded `ArtifactStore`（分片 JSONL + put_many 原子批写 + 身份/冲突/`verify_references` 硬 gate）；importer 已接入 |
 | DocumentVersion / Selection | 已完成(#50) | `version_select.py` 保守 recommend/build/render + DocumentVersion v2;§6.4 |
@@ -1300,18 +1300,17 @@ Web UI 不应早于 candidate/version/annotation 模型稳定。
 ### 20.2 接下来推荐顺序
 
 已完成：保守 recommendation + DocumentVersion v2 + 从显式版本渲染 bilingual（#50）；Artifact Store +
-跨工件引用 validator + importer 接入（#52/#54）；executor harness instruction pack + adapter（#57）。
+跨工件引用 validator + importer 接入（#52/#54）；executor harness instruction pack + adapter（#57）；
+translate-bundle/export-job 在生成 bundle 时把源 Revision 幂等入库，新文档 translate→import 闭环（#72）。
 下一阶段首先把「候选安全成为可发布版本」打通成真实文档的端到端闭环：
 
-1. 补 translate-bundle → import-result 的**新文档 Revision 入库闭环**（Issue #72）——否则全新文档走
-   harness 路线必 quarantine。
-2. 完成 Issue #42 的 zh renderer。
-3. 做一个真实文档的端到端 CLI demo：
+1. 完成 Issue #42 的 zh renderer。
+2. 做一个真实文档的端到端 CLI demo：
    source -> revision -> legacy/new candidates -> evaluations -> recommendation -> draft version -> bilingual/zh。
-4. 实现 current ref / 发布（原子 `refs/current.json`），把 DocumentVersion 推到发布物。
-5. 在该 vertical slice 上实现 annotation + 非破坏性 repair。
-6. version/repair 稳定后再做 scoped knowledge。
-7. 最后加入 SQLite 调度索引（Issue #55）、并发和 UI。
+3. 实现 current ref / 发布（原子 `refs/current.json`），把 DocumentVersion 推到发布物。
+4. 在该 vertical slice 上实现 annotation + 非破坏性 repair。
+5. version/repair 稳定后再做 scoped knowledge。
+6. 最后加入 SQLite 调度索引（Issue #55）、并发和 UI。
 
 这比继续横向增加 schema 或 executor 更优：先证明端到端，再补索引和并发。
 

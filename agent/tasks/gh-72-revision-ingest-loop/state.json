@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-72-revision-ingest-loop",
+  "title": "translate-bundle → import-result 新文档 Revision 入库闭环",
+  "status": "active",
+  "branch": "feat/revision-ingest-loop",
+  "objective": "让全新文档走 translate-bundle → 执行器 → import-result 不再 quarantine:在 bundle 生成时把源 DocumentRevision 幂等写入分片 ArtifactStore(Option 1),import-result 后续即可解析到同文档 revision shard。Makefile/executor-instructions 文档化闭环。",
+  "github": {
+    "issue": 72,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/task_export.py 新增 ingest_revision + --store,bundle 生成时幂等入库 revision",
+      "tasks/translation/src/core/task_export_test.py 新增/更新(入库 + 幂等 + 闭环)",
+      "Makefile translate-bundle / export-job 传 STORE",
+      "tasks/translation/docs/executor-instructions.md 文档化 revision 入库步骤",
+      "docs(PROJECT_STATUS / system-design §20)同步,基线对齐"
+    ],
+    "out": [
+      "保守择优 / DocumentVersion(#50 已完成)",
+      "context builder / review/repair job(P1)",
+      "SQLite 投影(#55)",
+      "zh renderer(#42)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "tasks/translation/src/core/result_import.py",
+      "purpose": "import_result 的 integrity gate 要求 revision 已在 store(闭环另一端)",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/legacy_import.py",
+      "purpose": "put_many([revision, *candidates, ...]) 入库范式,mirror 之",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/artifact_store.py",
+      "purpose": "ArtifactStore.put_many 幂等 + 分片;revision 是一类 kind",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "Option 1:export 时把 revision put_many 入库,而非新增手动 import-revision 步或 import-result 兜底",
+      "reason": "构 bundle 的 orchestrator 本就持有 revision(从 source 现场适配);写库是自然 ingestion 点。store 仍是唯一真相源,bundle 仍自包含 segments。比手动步(易忘)与 import-result 兜底(bundle 未带完整 revision,不足以重建)都干净。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "--store 可选;给定才入库。put_many 幂等(同 revision skip),重复 export 安全",
+      "reason": "保留无 store 的纯导出(检视/测试);Makefile 闭环路径统一传 STORE。revision 由 build_document_revision 确定性构建,re-export 产生同 payload → 幂等。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "task_export.ingest_revision + --store,bundle 生成时幂等入库 revision",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "ingest_revision(revision, store) 走 put_many 幂等",
+        "main --store 给定时入库后再写 bundle",
+        "单测绿"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Makefile translate-bundle/export-job 传 STORE + executor-instructions 文档化",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "Make 目标含 STORE",
+        "executor-instructions 写明 revision 入库是闭环前置"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "新文档端到端闭环测试(export 入库 → import-result 不 quarantine)",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "全新文档:revision+candidate+attestation 落同文档分片",
+        "import-result not quarantined",
+        "re-export 幂等"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "docs 同步 + 全量 pytest + 基线对齐",
+      "status": "completed",
+      "depends_on": [
+        "S2",
+        "S3"
+      ],
+      "acceptance": [
+        "pytest 全绿",
+        "AGENTS 基线一致",
+        "docs-drift + agent-validate 绿"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S4"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三联",
+        "PR 合并、main 收敛"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S5",
+    "instruction": "提交并开 PR closes #72,过 CI,处理 review 三联,squash 合并到 main。",
+    "acceptance": [
+      "CI 全绿",
+      "review resolve",
+      "PR 合并、main 收敛"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "255 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 255)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260614T213000Z-claude-code",
+    "timestamp": "2026-06-14T21:30:00Z",
+    "agent": "claude-code",
+    "summary": "ingest_revision + --store 闭环 + Makefile/doc + 测试,255 全绿,docs 同步",
+    "observed_head": "d4c08e2"
+  },
+  "next_task": null
+}

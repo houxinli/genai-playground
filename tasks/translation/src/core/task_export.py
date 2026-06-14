@@ -137,6 +137,15 @@ def export_job(revision: Dict[str, Any], segment_ids: List[str], **kwargs: Any) 
     }
 
 
+def ingest_revision(revision: Dict[str, Any], store: Any) -> Dict[str, Any]:
+    """把源 DocumentRevision 幂等写入分片 ArtifactStore,作为 translate→import 闭环的入库点。
+
+    import_result 的 integrity gate 要求同文档 revision shard 已存在;构 bundle 的 orchestrator
+    本就持有 revision,故在此入库(store 仍是唯一真相源)。put_many 幂等:同 revision 重复 export 跳过。
+    """
+    return store.put_many(revision["document_id"], [revision])
+
+
 def revision_from_source(provider: str, source_dir: Path, document_id: str) -> Dict[str, Any]:
     """只定位并构建指定 document 的 DocumentRevision——不解析整目录,无关文件的错误不影响目标。"""
     try:
@@ -162,6 +171,10 @@ def main() -> int:
     parser.add_argument("--segment", action="append", default=None, help="repeatable;默认全部 body segment")
     parser.add_argument("--task-type", default="translate")
     parser.add_argument("--out", required=True, type=Path, help="job bundle 输出 json")
+    parser.add_argument(
+        "--store", type=Path, default=None,
+        help="ArtifactStore 根目录;给定则把源 revision 幂等入库(import-result 闭环前置)",
+    )
     args = parser.parse_args()
 
     if args.revision:
@@ -171,11 +184,19 @@ def main() -> int:
     else:
         parser.error("需 --revision,或 --source-dir + --provider + --document")
 
+    if args.store:
+        try:
+            from .artifact_store import ArtifactStore
+        except ImportError:
+            from core.artifact_store import ArtifactStore
+        ingest_revision(revision, ArtifactStore(args.store))
+
     # 默认导出全部可翻译段(body + metadata.*),否则 metadata 无候选会导致渲染缺译文
     segment_ids = args.segment or [s["segment_id"] for s in revision["segments"]]
     bundle = export_job(revision, segment_ids, task_type=args.task_type)
     args.out.write_text(json.dumps(bundle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"task_id={bundle['task']['task_id']} segments={len(bundle['segments'])} out={args.out}")
+    store_note = f" store={args.store}" if args.store else ""
+    print(f"task_id={bundle['task']['task_id']} segments={len(bundle['segments'])} out={args.out}{store_note}")
     return 0
 
 
