@@ -1138,23 +1138,26 @@ src/core/render/       # bilingual/zh/package renderers
 
 迁移必须保持现有 Make 入口可运行，并允许阶段回滚。
 
-### 20.1 2026-06-13 实施检查点
+### 20.1 2026-06-14 实施检查点
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| 工件 Schema | 已完成 | revision/candidate/evaluation/version-v1/annotation/task/result |
-| Fixture / Golden / ID 稳定性 | 已完成 | Pixiv/Fanbox 合成 fixture，186 测试基线的一部分 |
+| 工件 Schema | 已完成 | revision/candidate-v3/evaluation/version-v2/annotation/task/result + attestation |
+| Fixture / Golden / ID 稳定性 | 已完成 | Pixiv/Fanbox 合成 fixture，回归基线的一部分（基线数字以 AGENTS.md 为准） |
 | DocumentRevision / Segment | 已完成 shadow path | 尚未替换生产 TXT 主路径 |
 | Renderer | 部分完成 | bilingual 已完成；zh 见 Issue #42 |
-| Legacy Candidate Import | 已完成 | 可幂等导入存量 bilingual |
-| Translate Task Export / Result Import | 已完成最小闭环 | 只支持无外部 context 的 translate job |
+| Legacy Candidate Import | 已完成 | 可幂等导入存量 bilingual（产出 v3 + attestation，写分片 store） |
+| Translate Task Export / Result Import | 已完成最小闭环 | 只支持无外部 context 的 translate job；新文档 revision 入库闭环见 Issue #72 |
 | Candidate Deterministic QA | 已完成 | 只提供机械证据，不承担语义排名 |
-| DocumentVersion / Selection | 已完成(#50) | `version_select.py` 保守 recommend/build/render + DocumentVersion v2;§6.4。current ref 发布仍未做 |
-| Artifact Store / Current Ref | 未完成 | 在发布、批量 repair、SQLite 之前补齐 |
+| Candidate 身份 / Artifact Store | 已完成(#52+#54) | Candidate v3 内容寻址 + Attestation；Sharded `ArtifactStore`（分片 JSONL + put_many 原子批写 + 身份/冲突/`verify_references` 硬 gate）；importer 已接入 |
+| DocumentVersion / Selection | 已完成(#50) | `version_select.py` 保守 recommend/build/render + DocumentVersion v2;§6.4 |
+| Executor Harness | 已完成(#57) | 共享 instruction pack + Codex/Claude/Cursor adapter，自然语言 translate-job |
+| Current Ref / 发布 | 未完成 | 在批量 repair、SQLite 之前补齐 |
 | Repair / Annotation / Knowledge | 未完成 | 依赖 version 与 store |
+| SQLite 可重建投影 | 未完成 | Issue #55，vertical slice 之后 |
 
-已经提前完成的 task/result translate round-trip 不代表 Phase 4 全部完成；context builder、instruction pack、
-review/repair job 和 harness adapter 仍未实现。
+已经完成的 task/result translate round-trip + executor harness（#57）不代表 Phase 4 全部完成；context builder
+与 review/repair job 仍未实现，新文档的 revision 入库闭环（#72）也待补。
 
 ### Phase 0：冻结协议和回归样本
 
@@ -1296,17 +1299,21 @@ Web UI 不应早于 candidate/version/annotation 模型稳定。
 
 ### 20.2 接下来推荐顺序
 
-1. 修订 Issue #50：实现保守 recommendation、DocumentVersion v2 和从显式版本渲染 bilingual。
-2. 实现 Artifact Store 与跨工件引用 validator；所有 importer/version writer 统一接入。
-3. 完成 Issue #42 的 zh renderer。
-4. 做一个真实文档的端到端 CLI demo：
-   source -> revision -> legacy/new candidates -> evaluations -> recommendation -> draft version -> bilingual/zh。
-5. 在该 vertical slice 上实现 annotation + 非破坏性 repair。
-6. 将现有 API Translator 桥接到统一 Task/Result/Candidate 协议，再补 harness instruction pack。
-7. version/repair 稳定后再做 scoped knowledge。
-8. 最后加入 SQLite 调度索引、并发和 UI。
+已完成：保守 recommendation + DocumentVersion v2 + 从显式版本渲染 bilingual（#50）；Artifact Store +
+跨工件引用 validator + importer 接入（#52/#54）；executor harness instruction pack + adapter（#57）。
+下一阶段首先把「候选安全成为可发布版本」打通成真实文档的端到端闭环：
 
-这比继续横向增加 schema 或 executor 更优：下一阶段首先证明“候选如何安全成为可发布版本”。
+1. 补 translate-bundle → import-result 的**新文档 Revision 入库闭环**（Issue #72）——否则全新文档走
+   harness 路线必 quarantine。
+2. 完成 Issue #42 的 zh renderer。
+3. 做一个真实文档的端到端 CLI demo：
+   source -> revision -> legacy/new candidates -> evaluations -> recommendation -> draft version -> bilingual/zh。
+4. 实现 current ref / 发布（原子 `refs/current.json`），把 DocumentVersion 推到发布物。
+5. 在该 vertical slice 上实现 annotation + 非破坏性 repair。
+6. version/repair 稳定后再做 scoped knowledge。
+7. 最后加入 SQLite 调度索引（Issue #55）、并发和 UI。
+
+这比继续横向增加 schema 或 executor 更优：先证明端到端，再补索引和并发。
 
 ## 21. 建议 CLI
 
