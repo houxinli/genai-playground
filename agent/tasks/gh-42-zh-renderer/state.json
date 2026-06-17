@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-42-zh-renderer",
+  "title": "renderer:zh 输出(复刻 extract_chinese 字段变换)",
+  "status": "active",
+  "branch": "feat/zh-renderer",
+  "objective": "在 renderer.py 增 render_zh(revision, source_text, translations),从 DocumentRevision + 逐 segment 译文渲染 zh 产物,与 extract_chinese 的 zh 字段变换字节一致;golden 验证。补全 #37 拆出的 zh 分支。",
+  "github": {
+    "issue": 42,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/renderer.py 新增 render_zh",
+      "tasks/translation/src/core/testdata/golden zh golden(pixiv/fanbox)",
+      "tasks/translation/src/core/renderer_test.py zh 渲染测试(逐字节匹配 golden,不调真实模型)"
+    ],
+    "out": [
+      "candidate/version 模型;bilingual 渲染(#37 已完成)",
+      "extract_chinese 脚本本身的重构/替换"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "tasks/translation/src/scripts/extract_chinese.py",
+      "purpose": "zh 字段变换真相源:extract_chinese_from_yaml(689-849)/extract_chinese_from_content(858)",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/renderer.py",
+      "purpose": "render_bilingual 既有 front-matter/body 行走逻辑,zh 复用其骨架",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/source_identity.py",
+      "purpose": "_structured_metadata 字段(title/caption/series_title/tags/published_at/updated_at);source.source_id=ID;_PROVIDER_SPEC 的日期键名",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "zh front matter 是源 front matter 的 curated 子集,只开 --- 不闭合 ---",
+      "reason": "据真实 pixiv *_zh 样本(data/pixiv/53230930_zh)与 extract_chinese:保留 ID/title/caption(fanbox:excerpt)/series:+  title:/tags/create_date(fanbox:published_at)/update_date(fanbox:updated_at);丢弃 author/series.id/order/x_restrict/source_url/lang;无闭合 ---。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "ID=source.source_id;日期键 provider 相关;series:+  title: 恒输出(空则 '  title: ')",
+      "reason": "extract_chinese 保留原日期键名(pixiv create_date/update_date、fanbox published_at/updated_at);样本显示 series 块即便无 series_title 也输出空 title 行。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "字段值取译文:title/caption/tags/series_title = 对应 metadata segment 的 translations;ID/日期取 revision 原值",
+      "reason": "tags 译文已是 '原词 / 中文' 形态(bilingual renderer 同源);caption HTML 剥离天然满足(译文是干净中文)。",
+      "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "body=逐 body segment 译文,保留源空行结构(需 source_text);golden 由 extract_chinese 实际输出锚定",
+      "reason": "revision 的 body segment 已丢空行(parse_source 去空),空行结构在 source_text;render_zh 复用 render_bilingual 的 body 行走但只出译文行。golden 用 extract_chinese 跑 bilingual golden 的真实产物,避免猜 header↔body 空行。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "用 extract_chinese 跑 bilingual golden 生成权威 zh golden(锁定字节级规格)",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "pixiv/fanbox zh golden 落 testdata/golden",
+        "格式与真实样本一致(无闭合 ---、curated 子集)"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "renderer.render_zh 实现:curated front matter + body 译文(复用 bilingual 骨架)",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "pixiv/fanbox 渲染逐字节匹配 golden",
+        "provider 日期键/ caption|excerpt 正确"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "测试 + docs 同步 + 全量 pytest + 基线对齐",
+      "status": "completed",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "zh golden 逐字节测试,不调真实模型",
+        "pytest 全绿,AGENTS 基线一致,docs-drift 通过"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S3"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三联",
+        "PR 合并、main 收敛"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S4",
+    "instruction": "提交并开 PR closes #42,过 CI,处理 review,squash 合并。",
+    "acceptance": [
+      "CI 全绿",
+      "review resolve",
+      "PR 合并、main 收敛"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "261 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 261)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260617T010000Z-claude-code",
+    "timestamp": "2026-06-17T01:00:00Z",
+    "agent": "claude-code",
+    "summary": "render_zh 实现 + zh golden(extract_chinese 锚定)+ 测试,261 全绿,docs 同步",
+    "observed_head": "2030093"
+  },
+  "next_task": null
+}

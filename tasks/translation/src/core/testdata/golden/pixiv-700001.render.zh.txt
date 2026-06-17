@@ -1,0 +1,14 @@
+---
+ID: 700001
+title: 早晨的问候
+caption: 用于测试的简短文章。
+series:
+  title: 
+tags: [テスト / 测试, 日常 / 日常]
+create_date: 2026-01-01T09:00:00+09:00
+update_date: 
+
+
+「早上好」
+
+今天天气真好。

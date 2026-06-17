@@ -9,10 +9,10 @@ from pathlib import Path
 
 try:
     from . import source_identity as si
-    from .renderer import render_bilingual
+    from .renderer import render_bilingual, render_zh
 except ImportError:  # core/ 在 sys.path 上
     import source_identity as si
-    from renderer import render_bilingual
+    from renderer import render_bilingual, render_zh
 
 
 TESTDATA = Path(__file__).resolve().parent / "testdata"
@@ -38,11 +38,20 @@ CASES = {
 }
 
 
+def _translations(rev):
+    return {s["segment_id"]: TRANSLATIONS[s["source_text"]] for s in rev["segments"]}
+
+
 def _render(name: str) -> str:
     provider, path = CASES[name]
     rev = si.build_document_revision(provider, path)
-    translations = {s["segment_id"]: TRANSLATIONS[s["source_text"]] for s in rev["segments"]}
-    return render_bilingual(rev, path.read_text(encoding="utf-8"), translations)
+    return render_bilingual(rev, path.read_text(encoding="utf-8"), _translations(rev))
+
+
+def _render_zh(name: str) -> str:
+    provider, path = CASES[name]
+    rev = si.build_document_revision(provider, path)
+    return render_zh(rev, path.read_text(encoding="utf-8"), _translations(rev))
 
 
 class RendererGoldenTest(unittest.TestCase):
@@ -50,6 +59,26 @@ class RendererGoldenTest(unittest.TestCase):
         for name in CASES:
             golden = (GOLDEN / f"{name}.render.bilingual.txt").read_text(encoding="utf-8")
             self.assertEqual(golden, _render(name), name)
+
+    def test_render_zh_matches_golden_byte_for_byte(self):
+        # zh golden 由 extract_chinese 跑 bilingual golden 生成,render_zh 必须逐字节复刻其字段变换
+        for name in CASES:
+            golden = (GOLDEN / f"{name}.render.zh.txt").read_text(encoding="utf-8")
+            self.assertEqual(golden, _render_zh(name), name)
+
+    def test_render_zh_drops_non_whitelisted_keys(self):
+        # author/creator/source_url/lang/x_restrict/series.id 等不得出现在 zh 产物
+        out = _render_zh("pixiv-700001")
+        for noise in ("author:", "source_url:", "lang:", "x_restrict:", "  id:", "  order:"):
+            self.assertNotIn(noise, out)
+        self.assertTrue(out.startswith("---\nID: 700001\n"))  # 只开 --- 不闭合 + ID 来自 novel_id
+
+    def test_render_zh_fanbox_uses_excerpt_and_published_keys(self):
+        out = _render_zh("fanbox-800001")
+        self.assertIn("excerpt: fixture 用的样本。", out)
+        self.assertIn("published_at: ", out)
+        self.assertNotIn("caption:", out)
+        self.assertNotIn("creator:", out)
 
     def test_metadata_keys_are_paired_after_source(self):
         # pixiv 配 caption,fanbox 配 excerpt;译文行紧跟在源键行之后
