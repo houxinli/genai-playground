@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-42-zh-renderer",
   "title": "renderer:zh 输出(复刻 extract_chinese 字段变换)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/zh-renderer",
   "objective": "在 renderer.py 增 render_zh(revision, source_text, translations),从 DocumentRevision + 逐 segment 译文渲染 zh 产物,与 extract_chinese 的 zh 字段变换字节一致;golden 验证。补全 #37 拆出的 zh 分支。",
   "github": {
     "issue": 42,
-    "pull_request": null
+    "pull_request": 79
   },
   "scope": {
     "in": [
@@ -63,7 +63,9 @@
       "status": "active"
     }
   ],
-  "open_questions": [],
+  "open_questions": [
+    "下一步是 §20.2 端到端 CLI demo + current ref/发布(原子 refs/current.json),目前无对应 issue;备选 #55 SQLite、#77 验证协议收口、#34 GitHub 状态同步。待用户定 next_task 后开 issue。"
+  ],
   "blockers": [],
   "plan": [
     {
@@ -103,7 +105,7 @@
     {
       "id": "S4",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S3"
       ],
@@ -114,15 +116,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S4",
-    "instruction": "提交并开 PR closes #42,过 CI,处理 review,squash 合并。",
-    "acceptance": [
-      "CI 全绿",
-      "review resolve",
-      "PR 合并、main 收敛"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -152,11 +146,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260617T010000Z-claude-code",
-    "timestamp": "2026-06-17T01:00:00Z",
+    "checkpoint_id": "cp-20260617T013000Z-claude-code",
+    "timestamp": "2026-06-17T01:30:00Z",
     "agent": "claude-code",
-    "summary": "render_zh 实现 + zh golden(extract_chinese 锚定)+ 测试,261 全绿,docs 同步",
-    "observed_head": "2030093"
+    "summary": "任务完成:PR #79 squash 合并,issue #42 关闭,CI 全绿,review 零 finding",
+    "observed_head": "6ccfa7c"
   },
   "next_task": null
 }
