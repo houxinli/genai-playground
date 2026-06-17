@@ -70,7 +70,7 @@ source -> revision -> legacy/new candidates -> evaluations
 | translate task/result 协议 | 最小闭环完成 | export-job + import-result 已往返；export 时把源 revision 幂等入库,新文档 translate→import 闭环(#72);instruction pack + harness adapter 已落地(#57);context builder、review/repair job 待实现 | `tasks/translation/src/core/task_export.py` |
 | result 导入(import-result) | 已完成(v3+store) | Task+Result → Candidate v3 + Attestation,写入分片 ArtifactStore:§5.4 stale 校验进 quarantine;内容寻址身份,同译文跨执行去重(一 Candidate + 多 Attestation),重放幂等 | `tasks/translation/src/core/result_import.py` |
 | Legacy 导入 | 已完成(v3+store) | bilingual 反解 → Candidate v3 + legacy Attestation + DocumentRevision,写入分片 ArtifactStore:同译文跨目录代次去重为同一 Candidate,代次差异由 Attestation.legacy_label 区分;确定性幂等、截断容错 | `tasks/translation/src/core/legacy_import.py` |
-| Source adapter / renderer | 部分完成 | 目录→DocumentRevision 适配 + bilingual shadow renderer(与现格式逐字节一致,golden 验证);zh renderer 待做(#42) | `tasks/translation/src/core/source_adapter.py` |
+| Source adapter / renderer | 已完成 | 目录→DocumentRevision 适配 + bilingual & zh shadow renderer(与现格式逐字节一致,golden 验证;zh 复刻 extract_chinese 字段变换,#42) | `tasks/translation/src/core/renderer.py` |
 | Fixture/Golden 底座 | 已完成 | 合成脱敏 Pixiv/Fanbox fixture、golden document-revision/bilingual/zh、revision/segment ID pin 稳定性测试 | `tasks/translation/src/core/testdata/` |
 | 业务工件 Schema | 基础完成 | 八类工件 JSON Schema（新增 attestation）、validate/round-trip/stale-result 测试与 CLI 校验已落地；DocumentVersion 已升 v2(#50) | `tasks/translation/schemas/` |
 | Candidate 身份 / Artifact Store | 已落地(#52+#54) | Candidate v3 内容寻址 + Attestation；Sharded `ArtifactStore`（按文档分片 JSONL + put_many 原子批写 + 冲突/身份硬 gate + `verify_references`）；legacy/result importer 已走 store。仍待 #55 SQLite 只读投影 | `tasks/translation/src/core/artifact_store.py` / 系统设计 §2.7 |

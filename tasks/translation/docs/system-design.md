@@ -1145,7 +1145,7 @@ src/core/render/       # bilingual/zh/package renderers
 | 工件 Schema | 已完成 | revision/candidate-v3/evaluation/version-v2/annotation/task/result + attestation |
 | Fixture / Golden / ID 稳定性 | 已完成 | Pixiv/Fanbox 合成 fixture，回归基线的一部分（基线数字以 AGENTS.md 为准） |
 | DocumentRevision / Segment | 已完成 shadow path | 尚未替换生产 TXT 主路径 |
-| Renderer | 部分完成 | bilingual 已完成；zh 见 Issue #42 |
+| Renderer | 已完成 | bilingual 与 zh 均完成(#37/#42)，golden 逐字节验证 |
 | Legacy Candidate Import | 已完成 | 可幂等导入存量 bilingual（产出 v3 + attestation，写分片 store） |
 | Translate Task Export / Result Import | 已完成最小闭环 | 只支持无外部 context 的 translate job；export 时把源 revision 幂等入库,新文档 translate→import 闭环(#72) |
 | Candidate Deterministic QA | 已完成 | 只提供机械证据，不承担语义排名 |
@@ -1301,16 +1301,17 @@ Web UI 不应早于 candidate/version/annotation 模型稳定。
 
 已完成：保守 recommendation + DocumentVersion v2 + 从显式版本渲染 bilingual（#50）；Artifact Store +
 跨工件引用 validator + importer 接入（#52/#54）；executor harness instruction pack + adapter（#57）；
-translate-bundle/export-job 在生成 bundle 时把源 Revision 幂等入库，新文档 translate→import 闭环（#72）。
+translate-bundle/export-job 在生成 bundle 时把源 Revision 幂等入库，新文档 translate→import 闭环（#72）；
+zh renderer 复刻 extract_chinese 字段变换、golden 逐字节验证（#42）。
 下一阶段首先把「候选安全成为可发布版本」打通成真实文档的端到端闭环：
 
-1. 完成 Issue #42 的 zh renderer。
-2. 做一个真实文档的端到端 CLI demo：
+1. 做一个真实文档的端到端 CLI demo：
    source -> revision -> legacy/new candidates -> evaluations -> recommendation -> draft version -> bilingual/zh。
-3. 实现 current ref / 发布（原子 `refs/current.json`），把 DocumentVersion 推到发布物。
-4. 在该 vertical slice 上实现 annotation + 非破坏性 repair。
-5. version/repair 稳定后再做 scoped knowledge。
-6. 最后加入 SQLite 调度索引（Issue #55）、并发和 UI。
+2. 实现 current ref / 发布（原子 `refs/current.json`），把 DocumentVersion 推到发布物。
+3. 在该 vertical slice 上实现 annotation + 非破坏性 repair。
+4. version/repair 稳定后再做 scoped knowledge。
+5. 最后加入 SQLite 调度索引（Issue #55）、并发和 UI。
+（旁路技术债：统一工件 identity/integrity 验证协议 #77；可在 e2e demo 后做。）
 
 这比继续横向增加 schema 或 executor 更优：先证明端到端，再补索引和并发。
 
