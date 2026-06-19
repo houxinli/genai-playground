@@ -73,11 +73,9 @@ def evaluate_candidate(
 
     findings = _findings(source_text, candidate["text"])
     verdict = "fail" if any(f["severity"] == "error" for f in findings) else "pass"
-    # 同 id 必同内容(immutable 不变量);公式与 verify_evaluation_identity 共用 evaluation_id_for。
-    evaluation_id = evaluation_id_for(candidate["candidate_id"], EVALUATOR_VERSION, findings, created_at)
-    evaluation = {
+    # 同 id 必同内容(immutable 不变量);id 由除 evaluation_id 外全部字段派生,与 verify 共用 evaluation_id_for。
+    core = {
         "schema_version": 1,
-        "evaluation_id": evaluation_id,
         "candidate_id": candidate["candidate_id"],
         "evaluator": {"type": "rule", "name": EVALUATOR_NAME, "version": EVALUATOR_VERSION},
         "verdict": verdict,
@@ -85,6 +83,7 @@ def evaluate_candidate(
         "scores": {},
         "created_at": created_at,
     }
+    evaluation = {"evaluation_id": evaluation_id_for(core), **core}
     errors = validate_artifact("evaluation", evaluation)
     if errors:
         raise ValueError(f"built evaluation invalid: {errors}")

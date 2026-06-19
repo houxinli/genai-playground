@@ -156,15 +156,12 @@ def validate_candidate_identity(candidate: Dict[str, Any]) -> List[str]:
 VERSION_ID_HEX = 40
 
 
-def evaluation_id_for(candidate_id: str, evaluator_version: str, findings: Any, created_at: str) -> str:
-    """evaluation_id 内容寻址:同 (candidate, evaluator 版本, findings, created_at) → 同 id。"""
-    payload = {
-        "candidate_id": candidate_id,
-        "evaluator": evaluator_version,
-        "findings": findings,
-        "created_at": created_at,
-    }
-    return "eval_" + hashlib.sha256(canonical_dumps(payload).encode("utf-8")).hexdigest()[:16]
+def evaluation_id_for(core: Dict[str, Any]) -> str:
+    """evaluation_id 内容寻址:core = evaluation 除 evaluation_id 外的全部字段。
+
+    覆盖 verdict/scores/evaluator(type/name/version)/findings/created_at —— 任一变化都改 id,
+    避免语义 review(改 scores/verdict)在同一不可变 id 下悄悄改变含义。"""
+    return "eval_" + hashlib.sha256(canonical_dumps(core).encode("utf-8")).hexdigest()[:16]
 
 
 def version_id_for(content: Dict[str, Any]) -> str:
@@ -181,12 +178,8 @@ def verify_attestation_identity(attestation: Dict[str, Any]) -> List[str]:
 
 
 def verify_evaluation_identity(evaluation: Dict[str, Any]) -> List[str]:
-    expected = evaluation_id_for(
-        evaluation.get("candidate_id"),
-        evaluation.get("evaluator", {}).get("version"),
-        evaluation.get("findings"),
-        evaluation.get("created_at"),
-    )
+    core = {k: v for k, v in evaluation.items() if k != "evaluation_id"}
+    expected = evaluation_id_for(core)
     if evaluation.get("evaluation_id") != expected:
         return [f"evaluation_id 与内容不符: 声明 {evaluation.get('evaluation_id')} 实算 {expected}"]
     return []

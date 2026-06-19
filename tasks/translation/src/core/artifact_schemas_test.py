@@ -456,14 +456,13 @@ class CandidateIdentityValidationTest(unittest.TestCase):
 def _valid_evaluation():
     cand_id = candidate_id_v3(REV, SEG, HASH, CAND_TEXT)
     findings = [{"code": "kana_residue", "severity": "error", "message": "x"}]
-    created = "2026-06-12T00:00:01Z"
-    return {
+    core = {
         "schema_version": 1,
-        "evaluation_id": evaluation_id_for(cand_id, "qa-v2", findings, created),
         "candidate_id": cand_id,
         "evaluator": {"type": "rule", "name": "deterministic-qa", "version": "qa-v2"},
-        "verdict": "fail", "findings": findings, "scores": {}, "created_at": created,
+        "verdict": "fail", "findings": findings, "scores": {}, "created_at": "2026-06-12T00:00:01Z",
     }
+    return {"evaluation_id": evaluation_id_for(core), **core}
 
 
 def _valid_version():
@@ -505,6 +504,15 @@ class IdentityProtocolTest(unittest.TestCase):
         self.assertTrue(verify_artifact_identity("evaluation", ev))
         ver = _valid_version(); ver["status"] = "published"
         self.assertTrue(verify_artifact_identity("document-version", ver))
+
+    def test_evaluation_id_covers_scores_and_verdict(self):
+        # 语义 review 改 scores/verdict 但不改 id → 必须被抓(evaluation_id 覆盖全 payload)
+        ev = _valid_evaluation(); ev["scores"] = {"fluency": 0.9}
+        self.assertTrue(verify_artifact_identity("evaluation", ev))
+        ev2 = _valid_evaluation(); ev2["verdict"] = "pass"
+        self.assertTrue(verify_artifact_identity("evaluation", ev2))
+        ev3 = _valid_evaluation(); ev3["evaluator"] = dict(ev3["evaluator"], name="llm-judge")
+        self.assertTrue(verify_artifact_identity("evaluation", ev3))
 
     def test_revision_and_annotation_delegated_noop(self):
         # revision 身份在生产者/入库点守;annotation 无内容寻址 → 通用分发为 no-op
