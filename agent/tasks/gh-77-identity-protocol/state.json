@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-77-identity-protocol",
+  "title": "统一工件 identity/integrity 验证协议(收口散落的 verify_*)",
+  "status": "active",
+  "branch": "feat/identity-protocol",
+  "objective": "把散落各模块的 id 重算/身份校验收敛成统一协议:抽出共享 *_id_for(让 generate==verify,结构防漂移),加 verify_artifact_identity(kind, artifact) 分发,store 写入路径对每个工件都重算 id(今天只对 candidate)。来源:2026-06-17 复盘 + issue #77。",
+  "github": {
+    "issue": 77,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/artifact_schemas.py 加 evaluation_id_for/version_id_for + verify_attestation_identity/verify_evaluation_identity/verify_version_identity + verify_artifact_identity 分发",
+      "candidate_eval.py 用 evaluation_id_for;version_select.py 用 version_id_for(单一公式源)",
+      "artifact_store._validate 改为对所有 kind 调 verify_artifact_identity",
+      "对应 *_test.py:每类工件篡改 id → 写入拒绝;现有 builder 仍过",
+      "system-design 增一节登记验证协议"
+    ],
+    "out": [
+      "annotation 内容寻址(无确定性生成器,身份校验为 no-op)",
+      "verify_references 跨工件层(已存在,本任务不动其语义)",
+      "端到端 demo / current ref(后续)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "tasks/translation/src/core/artifact_schemas.py",
+      "purpose": "identity hub:canonical_digest/candidate_id_v3/validate_candidate_identity/attestation_id_for",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/artifact_store.py",
+      "purpose": "_validate 是写入唯一 gate;kind_of 推断;verify_references 跨工件层",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/source_identity.py",
+      "purpose": "verify_revision_identity(revision 身份);分发对 revision 懒导入避免循环",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "5/6 kind 内容寻址:抽共享 *_id_for,builder 与 verifier 共用同一公式",
+      "reason": "candidate/attestation/evaluation/revision/version 均由内容派生 id;把公式抽成单一函数,结构上杜绝 generate 与 verify 漂移(复盘核心教训)。annotation 无生成器 → 身份校验 no-op。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "verify_artifact_identity(kind, artifact) 分发置于 artifact_schemas;revision 分支懒导入 source_identity",
+      "reason": "artifact_schemas 是 identity hub 且无下游依赖;source_identity 依赖 artifact_schemas,故对 revision 懒导入避免循环。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "store._validate 对所有 kind 调 verify_artifact_identity(今天只 candidate)",
+      "reason": "结构性地让每次写入重算每个 id;这是 issue #77 的核心价值,杜绝'schema 合法但 id 与内容不符'落盘。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "artifact_schemas:*_id_for + per-kind verify + verify_artifact_identity 分发",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "5 类内容寻址 kind 各有 verifier,annotation no-op",
+        "单测:篡改 id 被各自 verifier 抓到"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "candidate_eval/version_select 改用共享 *_id_for(单一公式源)",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "builder 行为不变,id 仍确定性",
+        "现有测试绿"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "store._validate 对所有 kind 调 verify_artifact_identity + 测试",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "每类工件篡改 id → put_many 拒绝",
+        "现有写入测试绿"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "docs 同步(system-design 验证协议节) + 全量 pytest + 基线对齐",
+      "status": "completed",
+      "depends_on": [
+        "S2",
+        "S3"
+      ],
+      "acceptance": [
+        "pytest 全绿",
+        "AGENTS 基线一致",
+        "docs-drift + agent-validate 绿"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S4"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三联",
+        "PR 合并、main 收敛"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S5",
+    "instruction": "提交并开 PR closes #77,过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "review resolve",
+      "PR 合并、main 收敛"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "266 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 266)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260619T010000Z-claude-code",
+    "timestamp": "2026-06-19T01:00:00Z",
+    "agent": "claude-code",
+    "summary": "统一身份协议:*_id_for 共享 + verify_artifact_identity 分发 + store 全 kind 重算,266 全绿",
+    "observed_head": "bb3e96b"
+  },
+  "next_task": null
+}

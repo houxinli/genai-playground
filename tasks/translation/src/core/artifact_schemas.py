@@ -150,6 +150,70 @@ def validate_candidate_identity(candidate: Dict[str, Any]) -> List[str]:
     return errors
 
 
+# ---- 统一身份验证协议(#77)----------------------------------------------------
+# 内容寻址工件的 id 公式在此单一定义,builder 与 verifier 共用,结构上杜绝 generate/verify 漂移。
+
+VERSION_ID_HEX = 40
+
+
+def evaluation_id_for(core: Dict[str, Any]) -> str:
+    """evaluation_id 内容寻址:core = evaluation 除 evaluation_id 外的全部字段。
+
+    覆盖 verdict/scores/evaluator(type/name/version)/findings/created_at —— 任一变化都改 id,
+    避免语义 review(改 scores/verdict)在同一不可变 id 下悄悄改变含义。"""
+    return "eval_" + hashlib.sha256(canonical_dumps(core).encode("utf-8")).hexdigest()[:16]
+
+
+def version_id_for(content: Dict[str, Any]) -> str:
+    """version_id 内容寻址:content 为 DocumentVersion 除 version_id 外的全部不可变字段。"""
+    return "version_" + canonical_digest(content)[:VERSION_ID_HEX]
+
+
+def verify_attestation_identity(attestation: Dict[str, Any]) -> List[str]:
+    core = {k: v for k, v in attestation.items() if k not in ("schema_version", "attestation_id")}
+    expected = attestation_id_for(core)
+    if attestation.get("attestation_id") != expected:
+        return [f"attestation_id 与内容不符: 声明 {attestation.get('attestation_id')} 实算 {expected}"]
+    return []
+
+
+def verify_evaluation_identity(evaluation: Dict[str, Any]) -> List[str]:
+    core = {k: v for k, v in evaluation.items() if k != "evaluation_id"}
+    expected = evaluation_id_for(core)
+    if evaluation.get("evaluation_id") != expected:
+        return [f"evaluation_id 与内容不符: 声明 {evaluation.get('evaluation_id')} 实算 {expected}"]
+    return []
+
+
+def verify_version_identity(version: Dict[str, Any]) -> List[str]:
+    content = {k: v for k, v in version.items() if k != "version_id"}
+    expected = version_id_for(content)
+    if version.get("version_id") != expected:
+        return [f"version_id 与内容不符: 声明 {version.get('version_id')} 实算 {expected}"]
+    return []
+
+
+def verify_artifact_identity(kind: str, artifact: Dict[str, Any]) -> List[str]:
+    """统一身份验证分发:对内容寻址工件重算 id 并比对(schema 只验形状,这里验意义)。
+
+    覆盖 importer/policy 可手工组装、且错 id 会静默污染去重/引用的 kind:candidate / attestation /
+    evaluation / document-version。
+    - annotation:无确定性生成器(用户/外部 id)→ no-op;引用完整性由 verify_references 守。
+    - document-revision:唯一生产者是 source_identity.build_document_revision(构造即自洽),新文档
+      入库点 task_export.ingest_revision 已调 verify_revision_identity(#72);不在通用 store gate
+      重算(避免把 store 耦合到 adapter/segmentation 版本,也不强迫存量测试用真 revision)。
+    """
+    if kind == "candidate":
+        return validate_candidate_identity(artifact)
+    if kind == "attestation":
+        return verify_attestation_identity(artifact)
+    if kind == "evaluation":
+        return verify_evaluation_identity(artifact)
+    if kind == "document-version":
+        return verify_version_identity(artifact)
+    return []
+
+
 def check_result_against_task(task: Dict[str, Any], result: Dict[str, Any]) -> List[str]:
     """stale-result 防护(system-design §5.4):任一不匹配的结果必须进 quarantine。"""
     errors: List[str] = []

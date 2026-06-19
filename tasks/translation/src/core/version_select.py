@@ -13,15 +13,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 try:
-    from .artifact_schemas import canonical_digest, validate_artifact
+    from .artifact_schemas import validate_artifact, version_id_for
     from .renderer import render_bilingual
 except ImportError:  # core/ 在 sys.path 上
-    from artifact_schemas import canonical_digest, validate_artifact
+    from artifact_schemas import validate_artifact, version_id_for
     from renderer import render_bilingual
 
 
 POLICY_ID = "conservative-select-v1"
-_VERSION_ID_HEX = 40
 
 
 class UnresolvedSelectionError(Exception):
@@ -159,10 +158,6 @@ def recommend_selection(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [_recommend_segment(seg) for seg in segments]
 
 
-def _version_id(payload: Dict[str, Any]) -> str:
-    return "version_" + canonical_digest(payload)[:_VERSION_ID_HEX]
-
-
 def build_document_version(
     revision: Dict[str, Any],
     recommendations: List[Dict[str, Any]],
@@ -217,7 +212,7 @@ def build_document_version(
     }
     # version_id 覆盖除自身外的全部不可变 payload(含 created_at/policy_id/created_by),保证
     # id ↔ payload 一一对应,杜绝同 ID 不同 payload 写 ArtifactStore 时的 fatal 冲突。
-    version = {"version_id": _version_id(content), **content}
+    version = {"version_id": version_id_for(content), **content}
     errors = validate_artifact("document-version", version)
     if errors:
         raise ValueError(f"DocumentVersion v2 校验失败: {errors}")

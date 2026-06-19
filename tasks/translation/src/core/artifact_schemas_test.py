@@ -19,11 +19,14 @@ try:
         candidate_id_v3,
         canonical_digest,
         check_result_against_task,
+        evaluation_id_for,
         load_schema,
         main,
         normalize_text,
         validate_artifact,
         validate_candidate_identity,
+        verify_artifact_identity,
+        version_id_for,
     )
 except ImportError:  # unittest discover may import as top-level core.artifact_schemas_test
     from artifact_schemas import (
@@ -33,11 +36,14 @@ except ImportError:  # unittest discover may import as top-level core.artifact_s
         candidate_id_v3,
         canonical_digest,
         check_result_against_task,
+        evaluation_id_for,
         load_schema,
         main,
         normalize_text,
         validate_artifact,
         validate_candidate_identity,
+        verify_artifact_identity,
+        version_id_for,
     )
 
 
@@ -445,6 +451,73 @@ class CandidateIdentityValidationTest(unittest.TestCase):
         tampered = make_candidate()
         tampered["text"] = "完全不同的译文"  # id 没变 → schema 过、身份不过
         self.assertEqual(1, self._run_cli(tampered))
+
+
+def _valid_evaluation():
+    cand_id = candidate_id_v3(REV, SEG, HASH, CAND_TEXT)
+    findings = [{"code": "kana_residue", "severity": "error", "message": "x"}]
+    core = {
+        "schema_version": 1,
+        "candidate_id": cand_id,
+        "evaluator": {"type": "rule", "name": "deterministic-qa", "version": "qa-v2"},
+        "verdict": "fail", "findings": findings, "scores": {}, "created_at": "2026-06-12T00:00:01Z",
+    }
+    return {"evaluation_id": evaluation_id_for(core), **core}
+
+
+def _valid_version():
+    content = {
+        "schema_version": 2, "document_id": "pixiv:50235390:12430834", "revision_id": REV,
+        "parent_version_id": None, "knowledge_snapshot_id": None,
+        "selections": {SEG: candidate_id_v3(REV, SEG, HASH, CAND_TEXT)},
+        "selection_decisions": {SEG: {
+            "selected_by": "policy", "outcome": "select_challenger",
+            "reason_code": "initial_single_passing_candidate",
+            "incumbent_candidate_id": None, "evaluation_ids": [],
+        }},
+        "decision": {"policy_id": "conservative-select-v1", "created_by": "workflow"},
+        "status": "draft", "created_at": "2026-06-12T00:10:00Z",
+    }
+    return {"version_id": version_id_for(content), **content}
+
+
+class IdentityProtocolTest(unittest.TestCase):
+    """统一身份验证协议(#77):内容寻址工件 id 与内容自洽,篡改 id 必被抓。"""
+
+    def test_valid_artifacts_pass_identity(self):
+        self.assertEqual([], verify_artifact_identity("attestation", make_attestation()))
+        self.assertEqual([], verify_artifact_identity("evaluation", _valid_evaluation()))
+        self.assertEqual([], verify_artifact_identity("document-version", _valid_version()))
+        self.assertEqual([], verify_artifact_identity("candidate", make_candidate()))
+
+    def test_tampered_id_is_caught_per_kind(self):
+        att = make_attestation(); att["attestation_id"] = "att_" + "0" * 64
+        self.assertTrue(verify_artifact_identity("attestation", att))
+        ev = _valid_evaluation(); ev["evaluation_id"] = "eval_" + "0" * 12
+        self.assertTrue(verify_artifact_identity("evaluation", ev))
+        ver = _valid_version(); ver["version_id"] = "version_" + "0" * 40
+        self.assertTrue(verify_artifact_identity("document-version", ver))
+
+    def test_tampered_content_shifts_id_expectation(self):
+        # 改内容但不改 id → 身份不符(同 id 必同内容)
+        ev = _valid_evaluation(); ev["findings"] = []
+        self.assertTrue(verify_artifact_identity("evaluation", ev))
+        ver = _valid_version(); ver["status"] = "published"
+        self.assertTrue(verify_artifact_identity("document-version", ver))
+
+    def test_evaluation_id_covers_scores_and_verdict(self):
+        # 语义 review 改 scores/verdict 但不改 id → 必须被抓(evaluation_id 覆盖全 payload)
+        ev = _valid_evaluation(); ev["scores"] = {"fluency": 0.9}
+        self.assertTrue(verify_artifact_identity("evaluation", ev))
+        ev2 = _valid_evaluation(); ev2["verdict"] = "pass"
+        self.assertTrue(verify_artifact_identity("evaluation", ev2))
+        ev3 = _valid_evaluation(); ev3["evaluator"] = dict(ev3["evaluator"], name="llm-judge")
+        self.assertTrue(verify_artifact_identity("evaluation", ev3))
+
+    def test_revision_and_annotation_delegated_noop(self):
+        # revision 身份在生产者/入库点守;annotation 无内容寻址 → 通用分发为 no-op
+        self.assertEqual([], verify_artifact_identity("document-revision", make_revision()))
+        self.assertEqual([], verify_artifact_identity("annotation", make_annotation()))
 
 
 if __name__ == "__main__":
