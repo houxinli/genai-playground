@@ -101,6 +101,16 @@ class PutManyTest(unittest.TestCase):
             self.assertEqual(1, r2["kinds"]["candidate"]["skipped"])
             self.assertEqual(0, r2["kinds"]["attestation"]["written"])
 
+    def test_put_many_rejects_tampered_attestation_id(self):
+        # #77:store 写入 gate 对 attestation 也重算 id,篡改 id 必拒
+        with tempfile.TemporaryDirectory() as tmp:
+            store = astore.ArtifactStore(Path(tmp))
+            cand = make_candidate()
+            att = make_attestation(cand["candidate_id"])
+            att["attestation_id"] = "att_" + "0" * 64  # 与内容不符
+            with self.assertRaises(ValueError):
+                store.put_many(DOC, [make_revision(), cand, att])
+
     def test_shard_files_are_per_document(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = astore.ArtifactStore(Path(tmp))

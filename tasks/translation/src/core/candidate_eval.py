@@ -9,19 +9,18 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
 try:
-    from .artifact_schemas import canonical_dumps, validate_artifact, validate_candidate_identity
+    from .artifact_schemas import evaluation_id_for, validate_artifact, validate_candidate_identity
     from .qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana
     from .source_identity import _source_hash
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core.artifact_schemas import canonical_dumps, validate_artifact, validate_candidate_identity
+    from core.artifact_schemas import evaluation_id_for, validate_artifact, validate_candidate_identity
     from core.qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana
     from core.source_identity import _source_hash
 
@@ -74,14 +73,8 @@ def evaluate_candidate(
 
     findings = _findings(source_text, candidate["text"])
     verdict = "fail" if any(f["severity"] == "error" for f in findings) else "pass"
-    evaluation_id = "eval_" + hashlib.sha256(
-        canonical_dumps({
-            "candidate_id": candidate["candidate_id"],
-            "evaluator": EVALUATOR_VERSION,
-            "findings": findings,
-            "created_at": created_at,  # 纳入身份:同 id 必同内容(immutable 不变量)
-        }).encode("utf-8")
-    ).hexdigest()[:16]
+    # 同 id 必同内容(immutable 不变量);公式与 verify_evaluation_identity 共用 evaluation_id_for。
+    evaluation_id = evaluation_id_for(candidate["candidate_id"], EVALUATOR_VERSION, findings, created_at)
     evaluation = {
         "schema_version": 1,
         "evaluation_id": evaluation_id,

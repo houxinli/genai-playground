@@ -25,9 +25,19 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
-    from .artifact_schemas import canonical_dumps, validate_artifact, validate_candidate_identity
+    from .artifact_schemas import (
+        canonical_dumps,
+        validate_artifact,
+        validate_candidate_identity,
+        verify_artifact_identity,
+    )
 except ImportError:  # core/ 在 sys.path 上
-    from artifact_schemas import canonical_dumps, validate_artifact, validate_candidate_identity
+    from artifact_schemas import (
+        canonical_dumps,
+        validate_artifact,
+        validate_candidate_identity,
+        verify_artifact_identity,
+    )
 
 
 def _segment_by_id(revision: Dict[str, Any], segment_id: str) -> Optional[Dict[str, Any]]:
@@ -262,10 +272,10 @@ class ArtifactStore:
         errors = validate_artifact(kind, artifact)
         if errors:
             raise ValueError(f"{kind} schema invalid: {errors}")
-        if kind == "candidate":
-            id_errors = validate_candidate_identity(artifact)
-            if id_errors:
-                raise ValueError(f"candidate identity invalid: {id_errors}")
+        # 写入唯一 gate:对每个内容寻址工件重算 id 并比对(#77 统一身份协议),不只 candidate。
+        id_errors = verify_artifact_identity(kind, artifact)
+        if id_errors:
+            raise ValueError(f"{kind} identity invalid: {id_errors}")
 
     def put_many(
         self, document_id: str, artifacts: List[Dict[str, Any]], verify: bool = True
