@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-77-identity-protocol",
   "title": "统一工件 identity/integrity 验证协议(收口散落的 verify_*)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/identity-protocol",
   "objective": "把散落各模块的 id 重算/身份校验收敛成统一协议:抽出共享 *_id_for(让 generate==verify,结构防漂移),加 verify_artifact_identity(kind, artifact) 分发,store 写入路径对每个工件都重算 id(今天只对 candidate)。来源:2026-06-17 复盘 + issue #77。",
   "github": {
     "issue": 77,
-    "pull_request": null
+    "pull_request": 81
   },
   "scope": {
     "in": [
@@ -114,7 +114,7 @@
     {
       "id": "S5",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S4"
       ],
@@ -125,15 +125,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S5",
-    "instruction": "提交并开 PR closes #77,过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "review resolve",
-      "PR 合并、main 收敛"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -163,11 +155,15 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260619T010000Z-claude-code",
-    "timestamp": "2026-06-19T01:00:00Z",
+    "checkpoint_id": "cp-20260619T013000Z-claude-code",
+    "timestamp": "2026-06-19T01:30:00Z",
     "agent": "claude-code",
-    "summary": "统一身份协议:*_id_for 共享 + verify_artifact_identity 分发 + store 全 kind 重算,266 全绿",
-    "observed_head": "bb3e96b"
+    "summary": "任务完成:PR #81 squash 合并,issue #77 关闭,review P1(eval_id 全 payload)已修;next_task → #62",
+    "observed_head": "ef7431d"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 62,
+    "task_id": "gh-62-cleanup-derived-dirs",
+    "branch": "chore/cleanup-derived-dirs"
+  }
 }
