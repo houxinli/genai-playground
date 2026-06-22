@@ -201,5 +201,92 @@ class TaskExportTest(unittest.TestCase):
             self.assertEqual("pixiv:700000:700001", rev["document_id"])
 
 
+class ContextPackTest(unittest.TestCase):
+    ENTITY = {"source": "ユキ", "target": "小雪", "forbidden": ["雪"]}
+    TERM = {"source": "魔法", "target": "魔法"}
+
+    def test_bundle_carries_context_pack_with_derived_neighbors(self):
+        rev = _revision()
+        ids = _body_ids(rev)
+        bundle = te.export_job(rev, ids, terminology=[self.TERM], entities=[self.ENTITY])
+        pack = bundle["context_pack"]
+        self.assertEqual([self.ENTITY], pack["entities"])
+        self.assertEqual([self.TERM], pack["terminology"])
+        # 两个 body segment 互为邻句:首段有 next、末段有 prev
+        first, last = ids[0], ids[-1]
+        self.assertIn("next", pack["neighbors"][first])
+        self.assertIn("prev", pack["neighbors"][last])
+        self.assertNotIn("prev", pack["neighbors"][first])
+
+    def test_neighbors_use_full_body_order_even_for_subset(self):
+        # 只选末段,邻句仍能取到文档里它前面的 body 源句
+        rev = _revision()
+        ids = _body_ids(rev)
+        bundle = te.export_job(rev, [ids[-1]])
+        self.assertEqual(
+            rev["segments"][[s["segment_id"] for s in rev["segments"]].index(ids[0])]["source_text"],
+            bundle["context_pack"]["neighbors"][ids[-1]]["prev"],
+        )
+
+    def test_context_changes_task_id_and_is_deterministic(self):
+        rev = _revision()
+        ids = _body_ids(rev)
+        plain = te.export_job(rev, ids)["task"]["task_id"]
+        with_ent = te.export_job(rev, ids, entities=[self.ENTITY])["task"]["task_id"]
+        with_ent2 = te.export_job(rev, ids, entities=[self.ENTITY])["task"]["task_id"]
+        self.assertNotEqual(plain, with_ent)  # 上下文进身份
+        self.assertEqual(with_ent, with_ent2)  # 同上下文确定性
+
+    def test_entities_order_independent_identity(self):
+        rev = _revision()
+        ids = _body_ids(rev)
+        e2 = {"source": "マホ", "target": "真秀"}
+        a = te.export_job(rev, ids, entities=[self.ENTITY, e2])["task"]["task_id"]
+        b = te.export_job(rev, ids, entities=[e2, self.ENTITY])["task"]["task_id"]
+        self.assertEqual(a, b)  # entities 按 canonical 排序 → 与输入顺序无关
+
+    def test_no_context_bundle_round_trips_without_regression(self):
+        # 无 context 输入:bundle 仍带 context_pack(空约束),import_result 不读它 → 不回退
+        rev = _revision()
+        bundle = te.export_job(rev, _body_ids(rev))
+        self.assertEqual([], bundle["context_pack"]["entities"])
+        task = bundle["task"]
+        fake_tr = {"「おはよう」": "「早上好」", "今日はいい天気だ。": "今天天气真好。"}
+        result = {
+            "schema_version": 1, "task_id": task["task_id"], "task_digest": bundle["task_digest"],
+            "producer": {"type": "harness", "name": "claude-code", "model": None},
+            "candidates": [
+                {"result_candidate_key": "option-a", "segment_id": s["segment_id"],
+                 "source_hash": task["source_hashes"][s["segment_id"]], "text": fake_tr[s["source_text"]]}
+                for s in bundle["segments"]
+            ],
+            "findings": [], "recommended_candidate_keys": ["option-a"],
+            "completed_at": "2026-06-13T00:00:00Z",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ArtifactStore(Path(tmp))
+            te.ingest_revision(rev, store)
+            report = ri.import_result(task, result, store)
+            self.assertFalse(report["quarantined"], report)
+            self.assertEqual(len(bundle["segments"]), report["written"])
+
+    def test_export_job_still_rejects_external_refs(self):
+        rev = _revision(); ids = _body_ids(rev)
+        with self.assertRaises(ValueError):
+            te.export_job(rev, ids, knowledge_snapshot_id="knowledge_" + "a" * 16)
+
+    def test_malformed_constraints_fail_fast(self):
+        # 误传不能被静默吞掉:否则长 harness 跑出无约束译文却仍产出可导入 bundle
+        rev = _revision(); ids = _body_ids(rev)
+        with self.assertRaises(ValueError):  # 单个对象当数组
+            te.export_job(rev, ids, entities=self.ENTITY)
+        with self.assertRaises(ValueError):  # 缺 target
+            te.export_job(rev, ids, entities=[{"source": "ユキ"}])
+        with self.assertRaises(ValueError):  # 非对象项
+            te.export_job(rev, ids, terminology=["魔法"])
+        with self.assertRaises(ValueError):  # terminology 非数组
+            te.build_context_pack(rev, ids, terminology={"source": "x", "target": "y"})
+
+
 if __name__ == "__main__":
     unittest.main()
