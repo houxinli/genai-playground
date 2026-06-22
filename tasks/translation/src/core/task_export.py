@@ -115,6 +115,23 @@ def export_task(
     return task
 
 
+def _validate_constraints(items: Any, kind: str) -> None:
+    """约束必须是「对象数组」且每项含非空 source+target —— 否则 fail fast。
+
+    防止误传(单个对象当数组、拼错键导致 None)被静默吞掉:那会让长 harness 跑出**无约束**译文
+    却仍产出可导入 bundle(Codex #86 review)。"""
+    if items is None:
+        return
+    if not isinstance(items, list):
+        raise ValueError(f"context_pack.{kind} 必须是对象数组,得到 {type(items).__name__}")
+    for i, it in enumerate(items):
+        if not isinstance(it, dict):
+            raise ValueError(f"context_pack.{kind}[{i}] 必须是对象,得到 {type(it).__name__}")
+        missing = [k for k in ("source", "target") if not it.get(k)]
+        if missing:
+            raise ValueError(f"context_pack.{kind}[{i}] 缺必填字段 {missing}: {it}")
+
+
 def build_context_pack(
     revision: Dict[str, Any],
     segment_ids: List[str],
@@ -128,6 +145,8 @@ def build_context_pack(
     - neighbors 由 revision 的 body 顺序派生:每个被选 body segment 的前/后一条 body 源句(给跨句上下文,
       即便只翻子集)。metadata segment 不取邻句。
     """
+    _validate_constraints(terminology, "terminology")
+    _validate_constraints(entities, "entities")
     segs = _segments_by_id(revision)
     body_order = [s["segment_id"] for s in revision["segments"] if s["kind"] == "body"]
     body_index = {sid: i for i, sid in enumerate(body_order)}
@@ -257,6 +276,11 @@ def main() -> int:
     terminology = entities = None
     if args.context:
         ctx = json.loads(args.context.read_text(encoding="utf-8"))
+        if not isinstance(ctx, dict):
+            parser.error("--context 必须是 JSON 对象 {terminology?, entities?}")
+        unknown = sorted(set(ctx) - {"terminology", "entities"})
+        if unknown:
+            parser.error(f"--context 含未知顶层键 {unknown}(只允许 terminology/entities;防拼错被静默吞掉)")
         terminology = ctx.get("terminology")
         entities = ctx.get("entities")
 

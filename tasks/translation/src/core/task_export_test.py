@@ -275,6 +275,18 @@ class ContextPackTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             te.export_job(rev, ids, knowledge_snapshot_id="knowledge_" + "a" * 16)
 
+    def test_malformed_constraints_fail_fast(self):
+        # 误传不能被静默吞掉:否则长 harness 跑出无约束译文却仍产出可导入 bundle
+        rev = _revision(); ids = _body_ids(rev)
+        with self.assertRaises(ValueError):  # 单个对象当数组
+            te.export_job(rev, ids, entities=self.ENTITY)
+        with self.assertRaises(ValueError):  # 缺 target
+            te.export_job(rev, ids, entities=[{"source": "ユキ"}])
+        with self.assertRaises(ValueError):  # 非对象项
+            te.export_job(rev, ids, terminology=["魔法"])
+        with self.assertRaises(ValueError):  # terminology 非数组
+            te.build_context_pack(rev, ids, terminology={"source": "x", "target": "y"})
+
 
 if __name__ == "__main__":
     unittest.main()
