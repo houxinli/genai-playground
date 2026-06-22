@@ -638,6 +638,13 @@ accepted_previous_segments
 - 模型复读规则
 - context 成本不可控
 
+**已落地(2026-06-22,#83 P1a)**:translate job bundle 携带**最小内联 Context Pack**
+`{terminology, entities, neighbors}`——`terminology`/`entities` 由调用方提供的作用域约束列表
+(`entity={source,target,aliases?,forbidden?,scope?}`),`neighbors` 由 revision 的 body 顺序派生(前/后源句)。
+其 canonical digest 折入 Task 的 `context_digest`(上下文变 → task_id 变)。这是「只注相关上下文」的
+最小自包含形态;完整的 scoped Entity/Knowledge 库、Entity Linking 与 `knowledge_snapshot_id` 引用解析
+仍是 #83 P1b(见 §8)。
+
 ### 7.2 翻译后审计
 
 确定性审计检查：

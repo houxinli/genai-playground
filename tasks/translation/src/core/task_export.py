@@ -53,6 +53,7 @@ def export_task(
     knowledge_snapshot_id: Optional[str] = None,
     existing_candidate_ids: Optional[List[str]] = None,
     annotation_ids: Optional[List[str]] = None,
+    context_pack: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """构建一个 schema 合法的 Task。segment_ids 必须属于该 revision。"""
     segs = _segments_by_id(revision)
@@ -69,13 +70,15 @@ def export_task(
     existing = sorted(existing_candidate_ids or [])
     annotations = sorted(annotation_ids or [])
 
-    # context_digest:覆盖参与本 task 的源内容与约束,内容变即新 task。
+    # context_digest:覆盖参与本 task 的源内容、约束与 Context Pack,内容变即新 task。
+    # context_pack(术语/实体/邻句)影响译文,必须进身份(#77 纪律:语义输入不进身份会同 id 异义)。
     context_digest = canonical_digest({
         "revision_id": revision["revision_id"],
         "segments": [{"segment_id": sid, "source_text": segs[sid]["source_text"]} for sid in ordered],
         "task_type": task_type,
         "constraints": constraints,
         "knowledge_snapshot_id": knowledge_snapshot_id,
+        "context_pack": context_pack,
     })
     # task_id:由身份内容确定性派生 → 同一 job 重复导出稳定;覆盖所有影响执行语义的引用字段。
     task_id = "task_" + hashlib.sha256(
@@ -112,20 +115,62 @@ def export_task(
     return task
 
 
-def export_job(revision: Dict[str, Any], segment_ids: List[str], **kwargs: Any) -> Dict[str, Any]:
-    """自包含 job bundle:Task + 每个 segment 的源文本(执行器据此翻译)。
+def build_context_pack(
+    revision: Dict[str, Any],
+    segment_ids: List[str],
+    terminology: Optional[List[Dict[str, Any]]] = None,
+    entities: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """构建最小 Context Pack(#83 P1a):隔离执行器据此施加术语/实体硬约束并参考邻句。
+
+    - terminology / entities 由调用方提供(P1a 不建 Entity Store):各为约束列表,按 canonical 形排序
+      以保证 task 身份确定性。entity 形如 {source, target, aliases?, forbidden?, scope?}。
+    - neighbors 由 revision 的 body 顺序派生:每个被选 body segment 的前/后一条 body 源句(给跨句上下文,
+      即便只翻子集)。metadata segment 不取邻句。
+    """
+    segs = _segments_by_id(revision)
+    body_order = [s["segment_id"] for s in revision["segments"] if s["kind"] == "body"]
+    body_index = {sid: i for i, sid in enumerate(body_order)}
+    neighbors: Dict[str, Dict[str, str]] = {}
+    for sid in sorted(segment_ids):
+        if sid not in body_index:
+            continue
+        i = body_index[sid]
+        entry: Dict[str, str] = {}
+        if i > 0:
+            entry["prev"] = segs[body_order[i - 1]]["source_text"]
+        if i + 1 < len(body_order):
+            entry["next"] = segs[body_order[i + 1]]["source_text"]
+        if entry:
+            neighbors[sid] = entry
+    return {
+        "terminology": sorted(list(terminology or []), key=canonical_dumps),
+        "entities": sorted(list(entities or []), key=canonical_dumps),
+        "neighbors": neighbors,
+    }
+
+
+def export_job(
+    revision: Dict[str, Any],
+    segment_ids: List[str],
+    terminology: Optional[List[Dict[str, Any]]] = None,
+    entities: Optional[List[Dict[str, Any]]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """自包含 job bundle:Task + 每个 segment 的源文本 + Context Pack(执行器据此翻译)。
 
     task_digest 在 bundle 内给出,供执行器原样回填到 Result.task_digest,避免重算口径不一致。
-    目前只支持无外部引用的 translate task:review/compare/repair 及 knowledge_snapshot /
-    existing_candidate / annotation 需要把被引用工件的只读内容打进 bundle,待 context builder
-    (P1)完成后再开放——否则隔离执行器拿不到这些内容,bundle 并不自包含。
+    Context Pack(术语/实体/邻句,#83 P1a)内联进 bundle,折入 task 身份(见 export_task)。
+    仍只支持无外部引用的 translate task:knowledge_snapshot / existing_candidate / annotation 是对
+    外部工件的引用,需把被引内容打进 bundle 才自包含,留待 #83 P1b——否则隔离执行器拿不到内容。
     """
     if kwargs.get("task_type", "translate") != "translate":
-        raise ValueError("export_job 目前只支持 translate task(其它类型需 context builder)")
+        raise ValueError("export_job 目前只支持 translate task(其它类型需 #83 P1b context builder)")
     for ref in ("knowledge_snapshot_id", "existing_candidate_ids", "annotation_ids"):
         if kwargs.get(ref):
-            raise ValueError(f"export_job 暂不支持带 {ref} 的 job(需 context builder 打包被引用内容)")
-    task = export_task(revision, segment_ids, **kwargs)
+            raise ValueError(f"export_job 暂不支持带 {ref} 的 job(对外部工件的引用需 #83 P1b 打包)")
+    context_pack = build_context_pack(revision, segment_ids, terminology, entities)
+    task = export_task(revision, segment_ids, context_pack=context_pack, **kwargs)
     segs = _segments_by_id(revision)
     return {
         "task": task,
@@ -134,6 +179,7 @@ def export_job(revision: Dict[str, Any], segment_ids: List[str], **kwargs: Any) 
             {"segment_id": sid, "kind": segs[sid]["kind"], "source_text": segs[sid]["source_text"]}
             for sid in task["segment_ids"]
         ],
+        "context_pack": context_pack,
     }
 
 
@@ -184,6 +230,10 @@ def main() -> int:
         "--store", type=str, default=None,
         help="ArtifactStore 根目录;给定则把源 revision 幂等入库(import-result 闭环前置)",
     )
+    parser.add_argument(
+        "--context", type=Path, default=None,
+        help="可选 Context Pack 输入 JSON:{\"terminology\":[...],\"entities\":[...]};neighbors 自动派生",
+    )
     args = parser.parse_args()
 
     # 区分"未传"(None,不入库)与"传了空串"(明显误用,如 Make 漏传 STORE=)——空串不能静默落到 cwd。
@@ -204,9 +254,17 @@ def main() -> int:
             from core.artifact_store import ArtifactStore
         ingest_revision(revision, ArtifactStore(Path(args.store)))
 
+    terminology = entities = None
+    if args.context:
+        ctx = json.loads(args.context.read_text(encoding="utf-8"))
+        terminology = ctx.get("terminology")
+        entities = ctx.get("entities")
+
     # 默认导出全部可翻译段(body + metadata.*),否则 metadata 无候选会导致渲染缺译文
     segment_ids = args.segment or [s["segment_id"] for s in revision["segments"]]
-    bundle = export_job(revision, segment_ids, task_type=args.task_type)
+    bundle = export_job(
+        revision, segment_ids, terminology=terminology, entities=entities, task_type=args.task_type
+    )
     args.out.write_text(json.dumps(bundle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     store_note = f" store={args.store}" if args.store else ""
     print(f"task_id={bundle['task']['task_id']} segments={len(bundle['segments'])} out={args.out}{store_note}")

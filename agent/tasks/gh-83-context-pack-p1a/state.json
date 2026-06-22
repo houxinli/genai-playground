@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-83-context-pack-p1a",
+  "title": "Context Pack P1a:bundle 携带术语/实体/邻句约束",
+  "status": "active",
+  "branch": "feat/context-pack-p1a",
+  "objective": "实现 #83 P1a 最小可交付:build_context_pack(术语+作用域实体约束+派生邻句)内联进 job bundle,折入 task 身份(context_digest);export_job/translate-bundle 携带 context_pack;executor-instructions 改为消费 bundle 内 Context Pack。不做完整 Entity Store/Linking/SQLite/current ref/annotation。",
+  "github": {
+    "issue": 83,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/task_export.py 新增 build_context_pack;export_task 增 context_pack 入参并折入 context_digest;export_job 携带 context_pack 进 bundle;CLI/translate-bundle 支持 terminology/entities 输入",
+      "tasks/translation/src/core/task_export_test.py 测试:context_pack 结构/neighbors 派生/context 变 task_id 变/无 context 兼容/result import 不回退",
+      "tasks/translation/docs/executor-instructions.md 新增 Context Pack 节,L32 改为以 bundle.context_pack 为准",
+      "docs(PROJECT_STATUS 旧事实修正 + system-design §9/§20.2 注记)同 PR"
+    ],
+    "out": [
+      "完整 Entity/Knowledge 库 + Entity Linking + review queue(#83 P1b)",
+      "instruction-pack 资产化(#83 P1c)",
+      "knowledge_snapshot_id/existing_candidate_ids/annotation_ids 引用解析(仍拒绝;需 P1b 打包外部工件)",
+      "SQLite(#55)/current ref/annotation repair/#62 迁移",
+      "旧生产翻译主路径(translator.py/pipeline.py)改动"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "§7.1 Context Pack(只注相关上下文,禁全局词典)/§9.1 Task/§20.2 顺序",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/task_export.py",
+      "purpose": "export_task 已折 constraints/knowledge 入 context_digest+task_id;export_job 当前拒绝 context 引用、bundle 无 context_pack",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/docs/executor-instructions.md",
+      "purpose": "翻译规则写死(L29-37);L32 引用未携带的 glossary —— 改为消费 bundle.context_pack",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "Context Pack 是 bundle 内联载荷(同 segments),非新工件、不引外部 store;terminology/entities 调用方提供,neighbors 由 revision 派生",
+      "reason": "P1a 保持 bundle 自包含、隔离执行器拿得到全部上下文;不建 Entity Store(P1b)。entities 是作用域约束列表 {source,target,aliases?,forbidden?,scope?},不是被链接的实体记录。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "context_pack 的 canonical digest 折入 export_task 的 context_digest → context 变则 task_id 变",
+      "reason": "术语/实体影响译文,必须进 task 身份(#77 纪律:语义输入不进身份会导致同 id 不同含义)。bundle 携带完整 pack 供执行器(同 segments 不进 task 工件)。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "仍拒绝 knowledge_snapshot_id/existing_candidate_ids/annotation_ids",
+      "reason": "这些是对外部工件的引用,隔离执行器需把被引内容打进 bundle 才自包含(P1b)。P1a 只走内联 context_pack。",
+      "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "无 context 输入时 bundle 仍带 context_pack(terminology/entities 空,neighbors 派生);result import 不读 pack",
+      "reason": "向后兼容:旧调用零参数仍可导出;import_result 只取 task+result,bundle 多一个 key 不影响 → 不回退。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "build_context_pack + export_task 折入身份 + export_job 携带(测试先行)",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "context_pack={terminology,entities,neighbors};neighbors 由 revision 派生",
+        "context 变 → task_id 变;无 context 仍可导出",
+        "单测绿"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "CLI/translate-bundle 支持 terminology/entities 输入(可选 --context JSON)",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "可从文件提供 terminology/entities;不传则空",
+        "import-result 路径不变、不回退"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "executor-instructions Context Pack 节 + L32 改写;docs 旧事实修正 + §20.2 注记",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "执行器须读 bundle.context_pack 并用作硬约束",
+        "PROJECT_STATUS L188/L189 旧事实修正",
+        "system-design §9/§20.2 注记 P1a 已落"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "全量 pytest + 基线对齐 + docs-drift + agent-validate",
+      "status": "completed",
+      "depends_on": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "acceptance": [
+        "pytest 全绿(≥267)",
+        "AGENTS 基线与 docs-drift 一致",
+        "validate_agent_tasks 绿"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S4"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三联",
+        "PR 合并、main 收敛"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S5",
+    "instruction": "提交并开 PR(partially addresses #83 P1a),过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "review resolve",
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "273 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 273)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260622T010000Z-claude-code",
+    "timestamp": "2026-06-22T01:00:00Z",
+    "agent": "claude-code",
+    "summary": "Context Pack P1a:build_context_pack + 折入身份 + bundle 携带 + executor 消费 + CLI --context;273 全绿",
+    "observed_head": "40092ec"
+  },
+  "next_task": null
+}
