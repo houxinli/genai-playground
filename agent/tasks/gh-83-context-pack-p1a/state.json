@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-83-context-pack-p1a",
   "title": "Context Pack P1a:bundle 携带术语/实体/邻句约束",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/context-pack-p1a",
   "objective": "实现 #83 P1a 最小可交付:build_context_pack(术语+作用域实体约束+派生邻句)内联进 job bundle,折入 task 身份(context_digest);export_job/translate-bundle 携带 context_pack;executor-instructions 改为消费 bundle 内 Context Pack。不做完整 Entity Store/Linking/SQLite/current ref/annotation。",
   "github": {
     "issue": 83,
-    "pull_request": null
+    "pull_request": 86
   },
   "scope": {
     "in": [
@@ -124,7 +124,7 @@
     {
       "id": "S5",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S4"
       ],
@@ -135,15 +135,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S5",
-    "instruction": "提交并开 PR(partially addresses #83 P1a),过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "review resolve",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -173,11 +165,15 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260622T010000Z-claude-code",
-    "timestamp": "2026-06-22T01:00:00Z",
+    "checkpoint_id": "cp-20260622T020000Z-claude-code",
+    "timestamp": "2026-06-22T02:00:00Z",
     "agent": "claude-code",
-    "summary": "Context Pack P1a:build_context_pack + 折入身份 + bundle 携带 + executor 消费 + CLI --context;273 全绿",
-    "observed_head": "40092ec"
+    "summary": "任务完成:PR #86 squash 合并,#83 P1a 落地(Context Pack 进 bundle+身份),review 已修;#83 仍 OPEN(P1b/P1c 续)",
+    "observed_head": "c77d921"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 83,
+    "task_id": "gh-83-entity-store-p1b",
+    "branch": "feat/entity-store-p1b"
+  }
 }
