@@ -36,8 +36,13 @@ source -> revision -> legacy/new candidates -> evaluations
        -> conservative recommendation -> draft version -> bilingual/zh
 ```
 
-完整目标设计与 2026-06-13 实施检查点见
-[`tasks/translation/docs/system-design.md`](../tasks/translation/docs/system-design.md)。
+该数据平面 slice（身份→store→版本→保守选择→bilingual/zh）已完成。**下一步(2026-06-19 重排)：
+Knowledge/context-builder 层 #83 P1a**——最小 context-builder 让 bundle 携带 Context Pack(术语+
+作用域实体+邻句),它是翻译质量(人名一致性)的真正来源、harness 路径当前缺的上下文载体,且端到端
+demo 须带上下文才有意义。完整顺序以 system-design §20.2 为准;此处与 §20.2 一致。
+
+完整目标设计与实施检查点见
+[`tasks/translation/docs/system-design.md`](../tasks/translation/docs/system-design.md)（§20.2 接下来推荐顺序）。
 
 开发任务本身的跨会话上下文由 [`AGENT_WORKFLOW.md`](AGENT_WORKFLOW.md) 和 `agent/tasks/` 管理；
 它与翻译业务的 Agent job/result 协议是两层不同系统，不能共用状态文件。
@@ -233,7 +238,7 @@ source -> revision -> legacy/new candidates -> evaluations
 ### P2: API/Agent 双执行路线与知识一致性
 
 1. ~~实现 translate task/result 的 `export-job` / `import-result` 最小闭环~~（#44/#46）。
-2. 补 `validate-result`、context builder、job 目录和 review/repair task（context-builder 见 #83 P1a）。
+2. **context-builder + Context Pack（#83 P1a）已提前为 Current Focus 的下一步**（先于端到端 demo / current ref，见 §20.2）；本节 P2 仅保留其后的 `validate-result`、review/repair task。
 3. 为 Codex、Claude Code、Cursor 提供由同一 instruction pack 派生的薄适配。
 4. 建立 scoped entity store、knowledge snapshot、entity linking review 和规则影响分析（#83，取代 #61）。
 5. 将现有人工 name map 迁移为 locked entity translations，自动预读只进入 candidate（#83 播种，见 #62 迁移）。
