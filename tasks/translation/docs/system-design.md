@@ -1322,17 +1322,25 @@ Web UI 不应早于 candidate/version/annotation 模型稳定。
 跨工件引用 validator + importer 接入（#52/#54）；executor harness instruction pack + adapter（#57）；
 translate-bundle/export-job 在生成 bundle 时把源 Revision 幂等入库，新文档 translate→import 闭环（#72）；
 zh renderer 复刻 extract_chinese 字段变换、golden 逐字节验证（#42）。
-下一阶段首先把「候选安全成为可发布版本」打通成真实文档的端到端闭环：
+下一阶段把「候选安全成为可发布版本」打通成真实文档的端到端闭环。**2026-06-19 重排**：把
+Knowledge/context-builder 层（Issue #83）提前——它是质量(人名一致性)的真正来源、是 harness 路径
+当前缺的上下文载体，且取代了 #61 的「补单篇预读」定位；端到端 demo 也应带上下文才有意义。
 
-1. 做一个真实文档的端到端 CLI demo：
-   source -> revision -> legacy/new candidates -> evaluations -> recommendation -> draft version -> bilingual/zh。
-2. 实现 current ref / 发布（原子 `refs/current.json`），把 DocumentVersion 推到发布物。
-3. 在该 vertical slice 上实现 annotation + 非破坏性 repair。
-4. version/repair 稳定后再做 scoped knowledge。
-5. 最后加入 SQLite 调度索引（Issue #55）、并发和 UI。
-（统一工件 identity/integrity 验证协议 #77 已完成，见 §6.6。）
+1. **最小 context-builder（#83 P1a）**：术语 + 作用域实体 + 邻句 → Context Pack 进 bundle；放开
+   `export_job` 对应输入，executor 消费 Context Pack 而非写死规则。
+2. 真实文档端到端 CLI demo：source -> revision -> candidates -> evaluations -> recommendation ->
+   draft version -> bilingual/zh（带 Context Pack）。
+3. 实现 current ref / 发布（原子 `refs/current.json`），把 DocumentVersion 推到发布物。
+4. **Entity/Knowledge 库 + Entity Linking（#83 P1b）**：作用域实体、authority/status、review 队列；
+   **instruction-pack 资产化（#83 P1c）**：收敛 preface 变体、按 id 钉死、API/harness 共用。
+5. 在该 vertical slice 上实现 annotation + 非破坏性 repair。
+6. 入库迁移（#62 前置）跑通后顺带给知识库播种（legacy 人名规则 + `.names.md`）。
+7. 最后加入 SQLite 调度索引（Issue #55）、并发和 UI。
 
-这比继续横向增加 schema 或 executor 更优：先证明端到端，再补索引和并发。
+（统一工件 identity/integrity 验证协议 #77 已完成，见 §6.6；scoped knowledge 的目标设计见 §7–8，
+落地计划见 #83；#61「修单篇人名预读」已由 #83 取代。）
+
+这比继续横向增加 schema 或 executor 更优：先用上下文层把质量做实、证明端到端，再补索引和并发。
 
 ## 21. 建议 CLI
 

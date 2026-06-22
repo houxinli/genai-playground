@@ -80,7 +80,7 @@ source -> revision -> legacy/new candidates -> evaluations
 | 多候选与版本 | 已完成保守择优(#50) | `version_select.py`:recommend_selection 判定表 + build_document_version v2 + render_version 渲染 bilingual;硬规则只做 gate,未证明严格改善则保留 incumbent。current ref 发布与自动 repair/Annotation 仍未做 | `tasks/translation/src/core/version_select.py` / Issue #50 |
 | 翻译 Agent harness | 执行器就绪 | 共享 instruction pack + Claude skill / Cursor rule 薄适配 + `make translate-bundle`;SFW=Claude、NSFW=Cursor+Grok,同协议;context adapter(review/repair/knowledge)待实现 | `tasks/translation/docs/executor-instructions.md` |
 | 用户句级反馈 | 未实现 | 尚不能持久化“某句话有问题”并触发定向修复 | 目标见系统设计 |
-| 跨文本知识库 | 未实现 | 当前主要依赖人工规则文件和单篇自动预读 | 目标见系统设计 |
+| 跨文本知识库 | 未实现(设计中) | 当前主要依赖人工规则文件和单篇自动预读;目标 = Knowledge/Entity 库 + Entity Linking + context-builder | §7–8 / Issue #83 |
 | 并发调度 | 缺口明显 | 当前仍主要依赖手工并行，没有内建 worker 调度器 | `tasks/translation/src/core/pipeline.py` |
 | 测试 | 基线健康 | pytest 统跑全绿；基线数字唯一来源在 `AGENTS.md` §2，CI `docs-drift` 强制一致（unittest discover 会漏 pytest 风格用例） | `tasks/translation/src/**/*_test.py` |
 | Sunday Movies | 维护模式 | 仓库中保留，但当前不作为近期规划重点 | `tasks/sunday-movies/` |
@@ -189,9 +189,10 @@ source -> revision -> legacy/new candidates -> evaluations
   逐条修复依赖 P1 的 candidate/repair 闭环；报告见 `logs/inventory/qa_baseline.json`。
 - 当前没有用户 annotation 生命周期和句级定向重译入口。
 - 人名规则尚未实体化、作用域化和版本化，同名跨系列冲突仍需人工避免。
-- **人名预读（name-glossary pre-reading）质量差**（#61）：本地模型自动抽取的人名候选词表错漏多
-  （漏抽、错译、把普通词当人名、同名不统一），实测不可直接信任，仍需人工规则兜底；
-  待 P2 scoped entity store / locked entity translations（见 Development Plan P2.4–P2.5）系统性解决。
+- **人名预读（name-glossary pre-reading）质量差**：本地模型自动抽取的人名候选词表错漏多
+  （漏抽、错译、把普通词当人名、同名不统一），实测不可直接信任，仍需人工规则兜底。
+  根因是单篇、无根基、无作用域的启发式 → **由 #83（Knowledge/Entity 库 + Entity Linking +
+  context-builder）系统性取代**，#61 已关闭(打补丁定位作废)。
 - **历史派生目录待清理**（#62，gated 在 #54 之后）：`data/**` 下 `*_bilingual/*_fixed/*_zh/*_v2/*_namefix/*_trial`
   等多代中间产物冗余，须在内容完整迁入 Artifact Store 且通过 integrity gate 后再归档/删除。
 - 还没有内建的文件级并发调度器，批量任务提速仍依赖外部手动拆分。
@@ -232,10 +233,10 @@ source -> revision -> legacy/new candidates -> evaluations
 ### P2: API/Agent 双执行路线与知识一致性
 
 1. ~~实现 translate task/result 的 `export-job` / `import-result` 最小闭环~~（#44/#46）。
-2. 补 `validate-result`、context builder、job 目录和 review/repair task。
+2. 补 `validate-result`、context builder、job 目录和 review/repair task（context-builder 见 #83 P1a）。
 3. 为 Codex、Claude Code、Cursor 提供由同一 instruction pack 派生的薄适配。
-4. 建立 scoped entity store、knowledge snapshot、entity linking review 和规则影响分析（含 #61 人名预读质量修复）。
-5. 将现有人工 name map 迁移为 locked entity translations，自动预读只进入 candidate。
+4. 建立 scoped entity store、knowledge snapshot、entity linking review 和规则影响分析（#83，取代 #61）。
+5. 将现有人工 name map 迁移为 locked entity translations，自动预读只进入 candidate（#83 播种，见 #62 迁移）。
 
 > Housekeeping（#62）：历史派生目录清理/归档，硬性 gate 在 #54 完成且 integrity 校验无丢失之后执行。
 
