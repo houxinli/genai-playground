@@ -187,6 +187,19 @@ class ResolveTest(unittest.TestCase):
             self.assertEqual("houxinli", r["decided_by"])    # 决定保住
             self.assertEqual("approved", h.estore.list_scope(CREATOR)[0]["status"])  # 实体未降级
 
+    def test_promotion_keys_on_entity_state_not_reason(self):
+        # Codex #91:重导使 reason 从 new_candidate 翻成 low_confidence_match(因第一次建的候选现在命中),
+        # approve 仍应晋升那个自动候选(晋升取决于实体状态,不取决于可变 reason)
+        with tempfile.TemporaryDirectory() as tmp:
+            h = Harness(tmp)
+            out = h.imp([_proposal("マホ", target="真秀", confidence=0.9)])
+            rid = out[0]["review_id"]
+            out2 = h.imp([_proposal("マホ", target="真秀", confidence=0.3)])  # 命中刚建的候选 → 翻转
+            self.assertEqual(rid, out2[0]["review_id"])
+            self.assertEqual("low_confidence_match", h.queue.get(rid)["reason"])
+            resolve_review(rid, "approved", "houxinli", h.queue, h.estore, CTX)
+            self.assertEqual("approved", h.estore.list_scope(CREATOR)[0]["status"])  # 仍晋升
+
     def test_invalid_review_does_not_orphan_entity(self):
         # Codex #90 F3:review 不合法(context 非字符串)时不得遗留孤儿 candidate 实体
         with tempfile.TemporaryDirectory() as tmp:

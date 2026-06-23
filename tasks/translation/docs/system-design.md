@@ -726,8 +726,11 @@ entity linking 证据应保存：
 - `import_proposals`(**精确匹配** mention==source 或 ∈aliases):命中+低置信 / 命中+target 冲突 →
   入队;命中干净高置信 → no-op;未命中+有译名 → 建 `candidate`(automatic,creator scope)+ 入队;
   未命中无译名 → 入队(needs_target)。坏 proposal fail-fast。
-- `resolve_review`:approve → candidate 实体 status→approved(`--locked` 则 locked/manual);
-  dismiss → 实体保留 candidate(可审计"曾被拒")。CLI `entity-review import/list/approve/dismiss`。
+- `resolve_review`:approve **仅晋升「当前仍是 status=candidate & authority=automatic 的自动候选」**
+  (晋升取决于实体当前状态,不取决于可变的 review.reason)→ status→approved(`--locked` 则 locked/manual);
+  既有 approved/locked 实体绝不被 approve 改动(不降级 locked)。dismiss → 实体保留 candidate(可审计
+  "曾被拒")。已裁决的 review 重导不重开(幂等);review 校验在写实体前(不留孤儿候选)。
+  CLI `entity-review import/list/approve/dismiss`。
 
 Entity Linking 的自动抽取器、模糊/读音匹配、规则影响分析(§8.3)仍待做(#83 P1b-2b)。
 

@@ -200,17 +200,19 @@ def import_proposals(
     return out
 
 
-def _set_entity_status(entity_store: EntityStore, scope_ctx: Dict[str, Any], entity_id: str, status: str) -> bool:
-    """在可达 scope 内找到 entity_id 并置 status(晋升/锁定)。返回是否找到。"""
+def _find_entity(entity_store: EntityStore, scope_ctx: Dict[str, Any], entity_id: str) -> Optional[Dict[str, Any]]:
     for scope in _reachable_scopes(scope_ctx):
         for e in entity_store.list_scope(scope):
             if e["entity_id"] == entity_id:
-                e = dict(e)
-                e["status"] = status
-                e["authority"] = "approved" if status == "approved" else ("manual" if status == "locked" else e["authority"])
-                entity_store.put(e)
-                return True
-    return False
+                return e
+    return None
+
+
+def _set_entity_status(entity_store: EntityStore, entity: Dict[str, Any], status: str) -> None:
+    e = dict(entity)
+    e["status"] = status
+    e["authority"] = "approved" if status == "approved" else ("manual" if status == "locked" else e["authority"])
+    entity_store.put(e)
 
 
 def resolve_review(
@@ -229,13 +231,13 @@ def resolve_review(
     review = queue.get(review_id)
     if review is None:
         raise ValueError(f"review 不存在: {review_id}")
-    # 仅 new_candidate 的 candidate_entity_id 是「待晋升的新候选」;命中类(low_confidence_match/
-    # target_conflict)的 candidate_entity_id 指向**既有**实体(可能 locked),approve 绝不改它——
-    # 否则会悄悄降级 locked 规则(Codex #90)。命中类的纠正由人工另行编辑实体规则。
-    if decision == "approved" and review.get("reason") == "new_candidate" and review.get("candidate_entity_id"):
-        status = "locked" if locked else "approved"
-        if not _set_entity_status(entity_store, scope_ctx, review["candidate_entity_id"], status):
-            raise ValueError(f"approve 失败:candidate 实体 {review['candidate_entity_id']} 不在可达 scope")
+    # 晋升与否取决于「被指实体当前是否仍是可晋升的自动候选」(status=candidate & authority=automatic),
+    # 而非可变的 review.reason —— reason 会随重导在 new_candidate/low_confidence_match 间翻转(Codex #91)。
+    # 既有 approved/locked/manual 实体不被 approve 改动(不降级 locked,Codex #90 F1)。
+    if decision == "approved" and review.get("candidate_entity_id"):
+        entity = _find_entity(entity_store, scope_ctx, review["candidate_entity_id"])
+        if entity is not None and entity.get("status") == "candidate" and entity.get("authority") == "automatic":
+            _set_entity_status(entity_store, entity, "locked" if locked else "approved")
     review = dict(review)
     review["status"] = decision
     review["decided_by"] = decided_by
