@@ -253,6 +253,10 @@ def main() -> int:
         "--context", type=Path, default=None,
         help="可选 Context Pack 输入 JSON:{\"terminology\":[...],\"entities\":[...]};neighbors 自动派生",
     )
+    parser.add_argument(
+        "--entity-store", type=Path, default=None,
+        help="可选实体库根目录;按文档 scope 解析出现的实体喂 Context Pack(--context 手填为 override)",
+    )
     args = parser.parse_args()
 
     # 区分"未传"(None,不入库)与"传了空串"(明显误用,如 Make 漏传 STORE=)——空串不能静默落到 cwd。
@@ -286,6 +290,25 @@ def main() -> int:
 
     # 默认导出全部可翻译段(body + metadata.*),否则 metadata 无候选会导致渲染缺译文
     segment_ids = args.segment or [s["segment_id"] for s in revision["segments"]]
+
+    if args.entity_store:
+        try:
+            from .entity_store import resolve_entities
+        except ImportError:
+            from core.entity_store import resolve_entities
+        try:
+            from .entity_store import EntityStore
+        except ImportError:
+            from core.entity_store import EntityStore
+        src = revision["source"]
+        scope_ctx = {"provider": src["provider"], "creator_id": src["creator_id"],
+                     "document_id": revision["document_id"]}
+        text = "\n".join(s["source_text"] for s in revision["segments"])
+        resolved = resolve_entities(scope_ctx, text, EntityStore(args.entity_store))
+        # --context 手填为 override:同 source 以手填为准
+        manual_sources = {e.get("source") for e in (entities or [])}
+        merged = [e for e in resolved if e["source"] not in manual_sources] + list(entities or [])
+        entities = merged
     bundle = export_job(
         revision, segment_ids, terminology=terminology, entities=entities, task_type=args.task_type
     )

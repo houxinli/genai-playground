@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/houxinli/genai-playground/tasks/translation/schemas/entity.schema.json",
+  "title": "entity",
+  "description": "作用域实体记录(#83 P1b):人名/专名/术语的标准译名与坏译禁用,按 scope 解析。entity_id 由 scope+source 内容寻址稳定;记录可更新(update 语义),非不可变工件。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "entity_id",
+    "scope",
+    "source",
+    "target",
+    "type",
+    "authority",
+    "status",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "entity_id": {
+      "type": "string",
+      "pattern": "^entity_[0-9a-f]{16,64}$"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "key"
+      ],
+      "properties": {
+        "level": {
+          "enum": [
+            "global",
+            "provider",
+            "creator",
+            "series",
+            "document"
+          ]
+        },
+        "key": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ]
+        }
+      }
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "readings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "forbidden": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "type": {
+      "enum": [
+        "person",
+        "org",
+        "place",
+        "term"
+      ]
+    },
+    "authority": {
+      "enum": [
+        "manual",
+        "approved",
+        "automatic"
+      ]
+    },
+    "status": {
+      "enum": [
+        "locked",
+        "approved",
+        "candidate"
+      ]
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
