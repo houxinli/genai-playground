@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-83-entity-store-p1b",
   "title": "Entity 库 + scoped resolver(#83 P1b-1)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/entity-store-p1b",
   "objective": "新增 entity schema + scoped 实体库(entities/<level>/<key>.jsonl,update 语义,entity_id=hash(scope+source))+ resolve_entities(scope 特异性优先、locked 不被低权覆盖)+ 接 task_export(--entity-store 解析相关实体喂 Context Pack)+ 人工规则播种。不做 Entity Linking/review 队列(P1b-2)、instruction-pack(P1c)。",
   "github": {
     "issue": 83,
-    "pull_request": null
+    "pull_request": 88
   },
   "scope": {
     "in": [
@@ -141,7 +141,7 @@
     {
       "id": "S6",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S5"
       ],
@@ -152,15 +152,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S6",
-    "instruction": "提交并开 PR(partially addresses #83 P1b-1),过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "review resolve",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -190,11 +182,15 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260622T040000Z-claude-code",
-    "timestamp": "2026-06-22T04:00:00Z",
+    "checkpoint_id": "cp-20260622T050000Z-claude-code",
+    "timestamp": "2026-06-22T05:00:00Z",
     "agent": "claude-code",
-    "summary": "Entity 库 + scoped resolver + 播种 + 接 task_export;290 全绿,docs 同步",
-    "observed_head": "7daa7be"
+    "summary": "任务完成:PR #88 合并,#83 P1b-1 落地(scoped 实体库+resolver),2 条 review(防碰撞/series)已修;#83 仍 OPEN",
+    "observed_head": "672cdfb"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 83,
+    "task_id": "gh-83-entity-linking-p1b2",
+    "branch": "feat/entity-linking-p1b2"
+  }
 }
