@@ -93,6 +93,18 @@ class EntityStoreTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.put(bad)
 
+    def test_distinct_keys_do_not_collide(self):
+        # pixiv:a_b:c 与 pixiv:a:b_c 朴素消毒会撞同名 → 必须映射到不同分片且互不串读
+        with tempfile.TemporaryDirectory() as tmp:
+            store = EntityStore(Path(tmp))
+            s1 = {"level": "document", "key": "pixiv:a_b:c"}
+            s2 = {"level": "document", "key": "pixiv:a:b_c"}
+            self.assertNotEqual(store.shard_path(s1), store.shard_path(s2))
+            store.put(build_entity(s1, "ユキ", "甲"))
+            store.put(build_entity(s2, "ユキ", "乙"))
+            self.assertEqual("甲", store.list_scope(s1)[0]["target"])
+            self.assertEqual("乙", store.list_scope(s2)[0]["target"])
+
     def test_shard_path_is_scope_safe(self):
         store = EntityStore(Path("/tmp/ent"))
         self.assertEqual(Path("/tmp/ent/global/_global.jsonl"),
@@ -159,6 +171,13 @@ class ResolveTest(unittest.TestCase):
         store = self._store(_entity("creator", "pixiv:99999999", "ユキ", "雪子"))
         out = resolve_entities(PIXIV_CTX, "ユキ", store)
         self.assertEqual([], out)
+
+    def test_series_scope_resolved_only_when_series_in_ctx(self):
+        # 系列作用域规则只在 scope_ctx 带 series 时可达(否则像 CLI 漏传 series 一样静默失效)
+        store = self._store(_entity("series", "pixiv:50235390:S1", "ユキ", "小雪"))
+        self.assertEqual("小雪", resolve_entities(PIXIV_CTX, "ユキ", store)[0]["target"])
+        no_series = {k: v for k, v in PIXIV_CTX.items() if k != "series"}
+        self.assertEqual([], resolve_entities(no_series, "ユキ", store))
 
 
 class SeedTest(unittest.TestCase):

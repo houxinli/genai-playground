@@ -303,6 +303,10 @@ def main() -> int:
         src = revision["source"]
         scope_ctx = {"provider": src["provider"], "creator_id": src["creator_id"],
                      "document_id": revision["document_id"]}
+        # 系列作用域:revision 只保留 series_title(身份不含 series.id),以其作 series key 的判别。
+        series_title = revision.get("metadata", {}).get("series_title")
+        if series_title:
+            scope_ctx["series"] = series_title
         text = "\n".join(s["source_text"] for s in revision["segments"])
         resolved = resolve_entities(scope_ctx, text, EntityStore(args.entity_store))
         # --context 手填为 override:同 source 以手填为准
