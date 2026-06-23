@@ -234,7 +234,7 @@ agent-bootstrap:
 
 
 # ============ 候选导入(新架构) ============
-.PHONY: legacy-import import-result export-job translate-bundle seed-entities
+.PHONY: legacy-import import-result export-job translate-bundle seed-entities entity-review-import entity-review-list entity-review-approve entity-review-dismiss
 
 # revision → job bundle(供执行器消费)。用法: make export-job REVISION=rev.json OUT=job.json STORE=...
 # STORE 必传(闭环前置):同步把源 revision 幂等入库,import-result 才解析得到 revision shard。
@@ -251,6 +251,19 @@ translate-bundle:
 # 人工规则 → 实体库播种。用法: make seed-entities ENTITY_STORE=... LEVEL=creator KEY=pixiv:50235390 RULES=rules.txt
 seed-entities:
 	$(PY) tasks/translation/src/core/entity_store.py --store "$(ENTITY_STORE)" --scope-level "$(LEVEL)" $(if $(KEY),--scope-key "$(KEY)") --rules "$(RULES)" $(if $(STATUS),--status $(STATUS))
+
+# Entity Linking review 队列(#83 P1b-2)。抽取(外部)产 PROPOSALS JSON → 链接入队 → 人工裁决。
+# 导入: make entity-review-import PROPOSALS=p.json ENTITY_STORE=... QUEUE=... DOCUMENT=pixiv:50235390:12430834
+entity-review-import:
+	$(PY) tasks/translation/src/core/entity_review.py import --proposals "$(PROPOSALS)" --entity-store "$(ENTITY_STORE)" --queue "$(QUEUE)" --document "$(DOCUMENT)" $(if $(THRESHOLD),--threshold $(THRESHOLD))
+# 列待裁决: make entity-review-list QUEUE=...
+entity-review-list:
+	$(PY) tasks/translation/src/core/entity_review.py list --queue "$(QUEUE)"
+# 裁决: make entity-review-approve REVIEW_ID=... ENTITY_STORE=... QUEUE=... DOCUMENT=... BY=houxinli [LOCKED=1]
+entity-review-approve:
+	$(PY) tasks/translation/src/core/entity_review.py approve --review-id "$(REVIEW_ID)" --entity-store "$(ENTITY_STORE)" --queue "$(QUEUE)" --document "$(DOCUMENT)" --by "$(BY)" $(if $(LOCKED),--locked)
+entity-review-dismiss:
+	$(PY) tasks/translation/src/core/entity_review.py dismiss --review-id "$(REVIEW_ID)" --entity-store "$(ENTITY_STORE)" --queue "$(QUEUE)" --document "$(DOCUMENT)" --by "$(BY)"
 
 # 存量 bilingual → legacy candidate。用法: make legacy-import PROVIDER=fanbox SOURCE=... BILINGUAL=... LABEL=... STORE=...
 legacy-import:
