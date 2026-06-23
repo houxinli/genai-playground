@@ -28,6 +28,7 @@ ARTIFACT_KINDS = (
     "document-version",
     "annotation",
     "entity",
+    "entity-review",
     "task",
     "result",
 )

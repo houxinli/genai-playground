@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-83-entity-linking-p1b2",
+  "title": "Entity Linking 闸门 + review 队列(#83 P1b-2a)",
+  "status": "active",
+  "branch": "feat/entity-linking-p1b2",
+  "objective": "造「抽取结果 → 链接 → 候选实体 → review 队列 → 晋升」闸门(抽取外部,系统性回避 #61:输出不被信任、过 review 才晋升)。entity-review 工件 + import_proposals(精确 source/alias 匹配)+ ReviewQueue(update 语义)+ review CLI。不做抽取器/模糊匹配/影响分析(P1b-2b)/instruction-pack(P1c)。",
+  "github": {
+    "issue": 83,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/schemas/entity-review.schema.json + ARTIFACT_KINDS + make_entity_review fixture",
+      "tasks/translation/src/core/entity_review.py:review_id_for/ReviewQueue(update 语义+身份/字段 gate)/import_proposals(精确匹配决策树)/promote+dismiss",
+      "tasks/translation/src/core/entity_review_test.py",
+      "review CLI(import-proposals / list / approve[--locked] / dismiss)+ Makefile 目标",
+      "docs(§8.2 注记)+ 基线"
+    ],
+    "out": [
+      "名字抽取器本身(外部 producer,输入 proposals JSON)",
+      "模糊/读音匹配(精确起步)",
+      "规则影响分析 §8.3(#83 P1b-2b)",
+      "instruction-pack(#83 P1c);SQLite/UI"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "§8.2 Entity Linking 步骤与证据字段 / §7 authority-status",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/entity_store.py",
+      "purpose": "复用 _reachable_scopes/_pick_winner/build_entity/EntityStore;实体 status 晋升",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "P1b-2a 只造闸门;抽取外部(输入 proposals,任意 producer)",
+      "reason": "#61 解法是'输出当不可信候选过 review',不是把抽取器做准;复用 producer 中立纪律,测试用数据无需 LLM。用户确认。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "精确匹配:mention==entity.source 或 ∈aliases 才命中(可达 scope 链),不模糊",
+      "reason": "起步避免误匹配;读音/别名模糊留 later。用户确认。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "决策树:命中+低置信→review;命中+target 冲突→review;命中干净→no-op;未命中+有译名→建 candidate(automatic,creator scope)+review;未命中无译名→review(needs_target)",
+      "reason": "candidate 状态 = 不可信,必须人工 review 才晋升(§8.2 step5/6);干净高置信命中无需排队。",
+      "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "review_id 内容寻址 over proposal 本质(mention,document_id,segment_id,suggested_target);status/decided_by 可变(update 语义)",
+      "reason": "同 proposal 重导幂等;resolution 是状态转移(approve/dismiss)更新同 id 记录。",
+      "status": "active"
+    },
+    {
+      "id": "D5",
+      "summary": "approve→对应 candidate 实体 status candidate→approved(--locked 则 locked);dismiss→实体保留 candidate、review 标 dismissed",
+      "reason": "显式状态转移、可审计'曾被拒';不静默改 locked(Codex/#77 纪律)。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "entity-review schema + ARTIFACT_KINDS/fixture + review_id_for",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "schema round-trip 绿",
+        "review_id 稳定"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "ReviewQueue(update 语义 + 身份/字段 gate) + import_proposals 决策树 + 测试",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "决策树每分支有测试",
+        "幂等重导",
+        "fail-fast 坏 proposal"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "promote/dismiss + review CLI + 播种/导入 CLI + Makefile",
+      "status": "completed",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "approve 晋升实体 status",
+        "dismiss 保留 candidate",
+        "CLI smoke"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "docs(§8.2 注记)+ 全量 pytest + 基线 + drift + agent-validate",
+      "status": "completed",
+      "depends_on": [
+        "S2",
+        "S3"
+      ],
+      "acceptance": [
+        "pytest 全绿",
+        "基线一致",
+        "drift+validate 绿"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S4"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三联",
+        "PR 合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S5",
+    "instruction": "提交并开 PR(partially addresses #83 P1b-2a),过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "review resolve",
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "304 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 304)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260622T070000Z-claude-code",
+    "timestamp": "2026-06-22T07:00:00Z",
+    "agent": "claude-code",
+    "summary": "Entity Linking 闸门 + review 队列 + 决策树 + 晋升 + CLI;304 全绿,docs 同步",
+    "observed_head": "cbca1eb"
+  },
+  "next_task": null
+}

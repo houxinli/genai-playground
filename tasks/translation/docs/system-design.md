@@ -719,6 +719,18 @@ entity linking 证据应保存：
 - 上下文摘要
 - reviewer 决策
 
+**已落地(2026-06-22,#83 P1b-2a)**:`entity_review.py` 造「抽取结果 → 链接 → 候选实体 → review
+队列 → 晋升」闸门;**抽取本身是外部 producer**(输入 proposals,不在此跑 LLM)——#61 的正确解法是
+把抽取输出当**不可信候选**经 review 才晋升,而非把抽取器做准。
+- `entity-review` 工件(队列项)+ `ReviewQueue`(update 语义,review_id 内容寻址幂等)。
+- `import_proposals`(**精确匹配** mention==source 或 ∈aliases):命中+低置信 / 命中+target 冲突 →
+  入队;命中干净高置信 → no-op;未命中+有译名 → 建 `candidate`(automatic,creator scope)+ 入队;
+  未命中无译名 → 入队(needs_target)。坏 proposal fail-fast。
+- `resolve_review`:approve → candidate 实体 status→approved(`--locked` 则 locked/manual);
+  dismiss → 实体保留 candidate(可审计"曾被拒")。CLI `entity-review import/list/approve/dismiss`。
+
+Entity Linking 的自动抽取器、模糊/读音匹配、规则影响分析(§8.3)仍待做(#83 P1b-2b)。
+
 ### 8.3 Knowledge Snapshot
 
 每个 translation task 固定 `knowledge_snapshot_id`。后续规则变化不会悄悄改变旧版本的含义。

@@ -185,6 +185,26 @@ def make_entity():
     }
 
 
+def make_entity_review():
+    # 仅必填字段(可选 candidate_entity_id/segment_id/... 在 entity_review_test 覆盖):共享测试 pop
+    # 字母序最前非 schema_version 字段并期望被拒,故最前须为必填(confidence)。
+    try:
+        from .entity_review import review_id_for
+    except ImportError:
+        from entity_review import review_id_for
+    doc = "pixiv:50235390:12430834"
+    return {
+        "schema_version": 1,
+        "review_id": review_id_for("ユキ", doc, None, "小雪"),
+        "mention": "ユキ",
+        "document_id": doc,
+        "confidence": 0.5,
+        "reason": "low_confidence_match",
+        "status": "pending",
+        "created_at": "2026-06-22T00:00:00Z",
+    }
+
+
 def make_task():
     return {
         "schema_version": 1,
@@ -226,6 +246,7 @@ def make_result():
 
 FIXTURES = {
     "entity": make_entity,
+    "entity-review": make_entity_review,
     "document-revision": make_revision,
     "candidate": make_candidate,
     "attestation": make_attestation,
