@@ -685,6 +685,20 @@ series:B/entity:character_07 -> 由纪
 
 不能写成无作用域的全局 `ユキ=雪`。
 
+**已落地(2026-06-22,#83 P1b-1)**:`entity_store.py` 提供 scoped 实体库与 resolver。
+- **entity 工件**(`schemas/entity.schema.json`):`{entity_id, scope:{level,key}, source, readings?, target,
+  aliases?, forbidden?, type, authority, status, updated_at}`;`entity_id = hash(scope+source)` 稳定,
+  记录**可更新**(update 语义,非不可变工件——可复现性由 task 端冻结 Context Pack 保证)。
+- **EntityStore**:按 scope 分片 `entities/<level>/<key>.jsonl`,**独立于** per-document Artifact Store;
+  写入校验 schema + `entity_id==hash(scope+source)` + 字段 fail-fast。
+- **resolve_entities(scope_ctx, text, store)**:展开可达 scope 链(global→…→document),按
+  **scope 特异性优先、`locked` 不被更具体作用域里非 locked/非 manual 记录覆盖**选胜出者;只注入
+  source/alias 在文档源文出现的实体(§7.1「只注相关」),产出 §7.1 Context Pack 的 entity 约束。
+- **播种**:`entity_store.py` CLI 从**人工 curated 规则**(`源=译名|坏译` 或 JSON,`authority=manual`)
+  建实体;**不导入自动 namefix 报告**(实测是垃圾,正是 #61 不可信根源)。
+
+Entity Linking 自动预分析、review 队列、规则影响分析(§8.2/§8.3)仍是 #83 P1b-2。
+
 ### 8.2 Entity Linking
 
 新文档预分析时：

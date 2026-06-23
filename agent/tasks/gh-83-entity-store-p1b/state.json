@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-83-entity-store-p1b",
+  "title": "Entity 库 + scoped resolver(#83 P1b-1)",
+  "status": "active",
+  "branch": "feat/entity-store-p1b",
+  "objective": "新增 entity schema + scoped 实体库(entities/<level>/<key>.jsonl,update 语义,entity_id=hash(scope+source))+ resolve_entities(scope 特异性优先、locked 不被低权覆盖)+ 接 task_export(--entity-store 解析相关实体喂 Context Pack)+ 人工规则播种。不做 Entity Linking/review 队列(P1b-2)、instruction-pack(P1c)。",
+  "github": {
+    "issue": 83,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/schemas/entity.schema.json 新增;ARTIFACT_KINDS + make_entity fixture",
+      "tasks/translation/src/core/entity_store.py 新增:entity_id_for/EntityStore(scoped 分片 update 语义 + 身份/字段 gate)/resolve_entities",
+      "tasks/translation/src/core/entity_store_test.py 新增",
+      "task_export CLI --entity-store:按文档 scope 解析相关实体,合并 --context(手填为 override)喂 Context Pack",
+      "人工规则播种 CLI(source=target|forbidden / JSON → authority=manual);docs(§8 注记)+ 基线"
+    ],
+    "out": [
+      "Entity Linking 自动预分析 / review 队列 / 规则影响分析(#83 P1b-2)",
+      "instruction-pack 资产化(#83 P1c)",
+      "把 entity 塞进 per-document Artifact Store(实体跨文档,单独 scoped 库)",
+      "自动 namefix 报告导入(垃圾,不可信,#61);SQLite/current ref"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "§7 实体记录字段/优先级 / §7.1 只注相关 / §8.2 linking / §8.3 snapshot",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/task_export.py",
+      "purpose": "build_context_pack/export_job 的 entities 形状 {source,target,aliases?,forbidden?,scope?};CLI 接 --entity-store",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/artifact_store.py",
+      "purpose": "原子写 + 分片 + 身份 gate 范式(实体库自建,不复用 per-document store)",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "轻身份模型:entity_id 稳定(=hash(scope+source)),记录可更新(update 语义),不做全量 append 历史",
+      "reason": "可复现性已由 P1a 把 resolved entities 冻结进 task Context Pack/身份保证;故实体库只需当前态。用户确认。审计译名演化是 nice-to-have(git 管种子),P1b-1 不做。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "实体库单独 scoped 分片 entities/<level>/<key>.jsonl,不进 per-document Artifact Store",
+      "reason": "实体跨文档(scoped 到 creator/series/global),不适配按 document_id 的分片;#77 的 hash(全部内容)硬 gate 是给不可变工件的,可更新记录用自有 gate(校验 entity_id==hash(scope+source) + 字段 fail-fast)。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "resolve 优先级:scope 特异性优先(document>series>creator>provider>global),locked 不被更具体作用域的低权覆盖(除非后者 authority=manual 显式 override)",
+      "reason": "用户选定。同名跨系列由 scope.key 区分。每 (scope,source) 至多一条记录(entity_id 唯一)→ 候选每 scope 至多一条。",
+      "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "P1b-1 不做 mention 检测;按文档源文 substring 过滤可达 scope 实体(只注相关,§7.1)",
+      "reason": "无 NER 也能实现「只注相关」:实体 source/alias 出现在文档源文才注入,避免全局词典塞 prompt。",
+      "status": "active"
+    },
+    {
+      "id": "D5",
+      "summary": "播种只从人工 curated 规则(source=target|forbidden / JSON,authority=manual);不导入自动 namefix 报告",
+      "reason": "实测自动报告 name_map 是垃圾(メイド→首先),正是 #61 不可信根源;实体库须从人工规则起种。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "entity schema + ARTIFACT_KINDS/fixture + entity_id_for",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "schema 校验 + round-trip 绿",
+        "entity_id_for 稳定(同 scope+source 同 id)"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "EntityStore:scoped 分片 + put(update 语义 + 身份/字段 gate) + list_scope",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "同 entity_id 更新覆盖",
+        "篡改 entity_id/缺字段 fail-fast",
+        "原子写"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "resolve_entities(scope 特异性 + locked 规则 + 源文相关过滤)+ 测试",
+      "status": "completed",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "跨 scope 优先级规则有测试",
+        "只注源文出现的实体",
+        "产出 Context Pack entity 形状"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "task_export CLI --entity-store + 人工规则播种 CLI",
+      "status": "completed",
+      "depends_on": [
+        "S3"
+      ],
+      "acceptance": [
+        "--entity-store 解析喂 Context Pack;--context 手填为 override",
+        "种子 CLI 从人工规则建 manual 实体"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "docs(§8 注记)+ 全量 pytest + 基线 + docs-drift + agent-validate",
+      "status": "completed",
+      "depends_on": [
+        "S3",
+        "S4"
+      ],
+      "acceptance": [
+        "pytest 全绿",
+        "基线一致",
+        "drift + agent-validate 绿"
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S5"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三联",
+        "PR 合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S6",
+    "instruction": "提交并开 PR(partially addresses #83 P1b-1),过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "review resolve",
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "290 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 290)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260622T040000Z-claude-code",
+    "timestamp": "2026-06-22T04:00:00Z",
+    "agent": "claude-code",
+    "summary": "Entity 库 + scoped resolver + 播种 + 接 task_export;290 全绿,docs 同步",
+    "observed_head": "7daa7be"
+  },
+  "next_task": null
+}

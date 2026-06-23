@@ -164,6 +164,27 @@ def make_annotation():
     }
 
 
+def make_entity():
+    scope = {"level": "creator", "key": "pixiv:50235390"}
+    try:
+        from .entity_store import entity_id_for
+    except ImportError:
+        from entity_store import entity_id_for
+    # 仅必填字段(可选 readings/aliases/forbidden 在 entity_store_test 覆盖):共享测试会 pop
+    # 字母序最前的非 schema_version 字段并期望被拒,故 fixture 的最前字段须为必填(authority)。
+    return {
+        "schema_version": 1,
+        "entity_id": entity_id_for(scope, "ユキ"),
+        "scope": scope,
+        "source": "ユキ",
+        "target": "小雪",
+        "type": "person",
+        "authority": "manual",
+        "status": "locked",
+        "updated_at": "2026-06-22T00:00:00Z",
+    }
+
+
 def make_task():
     return {
         "schema_version": 1,
@@ -204,6 +225,7 @@ def make_result():
 
 
 FIXTURES = {
+    "entity": make_entity,
     "document-revision": make_revision,
     "candidate": make_candidate,
     "attestation": make_attestation,

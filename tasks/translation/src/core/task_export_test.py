@@ -275,6 +275,31 @@ class ContextPackTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             te.export_job(rev, ids, knowledge_snapshot_id="knowledge_" + "a" * 16)
 
+    def test_resolved_entities_from_store_feed_bundle(self):
+        # 实体库 → resolve(只注出现的)→ export_job → bundle.context_pack.entities,且折入 task 身份
+        try:
+            from .entity_store import EntityStore, build_entity, resolve_entities
+        except ImportError:
+            from entity_store import EntityStore, build_entity, resolve_entities
+        rev = _revision()
+        ids = _body_ids(rev)
+        src = rev["source"]
+        scope = {"level": "creator", "key": f"{src['provider']}:{src['creator_id']}"}
+        text = "\n".join(s["source_text"] for s in rev["segments"])
+        present = next(iter(text)) if text else "あ"
+        with tempfile.TemporaryDirectory() as tmp:
+            store = EntityStore(Path(tmp))
+            store.put(build_entity(scope, present, "X译", forbidden=["坏译"], status="locked"))
+            store.put(build_entity(scope, "不出现的名字ZZZ", "Y译"))
+            scope_ctx = {"provider": src["provider"], "creator_id": src["creator_id"],
+                         "document_id": rev["document_id"]}
+            resolved = resolve_entities(scope_ctx, text, store)
+            self.assertEqual(["X译"], [e["target"] for e in resolved])  # 只注出现的
+            plain = te.export_job(rev, ids)["task"]["task_id"]
+            with_ent = te.export_job(rev, ids, entities=resolved)
+            self.assertEqual(resolved, with_ent["context_pack"]["entities"])
+            self.assertNotEqual(plain, with_ent["task"]["task_id"])  # 解析结果进身份
+
     def test_malformed_constraints_fail_fast(self):
         # 误传不能被静默吞掉:否则长 harness 跑出无约束译文却仍产出可导入 bundle
         rev = _revision(); ids = _body_ids(rev)
