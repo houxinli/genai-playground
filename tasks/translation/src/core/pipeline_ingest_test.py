@@ -90,7 +90,7 @@ class PipelineIngestTest(unittest.TestCase):
             (rd / "100.bilingual.txt").write_text("---\ntitle: 第一篇\ntitle: 甲\n---\n甲正文\n", encoding="utf-8")
             (rd / "100.zh.txt").write_text("---\ntitle: 甲\n\n\n甲译文\n", encoding="utf-8")
             (rd / "200.zh.txt").write_text("---\ntitle: 乙\n\n\n乙译文\n", encoding="utf-8")
-            res = pipeline_ingest.merge_author(rd, "53230930")
+            res = pipeline_ingest.merge_author(rd, "53230930", ["200", "100"])
             self.assertEqual(2, res["bilingual"]["chapters"])
             book = (rd / "53230930.bilingual.txt").read_text(encoding="utf-8")
             self.assertTrue(book.startswith("第1章 甲\n"))   # 100 在前(标题取译文行)
@@ -99,13 +99,17 @@ class PipelineIngestTest(unittest.TestCase):
             zh = (rd / "53230930.zh.txt").read_text(encoding="utf-8")
             self.assertIn("第1章 甲", zh); self.assertIn("甲译文", zh)
 
-    def test_merge_is_idempotent_excludes_self(self):
+    def test_merge_ignores_stale_files_on_disk(self):
+        # Codex #103:只合并本次 source_ids,磁盘上的遗留/他作者文件不卷进书
         with tempfile.TemporaryDirectory() as t:
             rd = Path(t)
             (rd / "100.zh.txt").write_text("---\ntitle: 甲\n\n\n甲译文\n", encoding="utf-8")
-            pipeline_ingest.merge_author(rd, "53230930")
-            pipeline_ingest.merge_author(rd, "53230930")  # 重跑不把合并文件当章节
-            self.assertEqual(1, pipeline_ingest.merge_author(rd, "53230930")["zh"]["chapters"])
+            (rd / "999.zh.txt").write_text("---\ntitle: 旧\n\n\n遗留译文\n", encoding="utf-8")  # 上次遗留
+            res = pipeline_ingest.merge_author(rd, "53230930", ["100"])  # 本次只渲染了 100
+            self.assertEqual(1, res["zh"]["chapters"])
+            book = (rd / "53230930.zh.txt").read_text(encoding="utf-8")
+            self.assertIn("甲译文", book)
+            self.assertNotIn("遗留译文", book)  # 遗留文件不入书
 
     def test_directory_run_produces_merged_book(self):
         with tempfile.TemporaryDirectory() as t:

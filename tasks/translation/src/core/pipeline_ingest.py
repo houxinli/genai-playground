@@ -111,29 +111,33 @@ def _chapter_title(content: str) -> Optional[str]:
     return title or None
 
 
-def merge_author(render_dir: Path, author_key: str) -> Dict[str, Any]:
-    """把 render_dir 里逐文档渲染产物按作者合并成整本:bilingual / zh 各一个文件,放回 render_dir。
+def _sid_sort_key(sid: str):
+    return (0, int(sid)) if sid.isdigit() else (1, sid)
 
-    按 source_id 升序;每篇前置 `第N章 <中文标题>`。合并文件不做 versioning(纯派生,可随时重建)。
+
+def merge_author(render_dir: Path, author_key: str, source_ids: List[str]) -> Dict[str, Any]:
+    """把本次成功渲染的逐文档产物按作者合并成整本:bilingual / zh 各一个文件,放回 render_dir。
+
+    **由本次渲染的 source_ids 驱动**(不 glob 磁盘):否则上次遗留/别的作者的 `*.txt` 会被卷进书、
+    章节数虚高(Codex #103)。按 source_id 升序;每篇前置 `第N章 <中文标题>`。合并文件不做 versioning。
     """
     render_dir = Path(render_dir)
+    ordered = sorted(set(source_ids), key=_sid_sort_key)
     out: Dict[str, Any] = {}
     for variant in ("bilingual", "zh"):
-        out_path = render_dir / f"{author_key}.{variant}.txt"
-        files = sorted(
-            (p for p in render_dir.glob(f"*.{variant}.txt")
-             if p != out_path and p.name.split(".")[0].isdigit()),
-            key=lambda p: int(p.name.split(".")[0]),
-        )
-        if not files:
-            continue
         chapters = []
-        for n, f in enumerate(files, 1):
+        for sid in ordered:
+            f = render_dir / f"{sid}.{variant}.txt"
+            if not f.is_file():
+                continue
             content = f.read_text(encoding="utf-8").rstrip("\n")
-            title = _chapter_title(content) or f.name.split(".")[0]
-            chapters.append(f"第{n}章 {title}\n\n{content}")
+            title = _chapter_title(content) or sid
+            chapters.append(f"第{len(chapters) + 1}章 {title}\n\n{content}")
+        if not chapters:
+            continue
+        out_path = render_dir / f"{author_key}.{variant}.txt"
         out_path.write_text("\n\n\n".join(chapters) + "\n", encoding="utf-8")
-        out[variant] = {"path": str(out_path), "chapters": len(files)}
+        out[variant] = {"path": str(out_path), "chapters": len(chapters)}
     return out
 
 
@@ -164,8 +168,9 @@ def ingest_directory(
         "skipped": sum(1 for d in docs if d.get("status") == "skipped_no_bilingual"),
         "errors": sum(1 for d in docs if d.get("status") == "error"),
     }
-    # 渲染完后按作者合并整本(bilingual / zh 各一个),放回 render_dir。
-    merged = merge_author(render_dir, source_dir.name) if render_dir is not None else {}
+    # 渲染完后按作者合并整本——只用本次渲染成功的文档(不 glob 磁盘,避免卷入遗留/他作者文件)。
+    rendered_sids = [d["document_id"].rsplit(":", 1)[-1] for d in docs if d.get("rendered")]
+    merged = merge_author(render_dir, source_dir.name, rendered_sids) if render_dir is not None else {}
     manifest = {
         "provider": provider, "source_dir": str(source_dir), "bilingual_dir": str(bilingual_dir),
         "store_root": str(store_root), "summary": summary, "merged": merged, "documents": docs,
