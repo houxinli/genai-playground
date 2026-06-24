@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-96-pipeline-ingest",
+  "title": "端到端批量编排器(source+bilingual → 新架构 → 发布+渲染)",
+  "status": "active",
+  "branch": "feat/pipeline-ingest",
+  "objective": "pipeline_ingest:把一个 pixiv 用户的现有 source+bilingual 端到端跑进持久 store(revision→legacy candidates(作 incumbent)→eval→recommend→version→publish→render bilingual+zh),逐文档容错+manifest 报告。CLI+make,在 53230930 实跑。不做重新翻译/P1c/SQLite。",
+  "github": {
+    "issue": 96,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/pipeline_ingest.py:ingest_document + ingest_directory(遍历 source 匹配 bilingual,逐文档 try/except,产 manifest)",
+      "tasks/translation/src/core/pipeline_ingest_test.py(fixture e2e + 容错)",
+      "CLI + Makefile 目标 ingest-user",
+      "在 53230930 实跑产出报告(数据 git-ignored,不入测试);docs + 基线"
+    ],
+    "out": [
+      "重新翻译(translate-bundle→执行器→import-result 叠加新候选,后续)",
+      "P1c instruction-pack;SQLite(#55);#62 删目录(本任务只填充 store)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "tasks/translation/src/core/e2e_test.py",
+      "purpose": "单文档全链范式(已验证),编排器复用其步骤",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/legacy_import.py",
+      "purpose": "build_legacy_candidates(source,bilingual)→候选+attestation+issues",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/renderer.py",
+      "purpose": "render_bilingual/render_zh 产物",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "legacy 候选作 incumbent(无挑战者);每段都有可落地 selection,版本可建可渲染",
+      "reason": "既有译文=incumbent;QA 失败段 review_required 保留 incumbent,不阻塞建版(e2e 已验证)。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "逐文档独立 try/except,坏/截断/缺 bilingual 记 manifest 不中断整批",
+      "reason": "真实语料有坏产物(#10);批量必须容错并可追因。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "持久 store + render-dir 由 CLI 指定;实跑数据 git-ignored,不进 CI 测试",
+      "reason": "data/ 大文件 git-ignored;测试用 fixture,实跑由用户/手动触发。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "pipeline_ingest.ingest_document + ingest_directory + manifest",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "单文档全链(含 publish+render bilingual+zh)",
+        "目录遍历匹配 bilingual + 逐文档容错"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "CLI + Makefile ingest-user + fixture e2e 测试",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "fixture 目录跑通,store 有各工件+ref,渲染符合 golden",
+        "坏/缺 bilingual 记 manifest 不崩"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "在 53230930 实跑,报告;docs + 全量 pytest + 基线 + drift",
+      "status": "completed",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "53230930 跑通报告(文档/段/发布/跳过/错误)",
+        "pytest 全绿",
+        "drift+validate 绿"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S3"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三联",
+        "PR 合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S4",
+    "instruction": "提交并开 PR closes #96,过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "review resolve",
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "318 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 318)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260623T100000Z-claude-code",
+    "timestamp": "2026-06-23T10:00:00Z",
+    "agent": "claude-code",
+    "summary": "批量编排器落地 + 53230930 实跑(8 篇,2 发布、6 incomplete);318 全绿",
+    "observed_head": "23d907a"
+  },
+  "next_task": null
+}
