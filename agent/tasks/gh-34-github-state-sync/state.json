@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-34-github-state-sync",
   "title": "agent/tasks GitHub 状态同步",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/gh-task-sync",
   "objective": "sync_github_task:bootstrap 给 issue 挂 agent-active、complete 摘标签并评论最终 validation 摘要;gh 调用 runner 可注入、同步失败不阻塞本地(降级提示);接入 bootstrap + make agent-complete;测试入 CI。",
   "github": {
     "issue": 34,
-    "pull_request": null
+    "pull_request": 111
   },
   "scope": {
     "in": [
@@ -70,7 +70,7 @@
     {
       "id": "S3",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S2"
       ],
@@ -80,14 +80,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR closes #34,过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -124,11 +117,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260624T080000Z-claude-code",
-    "timestamp": "2026-06-24T08:00:00Z",
+    "checkpoint_id": "cp-20260624T083000Z-claude-code",
+    "timestamp": "2026-06-24T08:30:00Z",
     "agent": "claude-code",
-    "summary": "sync_github_task 落地+接入 bootstrap+make agent-complete;真实在 #34 挂上 agent-active;CI 纳入 sync 测试",
-    "observed_head": "320cf7d"
+    "summary": "PR #111 合并(无 review),#34 关闭;GitHub 状态同步交付,dogfood make agent-complete",
+    "observed_head": "7306bab"
   },
   "next_task": null
 }
