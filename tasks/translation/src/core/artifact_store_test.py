@@ -10,11 +10,11 @@ from pathlib import Path
 
 try:
     from . import artifact_store as astore
-    from .artifact_schemas import build_attestation, candidate_id_v3, normalize_text
+    from .artifact_schemas import build_attestation, candidate_id_v3, normalize_text, version_id_for
     from .source_identity import _source_hash
 except ImportError:  # core/ 在 sys.path 上
     import artifact_store as astore
-    from artifact_schemas import build_attestation, candidate_id_v3, normalize_text
+    from artifact_schemas import build_attestation, candidate_id_v3, normalize_text, version_id_for
     from source_identity import _source_hash
 
 
@@ -345,6 +345,76 @@ class CommitOrderTest(unittest.TestCase):
                 astore.COMMIT_ORDER.index("document-revision"),
                 astore.COMMIT_ORDER.index("candidate"),
             )
+
+
+def _version(cand, created_at="2026-01-01T00:00:00Z"):
+    content = {
+        "schema_version": 2, "document_id": DOC, "revision_id": REV,
+        "parent_version_id": None, "knowledge_snapshot_id": None,
+        "selections": {SEG: cand["candidate_id"]},
+        "selection_decisions": {SEG: {
+            "selected_by": "policy", "outcome": "select_challenger",
+            "reason_code": "initial_single_passing_candidate",
+            "incumbent_candidate_id": None, "evaluation_ids": [],
+        }},
+        "decision": {"policy_id": "conservative-select-v1", "created_by": "workflow"},
+        "status": "draft", "created_at": created_at,
+    }
+    return {"version_id": version_id_for(content), **content}
+
+
+class PublishTest(unittest.TestCase):
+    def _seeded(self, tmp):
+        store = astore.ArtifactStore(Path(tmp))
+        cand = make_candidate()
+        store.put_many(DOC, [make_revision(), cand, make_attestation(cand["candidate_id"])])
+        return store, cand
+
+    def test_publish_sets_current_ref(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, cand = self._seeded(tmp)
+            v = _version(cand); store.put_many(DOC, [v])
+            self.assertIsNone(store.current_ref(DOC))
+            ref = store.publish(DOC, v["version_id"], published_at="2026-02-02T00:00:00Z")
+            self.assertEqual(v["version_id"], ref["version_id"])
+            self.assertIsNone(ref["parent_version_id"])
+            self.assertEqual(v["version_id"], store.current_ref(DOC)["version_id"])
+
+    def test_publish_cas_success_records_parent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, cand = self._seeded(tmp)
+            v1 = _version(cand, "2026-01-01T00:00:00Z"); store.put_many(DOC, [v1])
+            v2 = _version(cand, "2026-03-03T00:00:00Z"); store.put_many(DOC, [v2])
+            store.publish(DOC, v1["version_id"])
+            ref = store.publish(DOC, v2["version_id"], expected_version_id=v1["version_id"])
+            self.assertEqual(v2["version_id"], ref["version_id"])
+            self.assertEqual(v1["version_id"], ref["parent_version_id"])  # CAS 记录 parent
+
+    def test_publish_cas_conflict_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, cand = self._seeded(tmp)
+            v1 = _version(cand, "2026-01-01T00:00:00Z"); store.put_many(DOC, [v1])
+            v2 = _version(cand, "2026-03-03T00:00:00Z"); store.put_many(DOC, [v2])
+            store.publish(DOC, v1["version_id"])
+            with self.assertRaises(astore.StoreConflictError):
+                store.publish(DOC, v2["version_id"], expected_version_id="version_" + "0" * 40)
+            self.assertEqual(v1["version_id"], store.current_ref(DOC)["version_id"])  # 未被覆盖
+
+    def test_publish_defaults_to_real_timestamp(self):
+        # 不传 published_at 时记真实 UTC,不留 1970 占位(current ref 是审计/排序依据)
+        with tempfile.TemporaryDirectory() as tmp:
+            store, cand = self._seeded(tmp)
+            v = _version(cand); store.put_many(DOC, [v])
+            ref = store.publish(DOC, v["version_id"])
+            self.assertNotIn("1970", ref["published_at"])
+            self.assertTrue(ref["published_at"].startswith("20"))
+
+    def test_publish_unknown_version_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, _ = self._seeded(tmp)
+            with self.assertRaises(ValueError):
+                store.publish(DOC, "version_" + "0" * 40)  # 不在 store(发布≠创建)
+            self.assertIsNone(store.current_ref(DOC))
 
 
 if __name__ == "__main__":
