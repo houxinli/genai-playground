@@ -241,6 +241,19 @@ def main() -> int:
         return 1
 
     print(f"Bootstrapped {task_dir.relative_to(args.root.resolve())}")
+    # 给 issue 挂 agent-active(失败非致命,不影响 bootstrap 成功)。
+    if args.issue is not None:
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "sync_github_task", Path(__file__).resolve().parent / "sync_github_task.py")
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            warn = mod.sync_bootstrap(args.issue)
+            if warn:
+                print(warn, file=sys.stderr)
+        except Exception as exc:  # 同步永不阻塞 bootstrap
+            print(f"[warn] GitHub 同步跳过(已忽略): {exc}", file=sys.stderr)
     print("Next: concretize scope/plan/next_action, then commit the task bootstrap.")
     return 0
 

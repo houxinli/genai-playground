@@ -327,6 +327,16 @@ Issue 创建后以 issue number 生成 `task-id`。Issue/PR 模板不能替代 r
 GitHub 适合团队协作和 review，不适合每个本地编辑步骤都写一次远程 comment。
 Issue 模板默认申请 `agent-ready` 标签；仓库必须先创建该标签，否则 GitHub 会忽略模板标签。
 
+### 8.1 状态同步（`scripts/sync_github_task.py`，#34）
+
+任务生命周期里 issue 标签/评论由脚本自动维护，**同步失败一律降级为 stderr 提示、不阻塞本地流程**：
+
+- **bootstrap**：`make agent-bootstrap ... ISSUE=N` 写完 state 后自动给 issue 挂 `agent-active`。
+- **complete**：`make agent-complete TASK_ID=<id>` 读该任务 state（`github.issue` + `validation.last_results`），
+  摘 `agent-active` 并评论最终验证摘要。状态字段（status→`complete`）仍由收尾 commit 负责，本步只做 GitHub 同步。
+
+`agent-active`/`agent-ready` 标签须先在仓库创建。gh 调用经可注入 runner，便于测试 mock（无网络/无 gh 时静默降级）。
+
 ## 9. 生命周期
 
 ### 创建任务
