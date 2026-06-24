@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-83-entity-linking-p1b2",
   "title": "Entity Linking 闸门 + review 队列(#83 P1b-2a)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/entity-linking-p1b2",
   "objective": "造「抽取结果 → 链接 → 候选实体 → review 队列 → 晋升」闸门(抽取外部,系统性回避 #61:输出不被信任、过 review 才晋升)。entity-review 工件 + import_proposals(精确 source/alias 匹配)+ ReviewQueue(update 语义)+ review CLI。不做抽取器/模糊匹配/影响分析(P1b-2b)/instruction-pack(P1c)。",
   "github": {
     "issue": 83,
-    "pull_request": null
+    "pull_request": 90
   },
   "scope": {
     "in": [
@@ -124,7 +124,7 @@
     {
       "id": "S5",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S4"
       ],
@@ -135,15 +135,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S5",
-    "instruction": "提交并开 PR(partially addresses #83 P1b-2a),过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "review resolve",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -154,7 +146,7 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "304 passed",
+        "summary": "308 passed",
         "timestamp": null
       },
       {
@@ -173,11 +165,15 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260622T070000Z-claude-code",
-    "timestamp": "2026-06-22T07:00:00Z",
+    "checkpoint_id": "cp-20260623T060000Z-claude-code",
+    "timestamp": "2026-06-23T06:00:00Z",
     "agent": "claude-code",
-    "summary": "Entity Linking 闸门 + review 队列 + 决策树 + 晋升 + CLI;304 全绿,docs 同步",
-    "observed_head": "cbca1eb"
+    "summary": "任务完成:P1b-2a PR #90 + 合并后 review 修正 PR #91 均合并;#83 仍 OPEN;next_task → P1b-2b",
+    "observed_head": "bf78ddc"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 83,
+    "task_id": "gh-83-impact-analysis-p1b2b",
+    "branch": "feat/impact-analysis-p1b2b"
+  }
 }
