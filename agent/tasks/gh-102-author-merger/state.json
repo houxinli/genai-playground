@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-102-author-merger",
   "title": "按作者合并整本(merger)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/author-merger",
   "objective": "merge_author:逐文档渲染产物按 source_id 升序合并成整本 bilingual/zh 各一个(第N章 中文标题),放 rendered/不做 versioning;接入 ingest_directory 批量后自动合并。",
   "github": {
     "issue": 102,
-    "pull_request": null
+    "pull_request": 103
   },
   "scope": {
     "in": [
@@ -63,7 +63,7 @@
     {
       "id": "S3",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S2"
       ],
@@ -73,14 +73,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR closes #102,过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python scripts/validate_agent_tasks.py"
@@ -96,11 +89,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260623T150000Z-claude-code",
-    "timestamp": "2026-06-23T15:00:00Z",
+    "checkpoint_id": "cp-20260624T020000Z-claude-code",
+    "timestamp": "2026-06-24T02:00:00Z",
     "agent": "claude-code",
-    "summary": "merge_author 落地+接入 ingest;53230930 实跑产 2 章整本;325 全绿",
-    "observed_head": "63c8f26"
+    "summary": "PR #103 合并(含 review:合并由本次渲染驱动不 glob),issue #102 关闭;next → translate-user 通用编排器",
+    "observed_head": "101a236"
   },
   "next_task": null
 }
