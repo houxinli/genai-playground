@@ -73,5 +73,48 @@ class TranslateBundleTest(unittest.TestCase):
         self.assertIn("早上好", "".join(c["text"] for c in result["candidates"]))
 
 
+class OpenRouterCallRetryTest(unittest.TestCase):
+    def _patch_urlopen(self, side_effects):
+        calls = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            i = calls["n"]; calls["n"] += 1
+            eff = side_effects[i]
+            if isinstance(eff, Exception):
+                raise eff
+            import io
+            return io.BytesIO(eff.encode("utf-8"))  # 当作可读 body(json.load)
+
+        return fake_urlopen, calls
+
+    def test_retries_on_timeout_then_succeeds(self):
+        import urllib.request as ur
+        ok = '{"choices":[{"message":{"content":"好"}}]}'
+        fake, calls = self._patch_urlopen([TimeoutError("t"), ok])
+        orig = ur.urlopen
+        ur.urlopen = fake
+        try:
+            out = ex.openrouter_call([{"role": "user", "content": "x"}], "m", "k",
+                                     retries=3, sleep_fn=lambda s: None)
+        finally:
+            ur.urlopen = orig
+        self.assertEqual("好", out)
+        self.assertEqual(2, calls["n"])  # 第一次超时、第二次成功
+
+    def test_non_retryable_http_400_raises_immediately(self):
+        import urllib.request as ur, urllib.error
+        err = urllib.error.HTTPError(ex.OPENROUTER_URL, 400, "bad", {}, None)
+        fake, calls = self._patch_urlopen([err, '{"choices":[{"message":{"content":"x"}}]}'])
+        orig = ur.urlopen
+        ur.urlopen = fake
+        try:
+            with self.assertRaises(urllib.error.HTTPError):
+                ex.openrouter_call([{"role": "user", "content": "x"}], "m", "k",
+                                   retries=3, sleep_fn=lambda s: None)
+        finally:
+            ur.urlopen = orig
+        self.assertEqual(1, calls["n"])  # 400 不重试
+
+
 if __name__ == "__main__":
     unittest.main()

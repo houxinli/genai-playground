@@ -14,6 +14,8 @@ import argparse
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -93,16 +95,37 @@ def translate_bundle(
     }
 
 
+_RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504}
+
+
 def openrouter_call(messages: List[Dict[str, str]], model: str, api_key: str,
-                    *, temperature: float = 0.3, max_tokens: int = 4096) -> str:
+                    *, temperature: float = 0.3, max_tokens: int = 4096,
+                    timeout: float = 180, retries: int = 4, backoff: float = 3.0,
+                    sleep_fn=time.sleep) -> str:
+    """单次 chat 调用,带退避重试——长篇逐段翻译里单个超时/限流/5xx 不该让整篇失败。
+    可重试:超时/连接错误、HTTP 408/409/429/5xx;其余 HTTP 4xx 立即抛出(请求本身有问题)。"""
     payload = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
-    req = urllib.request.Request(
-        OPENROUTER_URL, data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=180) as resp:
-        data = json.load(resp)
-    return data["choices"][0]["message"]["content"]
+    data = json.dumps(payload).encode("utf-8")
+    last_exc: Optional[Exception] = None
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(
+            OPENROUTER_URL, data=data,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = json.load(resp)
+            return body["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            if exc.code not in _RETRYABLE_STATUS or attempt == retries:
+                raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            last_exc = exc
+            if attempt == retries:
+                raise
+        sleep_fn(backoff * (2 ** attempt))  # 指数退避
+    raise last_exc  # 不可达(循环内已抛),保险
 
 
 def main() -> int:
