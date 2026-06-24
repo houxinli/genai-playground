@@ -120,20 +120,26 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 
 def segment_evidence(conn: sqlite3.Connection, document_id: str, segment_id: str) -> Dict[str, List[dict]]:
-    """某 segment 的所有 candidate(含 producer/verdict join)+ attestation。"""
+    """某 segment 的证据,三个**互不相乘**的列表:distinct candidate、attestation、evaluation。
+
+    candidate 身份唯一,但一个 candidate 可有多条 attestation(多 producer/label)与多条 evaluation;
+    若把它们 join 进 candidates 会按笛卡尔积重复 candidate 行(Codex #109)。故 candidates 只返回
+    distinct 候选,producer/verdict 明细各自单列。"""
     cands = [dict(r) for r in conn.execute(
-        """SELECT c.candidate_id, c.text_len, a.producer_name, a.producer_model, a.legacy_label, e.verdict
-           FROM candidate c
-           LEFT JOIN attestation a ON a.candidate_id = c.candidate_id
-           LEFT JOIN evaluation e ON e.candidate_id = c.candidate_id
-           WHERE c.document_id = ? AND c.segment_id = ?
-           ORDER BY c.candidate_id""", (document_id, segment_id))]
+        """SELECT candidate_id, segment_id, source_hash, text_len
+           FROM candidate WHERE document_id = ? AND segment_id = ?
+           ORDER BY candidate_id""", (document_id, segment_id))]
     atts = [dict(r) for r in conn.execute(
-        """SELECT a.attestation_id, a.candidate_id, a.producer_name, a.purpose, a.legacy_label
+        """SELECT a.attestation_id, a.candidate_id, a.producer_name, a.producer_model, a.purpose, a.legacy_label
            FROM attestation a JOIN candidate c ON c.candidate_id = a.candidate_id
            WHERE c.document_id = ? AND c.segment_id = ?
            ORDER BY a.attestation_id""", (document_id, segment_id))]
-    return {"candidates": cands, "attestations": atts}
+    evals = [dict(r) for r in conn.execute(
+        """SELECT e.evaluation_id, e.candidate_id, e.verdict
+           FROM evaluation e JOIN candidate c ON c.candidate_id = e.candidate_id
+           WHERE c.document_id = ? AND c.segment_id = ?
+           ORDER BY e.evaluation_id""", (document_id, segment_id))]
+    return {"candidates": cands, "attestations": atts, "evaluations": evals}
 
 
 def candidates_for_document(conn: sqlite3.Connection, document_id: str) -> List[dict]:

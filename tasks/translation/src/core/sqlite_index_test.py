@@ -56,6 +56,7 @@ class SqliteIndexTest(unittest.TestCase):
                 self.assertTrue(ev["candidates"])
                 self.assertTrue(ev["attestations"])  # legacy 候选有 attestation(producer)
                 self.assertIsNotNone(ev["attestations"][0]["producer_name"])
+                self.assertIn("evaluations", ev)
                 # 作者级查询
                 prov, creator = doc.split(":")[0], doc.split(":")[1]
                 self.assertTrue(sx.candidates_for_author(conn, prov, creator))
@@ -79,6 +80,29 @@ class SqliteIndexTest(unittest.TestCase):
             conn = sx.connect(db); rows2 = sx.candidates_for_document(conn, doc); conn.close()
             self.assertEqual(c1, c2)
             self.assertEqual(rows1, rows2)
+
+    def test_multiple_attestations_do_not_duplicate_candidate(self):
+        # Codex #109:同一 candidate 多条 attestation 时,segment_evidence.candidates 不得按 join 重复
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            store_root, doc = _populate_store(tmp)
+            db = tmp / "index.db"
+            sx.rebuild_index(store_root, db)
+            conn = sx.connect(db)
+            try:
+                # 给某 candidate 直接插第二条 attestation(模拟多 producer 证言同一文本候选)
+                row = conn.execute("SELECT candidate_id, segment_id, document_id FROM candidate LIMIT 1").fetchone()
+                conn.execute("INSERT INTO attestation VALUES (?,?,?,?,?,?,?,?)",
+                             ("att-extra", row["candidate_id"], row["document_id"],
+                              "harness", "other-producer", None, "translation", None))
+                conn.commit()
+                ev = sx.segment_evidence(conn, row["document_id"], row["segment_id"])
+                ids = [c["candidate_id"] for c in ev["candidates"]]
+                self.assertEqual(len(ids), len(set(ids)))  # candidate 不重复
+                self.assertGreaterEqual(
+                    sum(1 for a in ev["attestations"] if a["candidate_id"] == row["candidate_id"]), 2)
+            finally:
+                conn.close()
 
     def test_rebuild_is_idempotent_no_dup(self):
         with tempfile.TemporaryDirectory() as t:
