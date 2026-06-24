@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-62-archive-cleanup",
   "title": "历史派生目录归档:gate + quarantine-with-manifest",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/archive-derived-gate",
   "objective": "archive_derived:实现可归档判定(每篇 legacy candidate 已导入 store+integrity 通过、非源入口目录)+ quarantine(移入隔离区+manifest,绝不 hard-delete);CLI --report(只读盘点)/--archive(gated)。盘点真实 data 但不归档任何真实目录(gate 未满足:无持久 store)。",
   "github": {
     "issue": 62,
-    "pull_request": null
+    "pull_request": 115
   },
   "scope": {
     "in": [
@@ -79,7 +79,7 @@
     {
       "id": "S3",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S2"
       ],
@@ -89,14 +89,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR(交付 gate+quarantine 机制+盘点;不归档真实数据,如实说明 gate 未满足),过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python scripts/validate_agent_tasks.py"
@@ -124,11 +117,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260624T110000Z-claude-code",
-    "timestamp": "2026-06-24T11:00:00Z",
+    "checkpoint_id": "cp-20260624T113000Z-claude-code",
+    "timestamp": "2026-06-24T11:30:00Z",
     "agent": "claude-code",
-    "summary": "archive_derived(gate+quarantine,只移不删)+盘点;354 绿;真实数据 gate 未满足未归档",
-    "observed_head": "b92c2ed"
+    "summary": "PR #115 合并(含 2 轮 review:内容核验 gate + 设计耦合),#62 关闭;归档机制交付,真实数据未归档(gate 未满足)",
+    "observed_head": "00b0e58"
   },
   "next_task": null
 }
