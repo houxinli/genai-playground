@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-62-archive-cleanup",
+  "title": "历史派生目录归档:gate + quarantine-with-manifest",
+  "status": "active",
+  "branch": "feat/archive-derived-gate",
+  "objective": "archive_derived:实现可归档判定(每篇 legacy candidate 已导入 store+integrity 通过、非源入口目录)+ quarantine(移入隔离区+manifest,绝不 hard-delete);CLI --report(只读盘点)/--archive(gated)。盘点真实 data 但不归档任何真实目录(gate 未满足:无持久 store)。",
+  "github": {
+    "issue": 62,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/archive_derived.py:is_archivable(每篇 legacy candidate 已导入 store+revision 在=integrity、非源入口目录)+ quarantine_dir(移入隔离区+manifest,绝不 hard-delete)+ CLI --report/--archive(gated)",
+      "archive_derived_test.py(fixtures:已导入→可归档+移动+manifest;未导入→拒绝;源目录拒绝;不删除)",
+      "只读盘点真实 data 产报告"
+    ],
+    "out": [
+      "归档/删除任何真实目录(gate 未满足:data 无持久 store);hard-delete(只隔离不删)",
+      "把 data 全量导入 store(单独的大操作,风险高,不在本任务)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "严守 #62 hard gate:只对「每篇 legacy candidate 已导入 store 且 revision 在(integrity)」且非源入口目录判可归档;否则 is_archivable 返回 False+原因,拒绝归档",
+      "reason": "issue 硬性前置;删除前必须证明已完整迁入。data 现无持久 store → 真实目录一律不可归档。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "归档=移入隔离区 + 写 manifest(原路径/来源/post/时间),绝不 hard-delete",
+      "reason": "issue 要求优先归档隔离而非删除,保留回溯;参考 #10 坏产物隔离模式。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "本任务交付安全机制+只读盘点,不对真实数据执行归档(gate 未满足)",
+      "reason": "用户数据、非我创建;gate 未满足时删除/归档是破坏性误操作。机制就绪,待全量导入后由用户驱动。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [
+    "实际清理被 gate 阻塞:data 无持久 store → 26 个真实派生目录全不可归档。解锁需先把 data 全量导入持久 store(大操作,风险高,用户数据)——本任务只交付安全机制+只读盘点,未归档任何真实目录。"
+  ],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "archive_derived.py:is_archivable + quarantine_dir + CLI",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "未导入拒绝",
+        "已导入可归档",
+        "只移不删+manifest"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "测试 + 只读盘点真实 data 报告 + 基线",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "fixtures 全过",
+        "盘点报告产出",
+        "pytest 全绿"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "PR 合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR(交付 gate+quarantine 机制+盘点;不归档真实数据,如实说明 gate 未满足),过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "354 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "通过(基线 354)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "passed",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260624T110000Z-claude-code",
+    "timestamp": "2026-06-24T11:00:00Z",
+    "agent": "claude-code",
+    "summary": "archive_derived(gate+quarantine,只移不删)+盘点;354 绿;真实数据 gate 未满足未归档",
+    "observed_head": "b92c2ed"
+  },
+  "next_task": null
+}
