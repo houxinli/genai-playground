@@ -84,8 +84,14 @@ def translate_document(
         return report
 
     segs = {s["segment_id"]: s for s in rev["segments"]}
-    new_by_seg = {c["segment_id"]: c for c in store.list_shard("candidate", doc)
-                  if c["candidate_id"] not in {x["candidate_id"] for x in legacy_by_seg.values()}}
+    # 只取本轮 import_result 写入的候选(rep["candidate_ids"]),不从整个 shard 重建:shard 里可能有
+    # 上一轮的非 legacy 候选,按 segment_id 去重会被旧候选覆盖,导致发布的不是本轮 executor 产物(Codex #107)。
+    cands_in_store = {c["candidate_id"]: c for c in store.list_shard("candidate", doc)}
+    new_by_seg: Dict[str, Dict[str, Any]] = {}
+    for cid in rep["candidate_ids"]:
+        c = cands_in_store.get(cid)
+        if c is not None:
+            new_by_seg[c["segment_id"]] = c
 
     segments_input: List[Dict[str, Any]] = []
     for sid in seg_ids:
@@ -105,18 +111,19 @@ def translate_document(
         segments_input.append({"segment_id": sid, "incumbent": incumbent, "challengers": challengers})
 
     recs = version_select.recommend_selection(segments_input)
-    # metadata 兜底:tags 译文按设计含「原词/中文」→ kana_residue 假阳性 QA fail;无 incumbent 时
-    # 没有可保护的旧值,接受唯一译文(body 仍走保守择优,QA fail 不兜底)。
+    # tags 兜底:tags 译文按设计含「原词/中文」→ kana_residue 假阳性 QA fail;无 incumbent 时没有可保护的
+    # 旧值,接受唯一译文。**只放行 metadata.tags**:title/caption/body 的 QA fail(未翻/拒译/假名残留)
+    # 仍须阻止发布,不能借兜底扩散到这些段(Codex #107)。
     kind_by_seg = {s["segment_id"]: s["kind"] for s in rev["segments"]}
     chal_by_seg = {si["segment_id"]: (si["challengers"][0]["candidate_id"] if si["challengers"] else None)
                    for si in segments_input}
     for r in recs:
         if (r["selected_candidate_id"] is None
-                and str(kind_by_seg.get(r["segment_id"], "")).startswith("metadata")
+                and kind_by_seg.get(r["segment_id"]) == "metadata.tags"
                 and chal_by_seg.get(r["segment_id"])):
             r["selected_candidate_id"] = chal_by_seg[r["segment_id"]]
             r["outcome"] = "select_challenger"
-            r["reason_code"] = "metadata_sole_candidate_accepted"
+            r["reason_code"] = "metadata_tags_sole_candidate_accepted"
     report["review_required"] = sum(1 for r in recs if r["outcome"] == "review_required")
     if any(r["selected_candidate_id"] is None for r in recs):
         report["status"] = "unresolved"  # body 段无可选(新译 QA fail 且无 incumbent)
