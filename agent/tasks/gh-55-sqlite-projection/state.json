@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-55-sqlite-projection",
+  "title": "SQLite 可重建投影",
+  "status": "active",
+  "branch": "feat/sqlite-projection",
+  "objective": "sqlite_index:从 JSONL 工件全量重建 SQLite 派生索引(candidate/attestation/evaluation/segment),索引 candidate_id/document_id/segment_id/producer(在 attestation)/verdict;join 查询(segment 的候选+attestation、文档/作者的候选与评估);写入正确性不依赖 SQLite(可丢弃重建)。CLI rebuild-index。",
+  "github": {
+    "issue": 55,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/sqlite_index.py:rebuild_index(store_root,db)全量重建 + 查询(segment_evidence/candidates_for_document/evaluations_for_document/candidates_for_author)+ CLI rebuild-index",
+      "sqlite_index_test.py(填充 store→重建→查询;丢弃 db 再重建结果一致)",
+      "Makefile rebuild-index;docs+基线"
+    ],
+    "out": [
+      "把 SQLite 作写入真相源(只作派生只读投影)",
+      "并发领取/WAL 调优;跨库分析(#83 P1b-2b)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "SQLite 仅派生只读投影,DROP+CREATE 全量重建;document_id 由 shard 路径(kind/provider/creator/source)推得,跨 kind 统一",
+      "reason": "§2.1:不允许业务事实只存 SQLite;删库可从 JSONL 重建。路径编码 document_id,attestation/evaluation 无 document_id 字段也能定位。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "producer 来自 attestation(candidate 无 producer);evaluation 无 segment_id,经 candidate_id join 取 segment;故 segment/producer/verdict 查询都过 candidate",
+      "reason": "按真实 schema:candidate 只有文本身份,producer 在 attestation,verdict 在 evaluation。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "sqlite_index:schema + rebuild_index + 查询 + CLI",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "全量重建",
+        "join 查询正确",
+        "丢弃可重建"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "测试 + Makefile + docs + 基线 + 全量 pytest",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "填充 store→查询命中",
+        "重建幂等一致",
+        "pytest 全绿"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "PR 合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR closes #55,过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "336 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "通过(基线 336)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "passed",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260624T063000Z-claude-code",
+    "timestamp": "2026-06-24T06:30:00Z",
+    "agent": "claude-code",
+    "summary": "sqlite_index 落地+测试;336 绿;待开 PR",
+    "observed_head": "5e797a6"
+  },
+  "next_task": null
+}

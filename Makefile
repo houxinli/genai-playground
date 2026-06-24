@@ -234,7 +234,13 @@ agent-bootstrap:
 
 
 # ============ 候选导入(新架构) ============
-.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user entity-review-import entity-review-list entity-review-approve entity-review-dismiss
+.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user rebuild-index entity-review-import entity-review-list entity-review-approve entity-review-dismiss
+
+# 从 JSONL 工件全量重建 SQLite 只读投影(派生索引,可丢弃重建)。
+# 用法: make rebuild-index STORE=<ArtifactStore 根目录> DB=index.db
+rebuild-index:
+	@test -n "$(STORE)" && test -n "$(DB)" || { echo "rebuild-index 需要 STORE= DB="; exit 2; }
+	$(PY) tasks/translation/src/core/sqlite_index.py --store "$(STORE)" --db "$(DB)"
 
 # revision → job bundle(供执行器消费)。用法: make export-job REVISION=rev.json OUT=job.json STORE=...
 # STORE 必传(闭环前置):同步把源 revision 幂等入库,import-result 才解析得到 revision shard。
