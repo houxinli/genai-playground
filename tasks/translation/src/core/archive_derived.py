@@ -22,10 +22,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
+    from . import legacy_import
     from .artifact_store import ArtifactStore
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from core import legacy_import
     from core.artifact_store import ArtifactStore
 
 # 历史派生目录后缀(源入口目录是裸 <creator>,无这些后缀)。
@@ -45,10 +47,17 @@ def post_ids(derived_dir: Path) -> List[str]:
 
 
 def is_archivable(
-    derived_dir: Path, store: ArtifactStore, provider: str,
+    derived_dir: Path, store: ArtifactStore, provider: str, source_dir: Path,
+    *, legacy_label: str = "bilingual",
 ) -> Tuple[bool, List[str]]:
-    """守 #62 gate。返回 (可归档, 原因列表)。原因非空 ⇒ 不可归档。"""
-    derived_dir = Path(derived_dir)
+    """守 #62 gate(内容核验,非「有就算」):**从本目录重建 legacy candidate,逐个核验其内容寻址
+    id 已在 store**,才证明这一篇的译文确实完整迁入(全覆盖)。任一篇缺源文件 / 重建失败 / 有
+    candidate 未在 store → 拒绝。仅靠「doc 下有任意 candidate」不够(可能是别轮 executor 候选,
+    或部分导入)——Codex #115。
+
+    返回 (可归档, 原因列表)。原因非空 ⇒ 不可归档。
+    """
+    derived_dir, source_dir = Path(derived_dir), Path(source_dir)
     reasons: List[str] = []
     parsed = parse_derived_name(derived_dir.name)
     if parsed is None:
@@ -59,10 +68,25 @@ def is_archivable(
         return False, [f"{derived_dir.name}: 空目录或无 .txt,跳过(不归档)"]
     for post in posts:
         doc = f"{provider}:{creator_id}:{post}"
-        if not store.list_shard("candidate", doc):
-            reasons.append(f"{post}: store 无 candidate(未迁入,gate 未过)")
-        elif not store.list_shard("document-revision", doc):
+        src = source_dir / f"{post}.txt"
+        if not src.is_file():
+            reasons.append(f"{post}: 缺源文件 {src.name},无法核验迁入")
+            continue
+        if not store.list_shard("document-revision", doc):
             reasons.append(f"{post}: store 无 revision(integrity 未过)")
+            continue
+        try:
+            cands, _atts, _issues = legacy_import.build_legacy_candidates(
+                provider, src, derived_dir / f"{post}.txt", legacy_label)
+        except Exception as exc:  # 无法重建 → 不可核验 → 不归档
+            reasons.append(f"{post}: 无法重建 legacy candidate({type(exc).__name__}),不可核验")
+            continue
+        if not cands:
+            reasons.append(f"{post}: 重建出 0 candidate,不可核验")
+            continue
+        missing = [c["candidate_id"] for c in cands if not store.exists("candidate", doc, c["candidate_id"])]
+        if missing:
+            reasons.append(f"{post}: {len(missing)}/{len(cands)} 个 legacy candidate 未在 store(未完整迁入)")
     return (not reasons), reasons
 
 
@@ -119,6 +143,7 @@ def main() -> int:
     arc.add_argument("--dir", required=True, type=Path)
     arc.add_argument("--store", required=True, type=Path)
     arc.add_argument("--provider", required=True)
+    arc.add_argument("--source-dir", required=True, type=Path, help="源 TXT 目录(核验迁入用)")
     arc.add_argument("--quarantine", required=True, type=Path)
     args = parser.parse_args()
 
@@ -126,7 +151,7 @@ def main() -> int:
         print(json.dumps(report(args.data_root, args.collections), ensure_ascii=False, indent=2))
         return 0
     store = ArtifactStore(args.store)
-    ok, reasons = is_archivable(args.dir, store, args.provider)
+    ok, reasons = is_archivable(args.dir, store, args.provider, args.source_dir)
     if not ok:
         print(json.dumps({"archived": False, "reasons": reasons}, ensure_ascii=False, indent=2))
         return 1  # gate 未过:拒绝归档

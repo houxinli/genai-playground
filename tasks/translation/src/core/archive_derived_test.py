@@ -24,13 +24,18 @@ BILINGUAL = TESTDATA / "golden" / "pixiv-700001.render.bilingual.txt"
 CREATOR = "700000"  # fixture 的 document_id 是 pixiv:700000:700001
 
 
-def _store_with_700001(tmp: Path) -> ArtifactStore:
-    src_dir = tmp / "src"; bil_dir = tmp / "bil"
-    src_dir.mkdir(); bil_dir.mkdir()
+def _layout(tmp: Path):
+    """造源目录 + bilingual 派生目录(名 700000_bilingual),内容同 fixture。"""
+    src_dir = tmp / "src"; src_dir.mkdir()
     shutil.copy(SRC, src_dir / "700001.txt")
-    shutil.copy(BILINGUAL, bil_dir / "700001.txt")
+    derived = tmp / f"{CREATOR}_bilingual"; derived.mkdir()
+    shutil.copy(BILINGUAL, derived / "700001.txt")
+    return src_dir, derived
+
+
+def _ingest(tmp: Path, src_dir: Path, derived: Path) -> ArtifactStore:
     store_root = tmp / "store"
-    pipeline_ingest.ingest_directory("pixiv", src_dir, bil_dir, store_root)
+    pipeline_ingest.ingest_directory("pixiv", src_dir, derived, store_root)  # 用 bilingual 灌库
     return ArtifactStore(store_root)
 
 
@@ -45,30 +50,54 @@ class IsArchivableTest(unittest.TestCase):
     def test_imported_dir_is_archivable(self):
         with tempfile.TemporaryDirectory() as t:
             tmp = Path(t)
-            store = _store_with_700001(tmp)
-            d = tmp / f"{CREATOR}_bilingual"; d.mkdir()
-            (d / "700001.txt").write_text("...", encoding="utf-8")
-            ok, reasons = ad.is_archivable(d, store, "pixiv")
+            src_dir, derived = _layout(tmp)
+            store = _ingest(tmp, src_dir, derived)  # 这一篇的 legacy candidate 已迁入
+            ok, reasons = ad.is_archivable(derived, store, "pixiv", src_dir)
             self.assertTrue(ok, reasons)
             self.assertEqual([], reasons)
 
-    def test_unimported_dir_refused(self):
+    def test_not_imported_refused(self):
+        # 内容核验:store 为空(未迁入)→ 重建的 legacy candidate 不在 store → 拒绝
         with tempfile.TemporaryDirectory() as t:
             tmp = Path(t)
-            store = _store_with_700001(tmp)
-            d = tmp / "999999_bilingual"; d.mkdir()
-            (d / "12345.txt").write_text("...", encoding="utf-8")  # store 无此 doc
-            ok, reasons = ad.is_archivable(d, store, "pixiv")
+            src_dir, derived = _layout(tmp)
+            empty_store = ArtifactStore(tmp / "empty")
+            ok, reasons = ad.is_archivable(derived, empty_store, "pixiv", src_dir)
             self.assertFalse(ok)
-            self.assertTrue(any("未迁入" in r for r in reasons))
+            self.assertTrue(any("未完整迁入" in r or "无 revision" in r for r in reasons))
+
+    def test_revision_present_but_legacy_candidates_missing_refused(self):
+        # Codex #115:doc 有 revision/别的工件 ≠ 这一篇 legacy 已迁入。删掉 candidate shard(只留 revision)
+        # → 重建的 legacy candidate 不在 store → 拒绝(全覆盖核验,不是「有就算」)
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir, derived = _layout(tmp)
+            store = _ingest(tmp, src_dir, derived)
+            doc = f"pixiv:{CREATOR}:700001"
+            self.assertTrue(store.exists("document-revision", doc, store.list_shard("document-revision", doc)[0]["revision_id"]))
+            store.shard_path("candidate", doc).unlink()  # 抹掉候选,保留 revision
+            ok, reasons = ad.is_archivable(derived, store, "pixiv", src_dir)
+            self.assertFalse(ok)
+            self.assertTrue(any("未完整迁入" in r for r in reasons))
+
+    def test_missing_source_refused(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir, derived = _layout(tmp)
+            store = _ingest(tmp, src_dir, derived)
+            (src_dir / "700001.txt").unlink()  # 源文件没了,无法核验
+            ok, reasons = ad.is_archivable(derived, store, "pixiv", src_dir)
+            self.assertFalse(ok)
+            self.assertTrue(any("缺源文件" in r for r in reasons))
 
     def test_source_dir_refused(self):
         with tempfile.TemporaryDirectory() as t:
             tmp = Path(t)
-            store = _store_with_700001(tmp)
-            d = tmp / CREATOR; d.mkdir()  # 裸源入口目录
-            (d / "700001.txt").write_text("...", encoding="utf-8")
-            ok, reasons = ad.is_archivable(d, store, "pixiv")
+            src_dir, derived = _layout(tmp)
+            store = _ingest(tmp, src_dir, derived)
+            bare = tmp / CREATOR; bare.mkdir()  # 裸源入口目录
+            (bare / "700001.txt").write_text("...", encoding="utf-8")
+            ok, reasons = ad.is_archivable(bare, store, "pixiv", src_dir)
             self.assertFalse(ok)
             self.assertTrue(any("源入口" in r for r in reasons))
 
