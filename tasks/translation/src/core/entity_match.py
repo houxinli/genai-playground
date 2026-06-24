@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # 片假名 → 平假名(U+30A1..U+30F6 → 平假名),其余字符原样。
 _KATA_START, _KATA_END, _OFFSET = 0x30A1, 0x30F6, 0x60
@@ -52,11 +52,13 @@ def fuzzy_score(mention: str, entity: Dict[str, Any]) -> float:
 
 def best_nonexact_match(
     mention: str, entities: List[Dict[str, Any]], *, fuzzy_threshold: float = 0.82,
+    pick_winner: Optional[Callable[[List[Dict[str, Any]]], Dict[str, Any]]] = None,
 ) -> Optional[Tuple[Dict[str, Any], str, float]]:
     """无精确匹配时的最佳近似命中 → (entity, kind, score)。优先读音(更可靠),其次模糊;都不达标返回 None。
 
     跳过本就精确命中的实体(那条路径由调用方先处理)。读音命中记 score=1.0、kind='reading';
-    模糊命中记 score=相似度、kind='fuzzy'。同类按 score、再按 entity_id 稳定排序取最优。
+    模糊命中记 score=相似度、kind='fuzzy'。先按 score 取最高分组,**同分用 pick_winner 的作用域/locked
+    优先级**(与精确匹配一致,creator 覆盖不被 global 同读音抢走;Codex #113),否则按 entity_id 兜底。
     """
     reading_hits: List[Tuple[Dict[str, Any], str, float]] = []
     fuzzy_hits: List[Tuple[Dict[str, Any], str, float]] = []
@@ -72,4 +74,11 @@ def best_nonexact_match(
     pool = reading_hits or fuzzy_hits
     if not pool:
         return None
-    return sorted(pool, key=lambda t: (-t[2], t[0]["entity_id"]))[0]
+    best = max(h[2] for h in pool)
+    top = [h for h in pool if h[2] == best]
+    if len(top) > 1 and pick_winner is not None:
+        winner_id = pick_winner([h[0] for h in top])["entity_id"]
+        for h in top:
+            if h[0]["entity_id"] == winner_id:
+                return h
+    return sorted(top, key=lambda t: (-t[2], t[0]["entity_id"]))[0]

@@ -55,6 +55,17 @@ class BestNonexactMatchTest(unittest.TestCase):
         hit = em.best_nonexact_match("ゆき", ents)
         self.assertEqual("reading", hit[1])
 
+    def test_tie_uses_scope_precedence_not_entity_id(self):
+        # Codex #113:同读音(score 1.0)的 global 与 creator 实体,应按作用域优先取 creator(与精确匹配一致)
+        try:
+            from .entity_store import _pick_winner
+        except ImportError:
+            from entity_store import _pick_winner
+        glob = build_entity({"level": "global", "key": "global"}, "ユキ", "全局雪", readings=["ゆき"])
+        creator = build_entity(CREATOR, "ユキ", "作者雪", readings=["ゆき"])
+        hit = em.best_nonexact_match("ゆき", [glob, creator], pick_winner=_pick_winner)
+        self.assertEqual(creator["entity_id"], hit[0]["entity_id"])  # creator 覆盖,不被 global 抢
+
     def test_no_match_below_threshold(self):
         ents = [_ent("田中", "田中")]
         self.assertIsNone(em.best_nonexact_match("山田太郎", ents))
