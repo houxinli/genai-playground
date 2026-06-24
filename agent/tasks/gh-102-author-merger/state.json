@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-102-author-merger",
+  "title": "按作者合并整本(merger)",
+  "status": "active",
+  "branch": "feat/author-merger",
+  "objective": "merge_author:逐文档渲染产物按 source_id 升序合并成整本 bilingual/zh 各一个(第N章 中文标题),放 rendered/不做 versioning;接入 ingest_directory 批量后自动合并。",
+  "github": {
+    "issue": 102,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/pipeline_ingest.py:merge_author + 接入 ingest_directory",
+      "pipeline_ingest_test.py:合并顺序/幂等/批量产书",
+      "docs + 基线"
+    ],
+    "out": [
+      "合并书的 versioning(纯派生);跨作者合并;EPUB 打包"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "按 source_id 升序、每篇 第N章 <中文标题(末个 title: 行)>、bilingual/zh 各一个、放 render_dir、不 versioning",
+      "reason": "用户指定;合并是派生物可随时重建。排除自身合并文件避免重跑把书当章节。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "merge_author + 接入 + 测试",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "按序合并",
+        "幂等排除自身",
+        "批量自动产书"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "实跑 53230930 产书 + docs + 基线",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "53230930.bilingual/zh 整本产出",
+        "pytest 全绿"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "PR 合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR closes #102,过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "325 passed",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260623T150000Z-claude-code",
+    "timestamp": "2026-06-23T15:00:00Z",
+    "agent": "claude-code",
+    "summary": "merge_author 落地+接入 ingest;53230930 实跑产 2 章整本;325 全绿",
+    "observed_head": "63c8f26"
+  },
+  "next_task": null
+}

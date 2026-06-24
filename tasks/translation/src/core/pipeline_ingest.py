@@ -102,6 +102,41 @@ def ingest_document(
     return report
 
 
+def _chapter_title(content: str) -> Optional[str]:
+    """从渲染文本取中文标题:最后一个顶层 `title:` 行的值(bilingual 两行取译文行,zh 仅一行)。"""
+    title = None
+    for line in content.splitlines():
+        if line.startswith("title: "):
+            title = line[len("title: "):].strip()
+    return title or None
+
+
+def merge_author(render_dir: Path, author_key: str) -> Dict[str, Any]:
+    """把 render_dir 里逐文档渲染产物按作者合并成整本:bilingual / zh 各一个文件,放回 render_dir。
+
+    按 source_id 升序;每篇前置 `第N章 <中文标题>`。合并文件不做 versioning(纯派生,可随时重建)。
+    """
+    render_dir = Path(render_dir)
+    out: Dict[str, Any] = {}
+    for variant in ("bilingual", "zh"):
+        out_path = render_dir / f"{author_key}.{variant}.txt"
+        files = sorted(
+            (p for p in render_dir.glob(f"*.{variant}.txt")
+             if p != out_path and p.name.split(".")[0].isdigit()),
+            key=lambda p: int(p.name.split(".")[0]),
+        )
+        if not files:
+            continue
+        chapters = []
+        for n, f in enumerate(files, 1):
+            content = f.read_text(encoding="utf-8").rstrip("\n")
+            title = _chapter_title(content) or f.name.split(".")[0]
+            chapters.append(f"第{n}章 {title}\n\n{content}")
+        out_path.write_text("\n\n\n".join(chapters) + "\n", encoding="utf-8")
+        out[variant] = {"path": str(out_path), "chapters": len(files)}
+    return out
+
+
 def ingest_directory(
     provider: str,
     source_dir: Path,
@@ -129,9 +164,11 @@ def ingest_directory(
         "skipped": sum(1 for d in docs if d.get("status") == "skipped_no_bilingual"),
         "errors": sum(1 for d in docs if d.get("status") == "error"),
     }
+    # 渲染完后按作者合并整本(bilingual / zh 各一个),放回 render_dir。
+    merged = merge_author(render_dir, source_dir.name) if render_dir is not None else {}
     manifest = {
         "provider": provider, "source_dir": str(source_dir), "bilingual_dir": str(bilingual_dir),
-        "store_root": str(store_root), "summary": summary, "documents": docs,
+        "store_root": str(store_root), "summary": summary, "merged": merged, "documents": docs,
     }
     out_dir = Path(render_dir) if render_dir is not None else store_root
     out_dir.mkdir(parents=True, exist_ok=True)
