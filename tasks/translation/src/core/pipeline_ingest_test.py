@@ -82,6 +82,44 @@ class PipelineIngestTest(unittest.TestCase):
             self.assertEqual("ref_exists_kept", m2["documents"][0]["status"])
             self.assertEqual(v2["version_id"], store.current_ref(doc)["version_id"])
 
+    def test_merge_author_builds_book_in_sid_order(self):
+        with tempfile.TemporaryDirectory() as t:
+            rd = Path(t)
+            # 故意乱序写入,合并应按 source_id 升序
+            (rd / "200.bilingual.txt").write_text("---\ntitle: 第二篇\ntitle: 乙\n---\n乙正文\n", encoding="utf-8")
+            (rd / "100.bilingual.txt").write_text("---\ntitle: 第一篇\ntitle: 甲\n---\n甲正文\n", encoding="utf-8")
+            (rd / "100.zh.txt").write_text("---\ntitle: 甲\n\n\n甲译文\n", encoding="utf-8")
+            (rd / "200.zh.txt").write_text("---\ntitle: 乙\n\n\n乙译文\n", encoding="utf-8")
+            res = pipeline_ingest.merge_author(rd, "53230930", ["200", "100"])
+            self.assertEqual(2, res["bilingual"]["chapters"])
+            book = (rd / "53230930.bilingual.txt").read_text(encoding="utf-8")
+            self.assertTrue(book.startswith("第1章 甲\n"))   # 100 在前(标题取译文行)
+            self.assertIn("第2章 乙", book)
+            self.assertLess(book.index("第1章 甲"), book.index("第2章 乙"))
+            zh = (rd / "53230930.zh.txt").read_text(encoding="utf-8")
+            self.assertIn("第1章 甲", zh); self.assertIn("甲译文", zh)
+
+    def test_merge_ignores_stale_files_on_disk(self):
+        # Codex #103:只合并本次 source_ids,磁盘上的遗留/他作者文件不卷进书
+        with tempfile.TemporaryDirectory() as t:
+            rd = Path(t)
+            (rd / "100.zh.txt").write_text("---\ntitle: 甲\n\n\n甲译文\n", encoding="utf-8")
+            (rd / "999.zh.txt").write_text("---\ntitle: 旧\n\n\n遗留译文\n", encoding="utf-8")  # 上次遗留
+            res = pipeline_ingest.merge_author(rd, "53230930", ["100"])  # 本次只渲染了 100
+            self.assertEqual(1, res["zh"]["chapters"])
+            book = (rd / "53230930.zh.txt").read_text(encoding="utf-8")
+            self.assertIn("甲译文", book)
+            self.assertNotIn("遗留译文", book)  # 遗留文件不入书
+
+    def test_directory_run_produces_merged_book(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir, bil_dir = _layout(tmp)
+            render_dir = tmp / "out"
+            m = pipeline_ingest.ingest_directory("pixiv", src_dir, bil_dir, tmp / "store", render_dir)
+            self.assertIn("bilingual", m["merged"])  # 合并书随批量产出
+            self.assertTrue((render_dir / f"{src_dir.name}.bilingual.txt").is_file())
+
     def test_missing_bilingual_is_skipped_not_fatal(self):
         with tempfile.TemporaryDirectory() as t:
             tmp = Path(t)
