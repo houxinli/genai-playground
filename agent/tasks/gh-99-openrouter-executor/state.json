@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-99-openrouter-executor",
   "title": "OpenRouter Grok 执行器 + 重新翻译闭环",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/openrouter-executor",
   "objective": "openrouter_executor:消费 job bundle(含 Context Pack)逐段调 grok-4.3 翻译产 result.json;translate_bundle 纯函数可 mock 测;闭环 demo 在 12806877 实跑(legacy 日文→grok 中文,择优选 grok→发布渲染)。不做整篇批量/合并器/P1c。",
   "github": {
     "issue": 99,
-    "pull_request": null
+    "pull_request": 100
   },
   "scope": {
     "in": [
@@ -100,7 +100,7 @@
     {
       "id": "S4",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S3"
       ],
@@ -111,15 +111,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S4",
-    "instruction": "提交并开 PR closes #99,过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "review resolve",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -149,11 +141,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260623T130000Z-claude-code",
-    "timestamp": "2026-06-23T13:00:00Z",
+    "checkpoint_id": "cp-20260623T140000Z-claude-code",
+    "timestamp": "2026-06-23T14:00:00Z",
     "agent": "claude-code",
-    "summary": "Grok 执行器 + 闭环;12806877 实跑:legacy 日文→grok 中文,择优全选 grok;322 全绿",
-    "observed_head": "c4dafb9"
+    "summary": "任务完成:PR #100 合并(Codex 本次未评、CI 全绿、等≈12min),issue #99 关闭;重新翻译闭环跑通",
+    "observed_head": "cb39589"
   },
   "next_task": null
 }
