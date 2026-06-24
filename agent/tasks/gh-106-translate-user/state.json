@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-106-translate-user",
+  "title": "translate-user 通用端到端编排器",
+  "status": "active",
+  "branch": "feat/translate-user",
+  "objective": "translate_user:逐篇 revision→bundle→翻译(executor 可插拔)→import→评估→保守择优(legacy incumbent vs 新译 challenger)→version→publish→render→按作者合并。executor=openrouter 全自动 CLI;通用 skill 薄壳供 cursor/claude。先通 openrouter 并在 18330282 跑 1 篇验证。",
+  "github": {
+    "issue": 106,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/translate_user.py:translate_user(provider,source_dir,store,render,translate_fn,bilingual_dir?,limit?)+ EXECUTORS 注册 + CLI(--executor openrouter)",
+      "translate_user_test.py(mock executor,fixture 全链)",
+      "Makefile translate-user;通用 skill(.claude/skills + .cursor/rules)薄壳",
+      "18330282 跑 1 篇实跑验证;docs+基线"
+    ],
+    "out": [
+      "整篇/整用户大批量(先证小);本地 vLLM/MLX executor(留口);P1b-2b;SQLite"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "translate_fn 可插拔(bundle->result);EXECUTORS={'openrouter':...};cursor/claude 走 skill 的 prepare→agent 翻→finish(非 Python 可调)",
+      "reason": "通用入口:executor/provider/user 参数化;自动路线(openrouter)一条命令,agent 路线由 skill 驱动同一编排。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "legacy bilingual(若有)作 incumbent,新译作 challenger;保守择优自动选更优;无 legacy 则新译初选",
+      "reason": "复用 #50 择优;既保底又能在有旧译时对比择优。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "逐文档容错 + limit 限篇 + manifest;实跑数据 git-ignored",
+      "reason": "整用户=大量付费调用,limit 控成本;坏篇不中断。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "translate_user 编排 + EXECUTORS + CLI",
+      "status": "in_progress",
+      "depends_on": [],
+      "acceptance": [
+        "逐篇全链(含 publish+render+merge)",
+        "executor 可插拔",
+        "limit/容错"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "mock executor fixture 测 + Makefile + 通用 skill 薄壳",
+      "status": "pending",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "fixture 一句话出整本",
+        "skill 通用(executor 参数)"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "18330282 跑 1 篇(openrouter)验证 + docs + 全量 pytest + 基线",
+      "status": "pending",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "1 篇真译→发布→渲染→并入书",
+        "pytest 全绿"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "pending",
+      "depends_on": [
+        "S3"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "PR 合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S1",
+    "instruction": "写 translate_user.py:translate_user + _translate_document + EXECUTORS + CLI。",
+    "acceptance": [
+      "mock 全链",
+      "可插拔"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "325 passed (起点)",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260624T030000Z-claude-code",
+    "timestamp": "2026-06-24T03:00:00Z",
+    "agent": "claude-code",
+    "summary": "建立 translate-user 通用编排任务;积木齐(下载/revision/bundle/executor/import/择优/render/merge)",
+    "observed_head": "c68aae4"
+  },
+  "next_task": null
+}
