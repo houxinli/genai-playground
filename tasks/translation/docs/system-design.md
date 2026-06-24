@@ -1209,7 +1209,7 @@ src/core/render/       # bilingual/zh/package renderers
 | Executor Harness | 已完成(#57) | 共享 instruction pack + Codex/Claude/Cursor adapter，自然语言 translate-job |
 | Current Ref / 发布 | 已完成 | `ArtifactStore.publish`/`current_ref`:per-document `refs/current.json` + expected-parent CAS(flock 临界区);发布≠版本创建。e2e_test 串通 source→…→publish→render |
 | Repair / Annotation / Knowledge | 未完成 | 依赖 version 与 store |
-| SQLite 可重建投影 | 未完成 | Issue #55，vertical slice 之后 |
+| SQLite 可重建投影 | 已落地(#55) | `sqlite_index.py`:从 JSONL 全量重建只读索引 + join 查询;可丢弃重建 |
 
 已经完成的 task/result translate round-trip + executor harness（#57）不代表 Phase 4 全部完成；context builder
 与 review/repair job 仍未实现，新文档的 revision 入库闭环（#72）也待补。
