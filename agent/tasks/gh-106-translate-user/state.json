@@ -47,13 +47,15 @@
       "status": "active"
     }
   ],
-  "open_questions": [],
+  "open_questions": [
+    "整篇真实译文质量验证被 OpenRouter 402(余额不足,usage≈$9.70)阻塞;需用户充值或换 executor(cursor/本地)。编排+retry+小切片(#100)已证。"
+  ],
   "blockers": [],
   "plan": [
     {
       "id": "S1",
       "title": "translate_user 编排 + EXECUTORS + CLI",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "acceptance": [
         "逐篇全链(含 publish+render+merge)",
@@ -64,7 +66,7 @@
     {
       "id": "S2",
       "title": "mock executor fixture 测 + Makefile + 通用 skill 薄壳",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "S1"
       ],
@@ -76,7 +78,7 @@
     {
       "id": "S3",
       "title": "18330282 跑 1 篇(openrouter)验证 + docs + 全量 pytest + 基线",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "S2"
       ],
@@ -88,7 +90,7 @@
     {
       "id": "S4",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         "S3"
       ],
@@ -99,11 +101,11 @@
     }
   ],
   "next_action": {
-    "step_id": "S1",
-    "instruction": "写 translate_user.py:translate_user + _translate_document + EXECUTORS + CLI。",
+    "step_id": "S4",
+    "instruction": "开 PR(代码+测试已绿;实跑整篇受 402 阻塞,如实说明),过 CI,处理 review,合并。",
     "acceptance": [
-      "mock 全链",
-      "可插拔"
+      "CI 全绿",
+      "PR 合并"
     ]
   },
   "validation": {
@@ -114,18 +116,30 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "325 passed (起点)",
+        "summary": "330 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "通过(基线 330)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "passed",
         "timestamp": null
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260624T030000Z-claude-code",
-    "timestamp": "2026-06-24T03:00:00Z",
+    "checkpoint_id": "cp-20260624T040000Z-claude-code",
+    "timestamp": "2026-06-24T04:00:00Z",
     "agent": "claude-code",
-    "summary": "建立 translate-user 通用编排任务;积木齐(下载/revision/bundle/executor/import/择优/render/merge)",
-    "observed_head": "c68aae4"
+    "summary": "translate-user+skill+retry 完成;330 绿;18330282 实跑编排正确但译文被 OpenRouter 402(余额)阻塞",
+    "observed_head": "615362c"
   },
   "next_task": null
 }
