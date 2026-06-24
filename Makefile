@@ -234,7 +234,7 @@ agent-bootstrap:
 
 
 # ============ 候选导入(新架构) ============
-.PHONY: legacy-import import-result export-job translate-bundle seed-entities entity-review-import entity-review-list entity-review-approve entity-review-dismiss
+.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user entity-review-import entity-review-list entity-review-approve entity-review-dismiss
 
 # revision → job bundle(供执行器消费)。用法: make export-job REVISION=rev.json OUT=job.json STORE=...
 # STORE 必传(闭环前置):同步把源 revision 幂等入库,import-result 才解析得到 revision shard。
@@ -251,6 +251,12 @@ translate-bundle:
 # 人工规则 → 实体库播种。用法: make seed-entities ENTITY_STORE=... LEVEL=creator KEY=pixiv:50235390 RULES=rules.txt
 seed-entities:
 	$(PY) tasks/translation/src/core/entity_store.py --store "$(ENTITY_STORE)" --scope-level "$(LEVEL)" $(if $(KEY),--scope-key "$(KEY)") --rules "$(RULES)" $(if $(STATUS),--status $(STATUS))
+
+# 端到端批量编排:用户现有 source+bilingual → 新架构 → 发布 + 渲染。
+# 用法: make ingest-user PROVIDER=pixiv SOURCE=data/pixiv/53230930 BILINGUAL=data/pixiv/53230930_bilingual STORE=... RENDER=...
+ingest-user:
+	@test -n "$(PROVIDER)" && test -n "$(SOURCE)" && test -n "$(BILINGUAL)" && test -n "$(STORE)" || { echo "ingest-user 需要 PROVIDER= SOURCE= BILINGUAL= STORE="; exit 2; }
+	$(PY) tasks/translation/src/core/pipeline_ingest.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --bilingual-dir "$(BILINGUAL)" --store "$(STORE)" $(if $(RENDER),--render-dir "$(RENDER)")
 
 # Entity Linking review 队列(#83 P1b-2)。抽取(外部)产 PROPOSALS JSON → 链接入队 → 人工裁决。
 # 导入: make entity-review-import PROPOSALS=p.json ENTITY_STORE=... QUEUE=... DOCUMENT=pixiv:50235390:12430834
