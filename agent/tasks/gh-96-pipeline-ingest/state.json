@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-96-pipeline-ingest",
   "title": "端到端批量编排器(source+bilingual → 新架构 → 发布+渲染)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/pipeline-ingest",
   "objective": "pipeline_ingest:把一个 pixiv 用户的现有 source+bilingual 端到端跑进持久 store(revision→legacy candidates(作 incumbent)→eval→recommend→version→publish→render bilingual+zh),逐文档容错+manifest 报告。CLI+make,在 53230930 实跑。不做重新翻译/P1c/SQLite。",
   "github": {
     "issue": 96,
-    "pull_request": null
+    "pull_request": 97
   },
   "scope": {
     "in": [
@@ -99,7 +99,7 @@
     {
       "id": "S4",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S3"
       ],
@@ -110,15 +110,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S4",
-    "instruction": "提交并开 PR closes #96,过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "review resolve",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -129,7 +121,7 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "318 passed",
+        "summary": "319 passed",
         "timestamp": null
       },
       {
@@ -148,11 +140,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260623T100000Z-claude-code",
-    "timestamp": "2026-06-23T10:00:00Z",
+    "checkpoint_id": "cp-20260623T110000Z-claude-code",
+    "timestamp": "2026-06-23T11:00:00Z",
     "agent": "claude-code",
-    "summary": "批量编排器落地 + 53230930 实跑(8 篇,2 发布、6 incomplete);318 全绿",
-    "observed_head": "23d907a"
+    "summary": "任务完成:PR #97 合并(含 2 条 review:不回滚 ref + 空路径守卫),issue #96 关闭;pixiv 53230930 端到端跑通",
+    "observed_head": "d6a8cce"
   },
   "next_task": null
 }
