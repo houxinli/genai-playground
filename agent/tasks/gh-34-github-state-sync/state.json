@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-34-github-state-sync",
+  "title": "agent/tasks GitHub 状态同步",
+  "status": "active",
+  "branch": "feat/gh-task-sync",
+  "objective": "sync_github_task:bootstrap 给 issue 挂 agent-active、complete 摘标签并评论最终 validation 摘要;gh 调用 runner 可注入、同步失败不阻塞本地(降级提示);接入 bootstrap + make agent-complete;测试入 CI。",
+  "github": {
+    "issue": 34,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "scripts/sync_github_task.py:sync_bootstrap/sync_complete(gh runner 可注入,非致命)+ summary_from_state + CLI",
+      "接入 bootstrap_agent_task.py(--issue 时挂 agent-active);make agent-complete TASK_ID=",
+      "scripts/sync_github_task_test.py(mock runner);CI 与 agent-validator-test 纳入该测试",
+      "创建 agent-active 标签"
+    ],
+    "out": [
+      "Projects 看板自动化;每条 checkpoint 远程同步;complete 时改 state(仍由 chore commit 负责)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "gh 经可注入 runner;同步任何失败都降级为 stderr 提示、不抛、不改本地流程/退出码",
+      "reason": "acceptance:同步失败不阻塞本地;CI/无网络/无 gh 时 bootstrap 仍成功。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "complete 同步读 state.github.issue + validation.last_results 生成摘要;不改 state(状态→complete 仍由 chore commit)",
+      "reason": "职责单一:本任务只做 GitHub 同步,不接管状态机。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "sync_github_task.py + 接入 bootstrap + make agent-complete",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "bootstrap 挂标签",
+        "complete 摘标签+评论",
+        "失败非致命"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "测试(mock runner)+ CI/agent-validator-test 纳入 + 真实生命周期演练",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "make agent-validator-test 绿",
+        "失败降级有测试"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "PR 合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR closes #34,过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py",
+      "conda run -n llm python -m unittest scripts.sync_github_task_test"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "337 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python -m unittest scripts.sync_github_task_test",
+        "status": "passed",
+        "summary": "scripts 单测全绿(含 sync)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "通过",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "passed",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260624T080000Z-claude-code",
+    "timestamp": "2026-06-24T08:00:00Z",
+    "agent": "claude-code",
+    "summary": "sync_github_task 落地+接入 bootstrap+make agent-complete;真实在 #34 挂上 agent-active;CI 纳入 sync 测试",
+    "observed_head": "320cf7d"
+  },
+  "next_task": null
+}

@@ -215,7 +215,7 @@ monitor-translation:
 
 
 # ============ Agent 任务状态 ============
-.PHONY: agent-validate agent-validator-test agent-bootstrap
+.PHONY: agent-validate agent-validator-test agent-bootstrap agent-complete
 
 agent-validate:
 	$(PY) scripts/validate_agent_tasks.py
@@ -225,12 +225,18 @@ docs-drift:
 	$(PY) scripts/check_docs_drift.py
 
 agent-validator-test:
-	$(PY) -m unittest scripts.validate_agent_tasks_test scripts.bootstrap_agent_task_test
+	$(PY) -m unittest scripts.validate_agent_tasks_test scripts.bootstrap_agent_task_test scripts.sync_github_task_test
 
 # 用法: make agent-bootstrap TASK_ID=gh-12-slug BRANCH=feat/x TITLE="..." OBJECTIVE="..." [ISSUE=12]
 agent-bootstrap:
 	$(PY) scripts/bootstrap_agent_task.py --task-id "$(TASK_ID)" --branch "$(BRANCH)" \
 		--title "$(TITLE)" --objective "$(OBJECTIVE)" $(if $(ISSUE),--issue $(ISSUE))
+
+# 任务完成时同步 GitHub:摘 agent-active + 评论最终验证摘要(读 state;失败非致命)。
+# 用法: make agent-complete TASK_ID=gh-12-slug
+agent-complete:
+	@test -n "$(TASK_ID)" || { echo "agent-complete 需要 TASK_ID="; exit 2; }
+	$(PY) scripts/sync_github_task.py --event complete --task-dir agent/tasks/$(TASK_ID)
 
 
 # ============ 候选导入(新架构) ============
