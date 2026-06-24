@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-55-sqlite-projection",
   "title": "SQLite 可重建投影",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/sqlite-projection",
   "objective": "sqlite_index:从 JSONL 工件全量重建 SQLite 派生索引(candidate/attestation/evaluation/segment),索引 candidate_id/document_id/segment_id/producer(在 attestation)/verdict;join 查询(segment 的候选+attestation、文档/作者的候选与评估);写入正确性不依赖 SQLite(可丢弃重建)。CLI rebuild-index。",
   "github": {
     "issue": 55,
-    "pull_request": null
+    "pull_request": 109
   },
   "scope": {
     "in": [
@@ -71,7 +71,7 @@
     {
       "id": "S3",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S2"
       ],
@@ -81,14 +81,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR closes #55,过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python scripts/validate_agent_tasks.py"
@@ -97,13 +90,13 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "336 passed",
+        "summary": "337 passed",
         "timestamp": null
       },
       {
         "command": "conda run -n llm python scripts/check_docs_drift.py",
         "status": "passed",
-        "summary": "通过(基线 336)",
+        "summary": "通过(基线 337)",
         "timestamp": null
       },
       {
@@ -116,11 +109,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260624T063000Z-claude-code",
-    "timestamp": "2026-06-24T06:30:00Z",
+    "checkpoint_id": "cp-20260624T070000Z-claude-code",
+    "timestamp": "2026-06-24T07:00:00Z",
     "agent": "claude-code",
-    "summary": "sqlite_index 落地+测试;336 绿;待开 PR",
-    "observed_head": "5e797a6"
+    "summary": "PR #109 合并(含 review:segment_evidence 不重复 candidate),#55 关闭;SQLite 可重建投影交付",
+    "observed_head": "4accf42"
   },
   "next_task": null
 }
