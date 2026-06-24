@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-99-openrouter-executor",
+  "title": "OpenRouter Grok 执行器 + 重新翻译闭环",
+  "status": "active",
+  "branch": "feat/openrouter-executor",
+  "objective": "openrouter_executor:消费 job bundle(含 Context Pack)逐段调 grok-4.3 翻译产 result.json;translate_bundle 纯函数可 mock 测;闭环 demo 在 12806877 实跑(legacy 日文→grok 中文,择优选 grok→发布渲染)。不做整篇批量/合并器/P1c。",
+  "github": {
+    "issue": 99,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/openrouter_executor.py:build_messages(注入 context_pack 约束)+ translate_bundle(bundle, call_fn) 纯函数 + openrouter HTTP 调用 + CLI",
+      "tasks/translation/src/core/openrouter_executor_test.py(mock call_fn:prompt 构造/result 组装/约束进 prompt)",
+      "Makefile 目标 translate-exec",
+      "闭环 demo 在 12806877 一小段实跑(脱敏,不入 CI);docs + 基线"
+    ],
+    "out": [
+      "整篇/整用户批量重译(先证小闭环)",
+      "合并器(独立任务);P1c instruction-pack;本地 vLLM/MLX 执行器(本任务只 OpenRouter)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "tasks/translation/docs/executor-instructions.md",
+      "purpose": "翻译规则 + Context Pack 消费约定 → system prompt",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/schemas/result.schema.json",
+      "purpose": "result 必填:task_id/task_digest/producer/candidates[result_candidate_key,segment_id,source_hash,text]/...",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/task_export.py",
+      "purpose": "bundle 结构 {task, task_digest, segments, context_pack}",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "执行器=外部 API producer(grok-4.3 via OpenRouter);translate_bundle 纯函数 + 可注入 call_fn",
+      "reason": "复用 harness 中立纪律;CI 无网络/key → mock call_fn 测 prompt/组装,真实调用走 CLI。grok-4/grok-4-fast 已弃用,用 x-ai/grok-4.3。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "逐段调用(一段一 candidate);system 注入 context_pack 的 entities(target/forbidden)+terminology 硬约束",
+      "reason": "段粒度对应 result candidate;Context Pack 是人名/术语一致性的载体(#83 P1a/P1b)。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "闭环把 grok 候选作 challenger、legacy 作 incumbent;legacy 日文 fail QA、grok 中文 pass → select_challenger",
+      "reason": "保守择优自动选更优(#50);真实展示「日文→中文」被自动选中。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "openrouter_executor:build_messages + translate_bundle(纯,可 mock)+ HTTP + CLI",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "mock 测 prompt/result 组装",
+        "context_pack 约束进 prompt",
+        "result schema 合法"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Makefile translate-exec + 真实 grok-4.3 单段调通(脱敏)",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "真实 1 段返回中文",
+        "result.json 落地"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "12806877 一小段闭环实跑 + 报告;docs + 全量 pytest + 基线 + drift",
+      "status": "completed",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "legacy 日文→grok 中文,择优选 grok,渲染中文",
+        "pytest 全绿",
+        "drift+validate 绿"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S3"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三联",
+        "PR 合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S4",
+    "instruction": "提交并开 PR closes #99,过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "review resolve",
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "322 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 322)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260623T130000Z-claude-code",
+    "timestamp": "2026-06-23T13:00:00Z",
+    "agent": "claude-code",
+    "summary": "Grok 执行器 + 闭环;12806877 实跑:legacy 日文→grok 中文,择优全选 grok;322 全绿",
+    "observed_head": "c4dafb9"
+  },
+  "next_task": null
+}
