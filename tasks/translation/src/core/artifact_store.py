@@ -66,6 +66,8 @@ COMMIT_ORDER = (
 # 解析 (kind, artifact_id) → artifact 的作用域解析器。
 Resolver = Callable[[str, str], Optional[Dict[str, Any]]]
 
+_UNSET = object()  # publish 的 expected_version_id 未给定哨兵(区分"不做 CAS"与"期望无当前 ref"=None)
+
 
 class StoreConflictError(Exception):
     """同 id 不同 canonical payload:不可变工件被改/损坏/算法漂移,必须 fatal,不静默覆盖。"""
@@ -369,3 +371,61 @@ class ArtifactStore:
     def resolver_for(self, document_id: str) -> Resolver:
         """返回按 document 作用域的解析器,供 verify_references 解引用同文档工件。"""
         return lambda kind, artifact_id: self.get(kind, document_id, artifact_id)
+
+    # ---- current ref / 发布(§4 atomic CAS;发布≠版本创建 §2.6)----------------------
+    def ref_path(self, document_id: str) -> Path:
+        provider, creator_id, source_id = _split_document_id(document_id)
+        return self.root / "refs" / provider / creator_id / f"{source_id}.json"
+
+    def current_ref(self, document_id: str) -> Optional[Dict[str, Any]]:
+        path = self.ref_path(document_id)
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def publish(
+        self,
+        document_id: str,
+        version_id: str,
+        expected_version_id: Any = _UNSET,
+        *,
+        decided_by: str = "workflow",
+        published_at: str = "1970-01-01T00:00:00Z",
+    ) -> Dict[str, Any]:
+        """把 DocumentVersion 设为 current(发布)。expected_version_id 给定则做 compare-and-swap。
+
+        §4:临时文件+原子 rename 不能让"读 parent→比较→替换"原子,必须持锁。这里在 flock 临界区内
+        读当前 ref→比对 expected→原子写;CAS 失败放弃(raise),不重试覆盖。version 必须已在 store 且属本文档。
+        """
+        version = self.get("document-version", document_id, version_id)
+        if version is None:
+            raise ValueError(f"publish: version {version_id} 不在 {document_id} 的 store(发布≠创建)")
+        if version.get("document_id") != document_id:
+            raise ValueError(
+                f"publish: version {version_id} 属于 {version.get('document_id')} != {document_id}"
+            )
+        path = self.ref_path(document_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = path.with_suffix(path.suffix + ".lock")
+        with lock_path.open("w") as lock_fh:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX)
+            current = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+            cur_vid = current["version_id"] if current else None
+            if expected_version_id is not _UNSET and cur_vid != expected_version_id:
+                raise StoreConflictError(
+                    [f"publish CAS 失败:current={cur_vid} != expected={expected_version_id};放弃覆盖"]
+                )
+            ref = {
+                "document_id": document_id,
+                "version_id": version_id,
+                "parent_version_id": cur_vid,
+                "decided_by": decided_by,
+                "published_at": published_at,
+            }
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            with tmp.open("w", encoding="utf-8") as fh:
+                fh.write(json.dumps(ref, ensure_ascii=False, sort_keys=True) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+        return ref

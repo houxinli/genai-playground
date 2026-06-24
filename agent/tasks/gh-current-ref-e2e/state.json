@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-current-ref-e2e",
+  "title": "current ref 发布(CAS)+ 端到端 demo",
+  "status": "active",
+  "branch": "feat/current-ref-e2e",
+  "objective": "ArtifactStore.publish/current_ref:per-document refs/current.json + expected-parent CAS(flock 临界区,§4)。e2e 测试串真实链:source→revision→legacy candidates→evaluations→recommend→version→publish→render bilingual。docs 标 current ref 已落。不做 repair/批量发布/UI。",
+  "github": {
+    "issue": 93,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/artifact_store.py:publish(document_id,version_id,expected=...) + current_ref + ref_path,CAS(flock 临界区:读 parent→比较→原子 rename)",
+      "tasks/translation/src/core/artifact_store_test.py:publish CAS 冲突/version 必须存在且属本文档/原子",
+      "tasks/translation/src/core/e2e_test.py:全链 source→revision→legacy candidates→eval→recommend→version→publish→render(fixture)",
+      "Makefile 薄 demo 目标(可选)+ docs(§4/§20.2 标 current ref 已落)+ 基线"
+    ],
+    "out": [
+      "非破坏 repair / 批量发布 / 自动重译",
+      "current ref 的 UI / SQLite 投影(#55)",
+      "#83 P1b-2b 影响分析;#62 迁移"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "§4 workspace+CAS 规则 / §2.6 发布≠版本创建 / §3.1 atomic refs",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/artifact_store.py",
+      "purpose": "shard_path/_split_document_id/flock/get 范式复用",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/src/core/version_select.py",
+      "purpose": "recommend_selection/build_document_version/render_version 串链",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "per-document ref refs/<provider>/<creator>/<post>.json;publish 用 flock 临界区做 expected-parent CAS",
+      "reason": "§4:临时文件+原子 rename 本身不保证'读 parent→比较→替换'原子,必须持锁;比较失败放弃写、不重试覆盖。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "publish 校验 version 存在且 document_id 一致;published_at 由调用方传入(测试确定性)",
+      "reason": "发布≠版本创建(§2.6);不发布不存在/跨文档的 version。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "ref 是操作性 manifest(非内容寻址业务工件),不进 ARTIFACT_KINDS/不走 #77 身份 gate",
+      "reason": "ref 是可变指针,代码校验 version 存在即可;避免 round-trip fixture 负担。",
+      "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "e2e 用真实函数(legacy_import/candidate_eval/version_select/renderer)串链,fixture 数据,不调真实模型",
+      "reason": "证明整条 slice 贯通且过各 store 身份/完整性 gate;给 P1b-2b 造语料范式。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "ArtifactStore.publish + current_ref + CAS + 测试",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "CAS 冲突拒绝",
+        "version 必须存在且属本文档",
+        "原子写 + flock 临界区"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "e2e 全链测试(source→…→publish→render)",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "fixture 全链跑通",
+        "ref 指向所建 version",
+        "render 输出符合 golden"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "docs(§4/§20.2 current ref 已落)+ Makefile demo + 全量 pytest + 基线 + drift",
+      "status": "completed",
+      "depends_on": [
+        "S1",
+        "S2"
+      ],
+      "acceptance": [
+        "pytest 全绿",
+        "基线一致",
+        "drift+validate 绿"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "建 issue 回填 + 开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S3"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "review 三联",
+        "PR 合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S4",
+    "instruction": "提交并开 PR closes #93,过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "review resolve",
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "conda run -n llm python scripts/check_docs_drift.py",
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "314 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "文档漂移检查通过(基线 314)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260623T080000Z-claude-code",
+    "timestamp": "2026-06-23T08:00:00Z",
+    "agent": "claude-code",
+    "summary": "publish/current_ref CAS + e2e 全链 + docs;314 全绿;issue #93 已建",
+    "observed_head": "d757258"
+  },
+  "next_task": null
+}
