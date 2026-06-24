@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-current-ref-e2e",
   "title": "current ref 发布(CAS)+ 端到端 demo",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/current-ref-e2e",
   "objective": "ArtifactStore.publish/current_ref:per-document refs/current.json + expected-parent CAS(flock 临界区,§4)。e2e 测试串真实链:source→revision→legacy candidates→evaluations→recommend→version→publish→render bilingual。docs 标 current ref 已落。不做 repair/批量发布/UI。",
   "github": {
     "issue": 93,
-    "pull_request": null
+    "pull_request": 94
   },
   "scope": {
     "in": [
@@ -109,7 +109,7 @@
     {
       "id": "S4",
       "title": "建 issue 回填 + 开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S3"
       ],
@@ -120,15 +120,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S4",
-    "instruction": "提交并开 PR closes #93,过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "review resolve",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/translation/src -q",
@@ -139,7 +131,7 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "314 passed",
+        "summary": "315 passed",
         "timestamp": null
       },
       {
@@ -158,11 +150,15 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260623T080000Z-claude-code",
-    "timestamp": "2026-06-23T08:00:00Z",
+    "checkpoint_id": "cp-20260623T090000Z-claude-code",
+    "timestamp": "2026-06-23T09:00:00Z",
     "agent": "claude-code",
-    "summary": "publish/current_ref CAS + e2e 全链 + docs;314 全绿;issue #93 已建",
-    "observed_head": "d757258"
+    "summary": "任务完成:PR #94 合并(含 2 条 review:目录 fsync + 真实时间戳),issue #93 关闭;next_task → #83 P1c",
+    "observed_head": "871f35c"
   },
-  "next_task": null
+  "next_task": {
+    "issue": 83,
+    "task_id": "gh-83-instruction-pack-p1c",
+    "branch": "feat/instruction-pack-p1c"
+  }
 }
