@@ -17,9 +17,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
+    from . import entity_match
     from .artifact_schemas import canonical_digest, canonical_dumps, validate_artifact
     from .entity_store import EntityStore, _pick_winner, _reachable_scopes, build_entity
 except ImportError:  # core/ 在 sys.path 上
+    import entity_match
     from artifact_schemas import canonical_digest, canonical_dumps, validate_artifact
     from entity_store import EntityStore, _pick_winner, _reachable_scopes, build_entity
 
@@ -143,13 +145,13 @@ def import_proposals(
         if existing is not None and existing.get("status") != "pending":
             continue  # 已裁决的 review 不被重导重开/不再改实体(幂等,保住人工决定)
 
-        matches = [
-            e for scope in reachable for e in entity_store.list_scope(scope)
-            if e["source"] == mention or mention in e.get("aliases", [])
-        ]
+        reachable_entities = [e for scope in reachable for e in entity_store.list_scope(scope)]
+        matches = [e for e in reachable_entities
+                   if e["source"] == mention or mention in e.get("aliases", [])]
         reason: Optional[str] = None
         candidate_entity_id: Optional[str] = None
         new_entity: Optional[Dict[str, Any]] = None
+        match_score: Optional[float] = None
 
         if matches:
             winner = _pick_winner(matches)
@@ -159,9 +161,16 @@ def import_proposals(
             elif suggested and suggested != winner["target"]:
                 reason = "target_conflict"
             else:
-                continue  # 干净高置信命中 → 不排队
+                continue  # 干净高置信精确命中 → 不排队
         else:
-            if suggested:
+            # 无精确匹配:回退 读音/模糊。近似命中链到既有实体并入 review(证据,不自动改/建实体),
+            # 避免对既有实体的微变体新建近重复 candidate(#83 P1b-2b)。
+            near = entity_match.best_nonexact_match(mention, reachable_entities)
+            if near is not None:
+                entity, kind, match_score = near
+                candidate_entity_id = entity["entity_id"]
+                reason = "reading_match" if kind == "reading" else "fuzzy_match"
+            elif suggested:
                 new_entity = build_entity(
                     _creator_scope(scope_ctx), mention, suggested,
                     authority="automatic", status="candidate", updated_at=created_at,
@@ -185,6 +194,8 @@ def import_proposals(
             review["segment_id"] = segment_id
         if candidate_entity_id is not None:
             review["candidate_entity_id"] = candidate_entity_id
+        if match_score is not None:
+            review["match_score"] = match_score
         if suggested is not None:
             review["suggested_target"] = suggested
         if p.get("context"):

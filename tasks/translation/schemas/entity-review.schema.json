@@ -77,7 +77,9 @@
         "low_confidence_match",
         "target_conflict",
         "new_candidate",
-        "unmatched_needs_target"
+        "unmatched_needs_target",
+        "fuzzy_match",
+        "reading_match"
       ]
     },
     "status": {
@@ -101,6 +103,12 @@
     "created_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "match_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "近似匹配(fuzzy/reading)分数;精确匹配不带此字段"
     }
   }
 }

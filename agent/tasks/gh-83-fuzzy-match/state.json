@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-83-fuzzy-match",
+  "title": "Entity Linking 模糊/读音匹配(#83 P1b-2b)",
+  "status": "active",
+  "branch": "feat/entity-fuzzy-match",
+  "objective": "entity_match:在 linking gate 的精确匹配之外加模糊(归一化相似度)+读音(kana 归一化比 readings/source/aliases)匹配——近似 mention 链到既有实体并入 review(reason fuzzy_match/reading_match + match_score),避免建近重复 candidate;精确匹配行为不变。本任务只做匹配层;自动抽取器与规则影响分析留作 #83 P1b-2b 后续。",
+  "github": {
+    "issue": 83,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/entity_match.py:kana 归一化 + best_nonexact_match(reading/fuzzy,带分数)",
+      "entity_review.import_proposals:无精确匹配时回退 reading/fuzzy → 链到既有实体入 review(reason fuzzy_match/reading_match + match_score),不建近重复 candidate",
+      "entity-review.schema:reason 加 fuzzy_match/reading_match + match_score 字段",
+      "测试 + docs(§8.2 更新)+ 基线"
+    ],
+    "out": [
+      "自动抽取器(§8.2 第2步,外部 producer)与规则影响分析(§8.3)——同属 #83 P1b-2b,留后续",
+      "跨语种音译/罗马音表"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "精确匹配行为完全不变;仅在「无精确匹配」时回退 fuzzy/reading",
+      "reason": "不回归 P1b-2a 的精确决策;只补近似链接这条新路径。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "fuzzy/reading 命中一律入 review(不论 proposal.confidence)——链接本身不确定,且禁止自动改/建实体",
+      "reason": "§8.2:低置信匹配进 review;近似命中是证据不是结论,避免近重复 candidate 也避免误并。",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "reading 用 kana 归一化(片假名→平假名)比 readings∪source∪aliases;fuzzy 用 difflib 归一化相似度≥阈值,stdlib 无依赖",
+      "reason": "确定性、可测、无外部库;读音匹配落在 entity.readings 字段上。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "entity_match.py + schema(reason/match_score)+ 接入 import_proposals",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "精确不变",
+        "近似→review 带分数",
+        "不建近重复"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "测试 + docs §8.2 + 基线 + 全量 pytest",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "reading/fuzzy/边界测试",
+        "pytest 全绿"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "开 PR、过 CI、处理 review、合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "CI 全绿",
+        "PR 合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR(addresses #83 P1b-2b 匹配层),过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 全绿",
+      "PR 合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "346 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "通过(基线 346)",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "passed",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260624T093000Z-claude-code",
+    "timestamp": "2026-06-24T09:30:00Z",
+    "agent": "claude-code",
+    "summary": "entity_match 模糊/读音匹配落地+接入 gate;346 绿;抽取器/影响分析留余项",
+    "observed_head": "283eb3f"
+  },
+  "next_task": null
+}

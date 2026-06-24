@@ -732,7 +732,13 @@ entity linking 证据应保存：
   "曾被拒")。已裁决的 review 重导不重开(幂等);review 校验在写实体前(不留孤儿候选)。
   CLI `entity-review import/list/approve/dismiss`。
 
-Entity Linking 的自动抽取器、模糊/读音匹配、规则影响分析(§8.3)仍待做(#83 P1b-2b)。
+**已落地(2026-06-24,#83 P1b-2b 部分)**:`entity_match.py` 给 linking gate 在精确匹配之外加
+**读音/模糊**回退——`import_proposals` 无精确命中时,用 kana 归一化(片假名→平假名)比 `readings∪source∪aliases`
+做读音匹配、用 difflib 归一化相似度(stdlib)做模糊匹配;近似命中链到既有实体并入 review
+(`reason=reading_match|fuzzy_match` + `match_score`,不自动改/建实体),避免对既有实体的微变体新建近重复 candidate。
+精确匹配行为不变。
+
+Entity Linking 的**自动抽取器**(§8.2 第 2 步,外部 producer)与**规则影响分析**(§8.3)仍待做(#83 P1b-2b 余项)。
 
 ### 8.3 Knowledge Snapshot
 
