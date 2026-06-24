@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-106-translate-user",
   "title": "translate-user 通用端到端编排器",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/translate-user",
   "objective": "translate_user:逐篇 revision→bundle→翻译(executor 可插拔)→import→评估→保守择优(legacy incumbent vs 新译 challenger)→version→publish→render→按作者合并。executor=openrouter 全自动 CLI;通用 skill 薄壳供 cursor/claude。先通 openrouter 并在 18330282 跑 1 篇验证。",
   "github": {
     "issue": 106,
-    "pull_request": null
+    "pull_request": 107
   },
   "scope": {
     "in": [
@@ -90,7 +90,7 @@
     {
       "id": "S4",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S3"
       ],
@@ -100,14 +100,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S4",
-    "instruction": "开 PR(代码+测试已绿;实跑整篇受 402 阻塞,如实说明),过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python scripts/validate_agent_tasks.py"
@@ -116,13 +109,13 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "330 passed",
+        "summary": "333 passed",
         "timestamp": null
       },
       {
         "command": "conda run -n llm python scripts/check_docs_drift.py",
         "status": "passed",
-        "summary": "通过(基线 330)",
+        "summary": "通过(基线 333)",
         "timestamp": null
       },
       {
@@ -135,11 +128,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260624T040000Z-claude-code",
-    "timestamp": "2026-06-24T04:00:00Z",
+    "checkpoint_id": "cp-20260624T050000Z-claude-code",
+    "timestamp": "2026-06-24T05:00:00Z",
     "agent": "claude-code",
-    "summary": "translate-user+skill+retry 完成;330 绿;18330282 实跑编排正确但译文被 OpenRouter 402(余额)阻塞",
-    "observed_head": "615362c"
+    "summary": "PR #107 合并(含 2 条 review:本轮候选选择 + tags-only 兜底);translate-user 通用编排器交付;整篇实跑待 OpenRouter 充值",
+    "observed_head": "b9b6ed6"
   },
   "next_task": null
 }
