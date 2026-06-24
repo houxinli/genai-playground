@@ -255,6 +255,7 @@ seed-entities:
 # 端到端批量编排:用户现有 source+bilingual → 新架构 → 发布 + 渲染。
 # 用法: make ingest-user PROVIDER=pixiv SOURCE=data/pixiv/53230930 BILINGUAL=data/pixiv/53230930_bilingual STORE=... RENDER=...
 ingest-user:
+	@test -n "$(PROVIDER)" && test -n "$(SOURCE)" && test -n "$(BILINGUAL)" && test -n "$(STORE)" || { echo "ingest-user 需要 PROVIDER= SOURCE= BILINGUAL= STORE="; exit 2; }
 	$(PY) tasks/translation/src/core/pipeline_ingest.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --bilingual-dir "$(BILINGUAL)" --store "$(STORE)" $(if $(RENDER),--render-dir "$(RENDER)")
 
 # Entity Linking review 队列(#83 P1b-2)。抽取(外部)产 PROPOSALS JSON → 链接入队 → 人工裁决。

@@ -57,6 +57,31 @@ class PipelineIngestTest(unittest.TestCase):
             self.assertTrue((render_dir / f"{DOC_SID}.zh.txt").is_file())
             self.assertTrue((render_dir / "ingest_manifest.json").is_file())
 
+    def test_existing_newer_ref_is_not_rolled_back(self):
+        # Codex #97:store 已有别的(更新)current ref 时,批量 ingest 不得回滚到 legacy 版本
+        try:
+            from artifact_schemas import version_id_for
+        except ImportError:
+            from .artifact_schemas import version_id_for
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir, bil_dir = _layout(tmp)
+            store_root = tmp / "store"
+            m1 = pipeline_ingest.ingest_directory("pixiv", src_dir, bil_dir, store_root)
+            doc = m1["documents"][0]["document_id"]
+            store = ArtifactStore(store_root)
+            legacy_v = store.current_ref(doc)["version_id"]
+            # 模拟他人发布了一个不同的更新版本(改 created_at → 不同 version_id)
+            content = {k: v for k, v in store.get("document-version", doc, legacy_v).items() if k != "version_id"}
+            content["created_at"] = "2099-01-01T00:00:00Z"
+            v2 = {"version_id": version_id_for(content), **content}
+            store.put_many(doc, [v2])
+            store.publish(doc, v2["version_id"], expected_version_id=legacy_v)
+            # 再跑批量 ingest:不得把 ref 回滚到 legacy 版本
+            m2 = pipeline_ingest.ingest_directory("pixiv", src_dir, bil_dir, store_root)
+            self.assertEqual("ref_exists_kept", m2["documents"][0]["status"])
+            self.assertEqual(v2["version_id"], store.current_ref(doc)["version_id"])
+
     def test_missing_bilingual_is_skipped_not_fatal(self):
         with tempfile.TemporaryDirectory() as t:
             tmp = Path(t)

@@ -76,9 +76,18 @@ def ingest_document(
     created_at = legacy_import._legacy_created_at(rev)
     version = version_select.build_document_version(rev, recs, "workflow", created_at)
     store.put_many(doc, [version])
-    store.publish(doc, version["version_id"])
     report["version_id"] = version["version_id"]
-    report["published"] = True
+    # 批量 ingest 只建立 legacy 基线:已有 current ref(repair/人工选择/他 worker 发的更新版本)绝不回滚。
+    current = store.current_ref(doc)
+    if current is None:
+        store.publish(doc, version["version_id"], expected_version_id=None)  # CAS:仅当无 current
+        report["published"] = True
+    elif current["version_id"] == version["version_id"]:
+        report["published"] = True  # 幂等:已发布同一版本
+    else:
+        report["status"] = "ref_exists_kept"
+        report["published"] = False
+        report["current_version_id"] = current["version_id"]  # 保留既有(更新)版本,不回滚
 
     cands_by_id = {c["candidate_id"]: c for c in cands}
     translations = {sid: cands_by_id[cid]["text"] for sid, cid in version["selections"].items()}
@@ -138,6 +147,10 @@ def main() -> int:
     parser.add_argument("--store", required=True, type=Path, help="持久 ArtifactStore 根目录")
     parser.add_argument("--render-dir", type=Path, default=None, help="渲染产物输出目录(可选)")
     args = parser.parse_args()
+    # 空路径(如 Make 漏传 STORE=)不能静默落到 cwd 写一个 store。
+    for name, val in (("--store", args.store), ("--source-dir", args.source_dir), ("--bilingual-dir", args.bilingual_dir)):
+        if not str(val).strip() or str(val) == ".":
+            parser.error(f"{name} 不能为空路径")
     manifest = ingest_directory(args.provider, args.source_dir, args.bilingual_dir, args.store, args.render_dir)
     print(json.dumps(manifest["summary"], ensure_ascii=False))
     return 0
