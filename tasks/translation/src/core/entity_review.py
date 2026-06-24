@@ -138,16 +138,22 @@ def import_proposals(
         suggested = p.get("suggested_target")
         confidence = float(p["confidence"])
 
+        review_id = review_id_for(mention, document_id, segment_id, suggested)
+        existing = queue.get(review_id)
+        if existing is not None and existing.get("status") != "pending":
+            continue  # 已裁决的 review 不被重导重开/不再改实体(幂等,保住人工决定)
+
         matches = [
             e for scope in reachable for e in entity_store.list_scope(scope)
             if e["source"] == mention or mention in e.get("aliases", [])
         ]
         reason: Optional[str] = None
         candidate_entity_id: Optional[str] = None
+        new_entity: Optional[Dict[str, Any]] = None
 
         if matches:
             winner = _pick_winner(matches)
-            candidate_entity_id = winner["entity_id"]
+            candidate_entity_id = winner["entity_id"]  # 仅作证据;命中类 review 不晋升/不改既有实体
             if confidence < threshold:
                 reason = "low_confidence_match"
             elif suggested and suggested != winner["target"]:
@@ -156,19 +162,18 @@ def import_proposals(
                 continue  # 干净高置信命中 → 不排队
         else:
             if suggested:
-                entity = build_entity(
+                new_entity = build_entity(
                     _creator_scope(scope_ctx), mention, suggested,
                     authority="automatic", status="candidate", updated_at=created_at,
                 )
-                entity_store.put(entity)
-                candidate_entity_id = entity["entity_id"]
+                candidate_entity_id = new_entity["entity_id"]
                 reason = "new_candidate"
             else:
                 reason = "unmatched_needs_target"
 
         review = {
             "schema_version": 1,
-            "review_id": review_id_for(mention, document_id, segment_id, suggested),
+            "review_id": review_id,
             "mention": mention,
             "document_id": document_id,
             "confidence": confidence,
@@ -184,22 +189,30 @@ def import_proposals(
             review["suggested_target"] = suggested
         if p.get("context"):
             review["context"] = p["context"]
+        # 先校验 review,再写实体:避免 review 不合法时遗留孤儿 candidate 实体(被 resolver 误捡)。
+        errors = validate_artifact("entity-review", review) + validate_review_identity(review)
+        if errors:
+            raise ValueError(f"entity-review 不合法,放弃本 proposal(不写实体): {errors}")
+        if new_entity is not None:
+            entity_store.put(new_entity)
         queue.put(review)
         out.append(review)
     return out
 
 
-def _set_entity_status(entity_store: EntityStore, scope_ctx: Dict[str, Any], entity_id: str, status: str) -> bool:
-    """在可达 scope 内找到 entity_id 并置 status(晋升/锁定)。返回是否找到。"""
+def _find_entity(entity_store: EntityStore, scope_ctx: Dict[str, Any], entity_id: str) -> Optional[Dict[str, Any]]:
     for scope in _reachable_scopes(scope_ctx):
         for e in entity_store.list_scope(scope):
             if e["entity_id"] == entity_id:
-                e = dict(e)
-                e["status"] = status
-                e["authority"] = "approved" if status == "approved" else ("manual" if status == "locked" else e["authority"])
-                entity_store.put(e)
-                return True
-    return False
+                return e
+    return None
+
+
+def _set_entity_status(entity_store: EntityStore, entity: Dict[str, Any], status: str) -> None:
+    e = dict(entity)
+    e["status"] = status
+    e["authority"] = "approved" if status == "approved" else ("manual" if status == "locked" else e["authority"])
+    entity_store.put(e)
 
 
 def resolve_review(
@@ -218,10 +231,13 @@ def resolve_review(
     review = queue.get(review_id)
     if review is None:
         raise ValueError(f"review 不存在: {review_id}")
+    # 晋升与否取决于「被指实体当前是否仍是可晋升的自动候选」(status=candidate & authority=automatic),
+    # 而非可变的 review.reason —— reason 会随重导在 new_candidate/low_confidence_match 间翻转(Codex #91)。
+    # 既有 approved/locked/manual 实体不被 approve 改动(不降级 locked,Codex #90 F1)。
     if decision == "approved" and review.get("candidate_entity_id"):
-        status = "locked" if locked else "approved"
-        if not _set_entity_status(entity_store, scope_ctx, review["candidate_entity_id"], status):
-            raise ValueError(f"approve 失败:candidate 实体 {review['candidate_entity_id']} 不在可达 scope")
+        entity = _find_entity(entity_store, scope_ctx, review["candidate_entity_id"])
+        if entity is not None and entity.get("status") == "candidate" and entity.get("authority") == "automatic":
+            _set_entity_status(entity_store, entity, "locked" if locked else "approved")
     review = dict(review)
     review["status"] = decision
     review["decided_by"] = decided_by

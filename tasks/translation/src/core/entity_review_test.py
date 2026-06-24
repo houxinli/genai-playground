@@ -162,6 +162,52 @@ class ResolveTest(unittest.TestCase):
             self.assertEqual("candidate", ent["status"])  # 实体保留 candidate
             self.assertEqual("dismissed", h.queue.get(out[0]["review_id"])["status"])
 
+    def test_approve_conflict_does_not_downgrade_locked(self):
+        # Codex #90 F1:approve target_conflict/low_conf 命中的 locked 实体绝不被降级
+        with tempfile.TemporaryDirectory() as tmp:
+            h = Harness(tmp)
+            h.estore.put(build_entity(CREATOR, "ユキ", "小雪", authority="manual", status="locked"))
+            out = h.imp([_proposal("ユキ", target="雪子", confidence=0.95)])
+            self.assertEqual("target_conflict", out[0]["reason"])
+            resolve_review(out[0]["review_id"], "approved", "houxinli", h.queue, h.estore, CTX)
+            ent = h.estore.list_scope(CREATOR)[0]
+            self.assertEqual("locked", ent["status"])       # 未被降级
+            self.assertEqual("manual", ent["authority"])
+            self.assertEqual("小雪", ent["target"])          # 未被改写
+
+    def test_reimport_after_resolution_is_idempotent(self):
+        # Codex #90 F2:已裁决的 review 不被重导重开,实体不被降级
+        with tempfile.TemporaryDirectory() as tmp:
+            h = Harness(tmp)
+            out = h.imp([_proposal("マホ", target="真秀", confidence=0.9)])
+            resolve_review(out[0]["review_id"], "approved", "houxinli", h.queue, h.estore, CTX)
+            h.imp([_proposal("マホ", target="真秀", confidence=0.9)])  # 重导
+            r = h.queue.get(out[0]["review_id"])
+            self.assertEqual("approved", r["status"])        # 未被重开
+            self.assertEqual("houxinli", r["decided_by"])    # 决定保住
+            self.assertEqual("approved", h.estore.list_scope(CREATOR)[0]["status"])  # 实体未降级
+
+    def test_promotion_keys_on_entity_state_not_reason(self):
+        # Codex #91:重导使 reason 从 new_candidate 翻成 low_confidence_match(因第一次建的候选现在命中),
+        # approve 仍应晋升那个自动候选(晋升取决于实体状态,不取决于可变 reason)
+        with tempfile.TemporaryDirectory() as tmp:
+            h = Harness(tmp)
+            out = h.imp([_proposal("マホ", target="真秀", confidence=0.9)])
+            rid = out[0]["review_id"]
+            out2 = h.imp([_proposal("マホ", target="真秀", confidence=0.3)])  # 命中刚建的候选 → 翻转
+            self.assertEqual(rid, out2[0]["review_id"])
+            self.assertEqual("low_confidence_match", h.queue.get(rid)["reason"])
+            resolve_review(rid, "approved", "houxinli", h.queue, h.estore, CTX)
+            self.assertEqual("approved", h.estore.list_scope(CREATOR)[0]["status"])  # 仍晋升
+
+    def test_invalid_review_does_not_orphan_entity(self):
+        # Codex #90 F3:review 不合法(context 非字符串)时不得遗留孤儿 candidate 实体
+        with tempfile.TemporaryDirectory() as tmp:
+            h = Harness(tmp)
+            with self.assertRaises(ValueError):
+                h.imp([_proposal("マホ", target="真秀", confidence=0.9, context=123)])
+            self.assertEqual([], h.estore.list_scope(CREATOR))  # 无孤儿实体
+
 
 if __name__ == "__main__":
     unittest.main()
