@@ -21,6 +21,7 @@ import contextlib
 import fcntl
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -390,13 +391,15 @@ class ArtifactStore:
         expected_version_id: Any = _UNSET,
         *,
         decided_by: str = "workflow",
-        published_at: str = "1970-01-01T00:00:00Z",
+        published_at: Optional[str] = None,
     ) -> Dict[str, Any]:
         """把 DocumentVersion 设为 current(发布)。expected_version_id 给定则做 compare-and-swap。
 
         §4:临时文件+原子 rename 不能让"读 parent→比较→替换"原子,必须持锁。这里在 flock 临界区内
         读当前 ref→比对 expected→原子写;CAS 失败放弃(raise),不重试覆盖。version 必须已在 store 且属本文档。
         """
+        # 默认用真实 UTC 时间(不能用 1970 占位:current ref 是审计/排序/回滚的依据,假时间会乱序)。
+        published_at = published_at or datetime.now(timezone.utc).isoformat()
         version = self.get("document-version", document_id, version_id)
         if version is None:
             raise ValueError(f"publish: version {version_id} 不在 {document_id} 的 store(发布≠创建)")
@@ -428,4 +431,10 @@ class ArtifactStore:
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(tmp, path)
+            # 持锁时 fsync 目录:否则 rename 在崩溃/重启后可能丢失,current ref 回滚(与 shard 写一致)。
+            dir_fd = os.open(str(path.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
         return ref

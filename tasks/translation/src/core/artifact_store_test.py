@@ -400,6 +400,15 @@ class PublishTest(unittest.TestCase):
                 store.publish(DOC, v2["version_id"], expected_version_id="version_" + "0" * 40)
             self.assertEqual(v1["version_id"], store.current_ref(DOC)["version_id"])  # 未被覆盖
 
+    def test_publish_defaults_to_real_timestamp(self):
+        # 不传 published_at 时记真实 UTC,不留 1970 占位(current ref 是审计/排序依据)
+        with tempfile.TemporaryDirectory() as tmp:
+            store, cand = self._seeded(tmp)
+            v = _version(cand); store.put_many(DOC, [v])
+            ref = store.publish(DOC, v["version_id"])
+            self.assertNotIn("1970", ref["published_at"])
+            self.assertTrue(ref["published_at"].startswith("20"))
+
     def test_publish_unknown_version_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             store, _ = self._seeded(tmp)
