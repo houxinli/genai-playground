@@ -240,7 +240,18 @@ agent-complete:
 
 
 # ============ 候选导入(新架构) ============
-.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user rebuild-index extract-entities entity-review-import entity-review-list entity-review-approve entity-review-dismiss
+.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user rebuild-index extract-entities extract-job import-extraction entity-review-import entity-review-list entity-review-approve entity-review-dismiss
+
+# Agent 人名抽取(Cursor 等):导出待抽取文本 → agent 抽 → 导回实体库。
+# 用法: make extract-job REVISION=rev.json OUT=job.json
+extract-job:
+	@test -n "$(REVISION)" && test -n "$(OUT)" || { echo "extract-job 需要 REVISION= OUT="; exit 2; }
+	$(PY) tasks/translation/src/core/entity_extract.py --mode job --revision "$(REVISION)" --out "$(OUT)"
+
+# 用法: make import-extraction REVISION=rev.json RESULT=result.json ENTITY_STORE=.. QUEUE=..
+import-extraction:
+	@test -n "$(REVISION)" && test -n "$(RESULT)" && test -n "$(ENTITY_STORE)" && test -n "$(QUEUE)" || { echo "import-extraction 需要 REVISION= RESULT= ENTITY_STORE= QUEUE="; exit 2; }
+	$(PY) tasks/translation/src/core/entity_extract.py --mode import --revision "$(REVISION)" --result "$(RESULT)" --entity-store "$(ENTITY_STORE)" --queue "$(QUEUE)"
 
 # 从 revision 启发式抽人名 mention → 喂链接闸门入 review(--link)。
 # 用法: make extract-entities REVISION=rev.json ENTITY_STORE=... QUEUE=... PROVIDER=pixiv CREATOR_ID=... [LINK=1]

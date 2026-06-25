@@ -107,6 +107,9 @@ def _validate_proposal(p: Any) -> None:
     conf = p.get("confidence")
     if not isinstance(conf, (int, float)) or not (0 <= conf <= 1):
         raise ValueError(f"proposal.confidence 必须是 0..1 的数: {p!r}")
+    readings = p.get("readings")
+    if readings is not None and not (isinstance(readings, list) and all(isinstance(r, str) for r in readings)):
+        raise ValueError(f"proposal.readings 必须是字符串数组: {p!r}")
 
 
 def _creator_scope(scope_ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -165,7 +168,9 @@ def import_proposals(
         else:
             # 无精确匹配:回退 读音/模糊。近似命中链到既有实体并入 review(证据,不自动改/建实体),
             # 避免对既有实体的微变体新建近重复 candidate(#83 P1b-2b)。
-            near = entity_match.best_nonexact_match(mention, reachable_entities, pick_winner=_pick_winner)
+            near = entity_match.best_nonexact_match(
+                mention, reachable_entities, pick_winner=_pick_winner,
+                mention_readings=p.get("readings"))  # agent 给的读音也参与匹配,避免「雪/ゆき」重建近重复
             if near is not None:
                 entity, kind, match_score = near
                 candidate_entity_id = entity["entity_id"]
@@ -173,6 +178,7 @@ def import_proposals(
             elif suggested:
                 new_entity = build_entity(
                     _creator_scope(scope_ctx), mention, suggested,
+                    readings=(p.get("readings") or None),  # LLM 给的读音落进候选 → 喂读音匹配
                     authority="automatic", status="candidate", updated_at=created_at,
                 )
                 candidate_entity_id = new_entity["entity_id"]

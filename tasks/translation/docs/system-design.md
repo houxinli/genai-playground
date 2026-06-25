@@ -743,6 +743,12 @@ entity linking 证据应保存：
 `import_proposals` 链接入 review。**抽取是不可信候选生产者**,准度由 review 闸门兜,不跑 LLM。
 `make extract-entities ... LINK=1` 端到端。
 
+**已落地(2026-06-24,#83 agent 抽取)**:除启发式抽取外,新增 **agent(Cursor+Grok 等)抽取生产者**——
+`entity_extract.build_extraction_job`(导出待抽取文本)→ agent 按 skill `extract-names` 通读全文产
+`{mention, readings, suggested_target, confidence}` → `import_extraction_result` 喂链接闸门(作用域取自
+document_id;LLM 给的 readings 透传进新建候选 → 喂读音匹配)。这是 `extract_name_glossary`(#61) 的正确版:
+产物进**实体库**(有作用域/经 review/可锁定),而非塞进每次 prompt。`make extract-job` / `make import-extraction`。
+
 Entity Linking 的**规则影响分析**(§8.3)仍待做(#83 P1b-2b 最后余项)。
 
 ### 8.3 Knowledge Snapshot
