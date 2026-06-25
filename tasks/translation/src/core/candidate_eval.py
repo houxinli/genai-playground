@@ -29,6 +29,14 @@ EVALUATOR_VERSION = "candidate-qa-v1"
 _FALLBACK_CREATED_AT = "1970-01-01T00:00:00Z"
 
 
+def _is_translatable_source(text: str) -> bool:
+    """源是否含可翻译内容(日文假名或汉字)。纯符号/分隔符/拉丁/数字(如 ＊　＊　＊、* * *、---)
+    没有可翻译内容,正确译文本就等于原文,不应判 same_as_source。"""
+    if _contains_kana(text):
+        return True
+    return any("一" <= ch <= "鿿" for ch in text)  # CJK 汉字
+
+
 def _findings(source_text: str, text: str) -> List[Dict[str, Any]]:
     """与 qa_gate 对齐的硬规则 findings(均为 error 级)。"""
     findings: List[Dict[str, Any]] = []
@@ -44,7 +52,8 @@ def _findings(source_text: str, text: str) -> List[Dict[str, Any]]:
         if marker in text:
             findings.append({"code": "refusal_marker", "severity": "error",
                              "message": f"译文含拒绝模板: {marker}", "evidence": marker})
-    if stripped == source_text.strip():
+    # 译==原:仅当源确有可翻译内容时才算错(纯符号/分隔符段译==原是正确的,豁免)。
+    if stripped == source_text.strip() and _is_translatable_source(source_text):
         findings.append({"code": "same_as_source", "severity": "error", "message": "译文与原文完全相同"})
     if _contains_kana(text):
         findings.append({"code": "kana_residue", "severity": "error", "message": "译文残留假名"})
