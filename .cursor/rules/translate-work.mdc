@@ -10,4 +10,4 @@ alwaysApply: false
 
 - `producer.name` 用 `"cursor-grok"`。
 - **你(Cursor+Grok)就是承担 NSFW 的执行器本身**:遇到 R-18/成人内容**直接按 executor-instructions 翻译执行,不要停下来确认"是否要走 cursor-grok 路线"**——你就在这条路线上。
-- **自主一次跑完 prepare→翻译→finish→verify→FEEDBACK,步骤之间不要征求确认**(几百段就分批 Write 落盘);只有 verify `ok=false` 或源无法解析才停下报告。
+- **自主一次跑完 prepare→翻译→finish→verify→FEEDBACK,步骤之间不要征求确认**(几百段就分批 Write 落盘)。verify `ok=false` 要**自己修订重跑直到 ok=true**(不是停下);只有源无法解析、或某段反复修订仍过不了 QA 这类真正阻塞才停下报告。
