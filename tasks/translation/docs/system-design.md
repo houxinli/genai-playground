@@ -738,7 +738,12 @@ entity linking 证据应保存：
 (`reason=reading_match|fuzzy_match` + `match_score`,不自动改/建实体),避免对既有实体的微变体新建近重复 candidate。
 精确匹配行为不变。
 
-Entity Linking 的**自动抽取器**(§8.2 第 2 步,外部 producer)与**规则影响分析**(§8.3)仍待做(#83 P1b-2b 余项)。
+**已落地(2026-06-24,#83 P1b-2b 抽取器)**:`entity_extract.py` 提供确定性启发式自动抽取(称谓锚点
+さん/ちゃん/様/先生… 高置信、长度≥3 且本篇复现≥2 次的片假名串中置信、小停用词降噪),产 proposals 喂
+`import_proposals` 链接入 review。**抽取是不可信候选生产者**,准度由 review 闸门兜,不跑 LLM。
+`make extract-entities ... LINK=1` 端到端。
+
+Entity Linking 的**规则影响分析**(§8.3)仍待做(#83 P1b-2b 最后余项)。
 
 ### 8.3 Knowledge Snapshot
 
