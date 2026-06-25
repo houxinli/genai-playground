@@ -240,7 +240,14 @@ agent-complete:
 
 
 # ============ 候选导入(新架构) ============
-.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user rebuild-index entity-review-import entity-review-list entity-review-approve entity-review-dismiss
+.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user rebuild-index extract-entities entity-review-import entity-review-list entity-review-approve entity-review-dismiss
+
+# 从 revision 启发式抽人名 mention → 喂链接闸门入 review(--link)。
+# 用法: make extract-entities REVISION=rev.json ENTITY_STORE=... QUEUE=... PROVIDER=pixiv CREATOR_ID=... [LINK=1]
+extract-entities:
+	@test -n "$(REVISION)" || { echo "extract-entities 需要 REVISION="; exit 2; }
+	@if [ -n "$(LINK)" ]; then test -n "$(ENTITY_STORE)" && test -n "$(QUEUE)" || { echo "extract-entities LINK 需要 ENTITY_STORE= 与 QUEUE="; exit 2; }; fi
+	$(PY) tasks/translation/src/core/entity_extract.py --revision "$(REVISION)" $(if $(ENTITY_STORE),--entity-store "$(ENTITY_STORE)") $(if $(QUEUE),--queue "$(QUEUE)") $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(CREATOR_ID),--creator-id "$(CREATOR_ID)") $(if $(LINK),--link)
 
 # 从 JSONL 工件全量重建 SQLite 只读投影(派生索引,可丢弃重建)。
 # 用法: make rebuild-index STORE=<ArtifactStore 根目录> DB=index.db
