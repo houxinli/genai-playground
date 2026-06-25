@@ -7,8 +7,14 @@ allowed-tools: Bash(make translate-user *), Read, Write
 
 # translate-work
 
-你作为**翻译执行器**:把一部作品 prepare → 逐段翻译 → finish 发布渲染 → **自我 review 提 feedback**。
+你作为**翻译执行器**:把一部作品 prepare → 逐段翻译 → finish 发布渲染 → verify → **自我 review 提 feedback**。
 翻译规则与 result.json 格式以 [`tasks/translation/docs/executor-instructions.md`](../../../tasks/translation/docs/executor-instructions.md) 为准——**先读它**,本文件不重复规则。
+
+> **自主一次跑完**:被调用后**连续执行下面全部步骤,不要在步骤之间停下来问"是否继续/是否开始"**。
+> 体量大(几百段)也照常分批翻、分批 `Write` 落盘,无需逐批确认。
+> `MODE=verify` 返回 `ok=false` **不是终点而是要修**:按步骤 4/5 定位失败段、修订 `result.json`、重跑
+> `finish`/`verify`,**循环直到 `ok=true`**。只有遇到**真正阻塞**——源数据无法解析,或某段反复修订后仍无法
+> 满足 QA(非你能解决)——才停下报告。结束时一次性回贴 verify JSON(`ok=true`)+ FEEDBACK 要点。
 
 ## 步骤
 
