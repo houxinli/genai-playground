@@ -51,32 +51,39 @@ def make_translate_fn(executor: str, model: Optional[str] = None) -> TranslateFn
     raise ValueError(f"未知/不可自动执行的 executor: {executor!r}(cursor/claude 走 skill 薄壳)")
 
 
-def translate_document(
-    provider: str,
-    source_path: Path,
-    store: ArtifactStore,
-    translate_fn: TranslateFn,
-    render_dir: Optional[Path] = None,
-    bilingual_dir: Optional[Path] = None,
-) -> Dict[str, Any]:
-    """单篇:revision→bundle→翻译→import→评估→保守择优→version→publish→render。返回报告。"""
+def _revision_bundle_legacy(provider, source_path, store, bilingual_dir):
+    """确定性重建 revision + bundle + legacy 映射(prepare/finish 共用)。ingest/legacy 入库幂等。"""
     source_path = Path(source_path)
     rev = si.build_document_revision(provider, source_path)
     doc = rev["document_id"]
-    report: Dict[str, Any] = {"document_id": doc, "segments": len(rev["segments"]), "status": "ok"}
     ingest_revision(rev, store)
-
-    # 已有 legacy 译文(可选)作 incumbent 基线;新译作 challenger。
     legacy_by_seg: Dict[str, Dict[str, Any]] = {}
     if bilingual_dir is not None and (Path(bilingual_dir) / source_path.name).is_file():
         legacy, atts, _ = legacy_import.build_legacy_candidates(provider, source_path, Path(bilingual_dir) / source_path.name, "bilingual")
         if legacy:
             store.put_many(doc, [*legacy, *atts])
             legacy_by_seg = {c["segment_id"]: c for c in legacy}
-
     seg_ids = [s["segment_id"] for s in rev["segments"]]
     bundle = export_job(rev, seg_ids)
-    result = translate_fn(bundle)
+    return rev, bundle, legacy_by_seg
+
+
+def prepare_document(provider, source_path, store, bilingual_dir=None) -> Dict[str, Any]:
+    """agent 路线第一步:导出该篇翻译 bundle(并入库 revision/legacy)给执行器(我/Cursor)。"""
+    rev, bundle, _ = _revision_bundle_legacy(provider, source_path, store, bilingual_dir)
+    doc = rev["document_id"]
+    return {"document_id": doc, "source_id": doc.rsplit(":", 1)[-1], "bundle": bundle}
+
+
+def finish_document(
+    provider, source_path, store, result, render_dir=None, bilingual_dir=None,
+) -> Dict[str, Any]:
+    """agent 路线第二步:吃 executor 产的 result → import→评估→保守择优→version→publish→render。"""
+    source_path = Path(source_path)
+    rev, bundle, legacy_by_seg = _revision_bundle_legacy(provider, source_path, store, bilingual_dir)
+    doc = rev["document_id"]
+    report: Dict[str, Any] = {"document_id": doc, "segments": len(rev["segments"]), "status": "ok"}
+    seg_ids = [s["segment_id"] for s in rev["segments"]]
     rep = import_result(bundle["task"], result, store)
     if rep["quarantined"]:
         report["status"] = "translate_quarantined"
@@ -157,6 +164,76 @@ def translate_document(
     return report
 
 
+def translate_document(
+    provider, source_path, store, translate_fn, render_dir=None, bilingual_dir=None,
+) -> Dict[str, Any]:
+    """自动路线单篇:prepare(导出 bundle)→ translate_fn 翻译 → finish(发布渲染)。"""
+    prep = prepare_document(provider, source_path, store, bilingual_dir)
+    result = translate_fn(prep["bundle"])
+    return finish_document(provider, source_path, store, result, render_dir, bilingual_dir)
+
+
+def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=None, limit=None) -> Dict[str, Any]:
+    """agent 路线:逐篇导出 bundle 到 jobs_dir/<source_id>.job.json,供执行器逐个翻译。"""
+    source_dir, store_root, jobs_dir = Path(source_dir), Path(store_root), Path(jobs_dir)
+    store = ArtifactStore(store_root)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    sources = sorted(source_dir.glob("*.txt"))
+    if limit is not None:
+        sources = sources[:limit]
+    jobs = []
+    for src in sources:
+        try:
+            prep = prepare_document(provider, src, store, bilingual_dir)
+            out = jobs_dir / f"{prep['source_id']}.job.json"
+            out.write_text(json.dumps(prep["bundle"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            jobs.append({"source": src.name, "source_id": prep["source_id"], "job": str(out),
+                         "segments": len(prep["bundle"]["segments"])})
+        except Exception as exc:
+            jobs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
+    manifest = {"provider": provider, "source_dir": str(source_dir), "jobs_dir": str(jobs_dir), "jobs": jobs}
+    (jobs_dir / "prepare_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return manifest
+
+
+def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, bilingual_dir=None, limit=None) -> Dict[str, Any]:
+    """agent 路线:对每篇 source 找 results_dir/<source_id>.result.json → finish_document → 合并整本。
+
+    source_id 与 prepare 一致地取自 document_id(**不是 src.stem**:pixiv 系列文件名是
+    `{series}_{order}_{novel}.txt`,stem≠novel_id,会错配成 no_result,Codex #122)。limit 与 prepare 对齐。"""
+    source_dir, store_root = Path(source_dir), Path(store_root)
+    results_dir, render_dir = Path(results_dir), Path(render_dir)
+    store = ArtifactStore(store_root)
+    sources = sorted(source_dir.glob("*.txt"))
+    if limit is not None:
+        sources = sources[:limit]
+    docs = []
+    for src in sources:
+        try:
+            source_id = si.build_document_revision(provider, src)["document_id"].rsplit(":", 1)[-1]
+        except Exception as exc:
+            docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        result_path = results_dir / f"{source_id}.result.json"
+        if not result_path.is_file():
+            docs.append({"source": src.name, "status": "no_result"})
+            continue
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            docs.append(finish_document(provider, src, store, result, render_dir, bilingual_dir))
+        except Exception as exc:
+            docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
+    rendered_sids = [d["document_id"].rsplit(":", 1)[-1] for d in docs if d.get("rendered")]
+    merged = merge_author(render_dir, source_dir.name, rendered_sids)
+    summary = {"total": len(docs), "published": sum(1 for d in docs if d.get("published")),
+               "no_result": sum(1 for d in docs if d.get("status") == "no_result"),
+               "errors": sum(1 for d in docs if d.get("status") == "error")}
+    manifest = {"provider": provider, "summary": summary, "merged": merged, "documents": docs}
+    render_dir.mkdir(parents=True, exist_ok=True)
+    (render_dir / "translate_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return manifest
+
+
 def translate_user(
     provider: str,
     source_dir: Path,
@@ -199,18 +276,38 @@ def translate_user(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", choices=("auto", "prepare", "finish"), default="auto",
+                        help="auto=自动执行器全程;prepare=导出 bundle 给 agent;finish=吃 agent result 发布渲染")
     parser.add_argument("--provider", required=True, choices=("pixiv", "fanbox"))
     parser.add_argument("--source-dir", required=True, type=Path)
     parser.add_argument("--store", required=True, type=Path)
     parser.add_argument("--render-dir", type=Path, default=None)
+    parser.add_argument("--jobs-dir", type=Path, default=None, help="mode=prepare 的 bundle 输出目录")
+    parser.add_argument("--results-dir", type=Path, default=None, help="mode=finish 的 agent result 目录")
     parser.add_argument("--bilingual-dir", type=Path, default=None, help="可选:已有 legacy 译文作 incumbent")
-    parser.add_argument("--executor", default="openrouter", help="自动执行器(openrouter);cursor/claude 走 skill")
+    parser.add_argument("--executor", default="openrouter", help="mode=auto 的执行器(openrouter)")
     parser.add_argument("--model", default=None)
-    parser.add_argument("--limit", type=int, default=None, help="只翻前 N 篇(控成本)")
+    parser.add_argument("--limit", type=int, default=None, help="只处理前 N 篇(控成本)")
     args = parser.parse_args()
     for name, val in (("--store", args.store), ("--source-dir", args.source_dir)):
         if not str(val).strip() or str(val) == ".":
             parser.error(f"{name} 不能为空路径")
+
+    if args.mode == "prepare":
+        if not (args.jobs_dir and str(args.jobs_dir).strip()):
+            parser.error("mode=prepare 需要非空 --jobs-dir")
+        m = prepare_user(args.provider, args.source_dir, args.store, args.jobs_dir,
+                         bilingual_dir=args.bilingual_dir, limit=args.limit)
+        print(json.dumps({"jobs": len([j for j in m["jobs"] if j.get("job")]), "jobs_dir": str(args.jobs_dir)}, ensure_ascii=False))
+        return 0
+    if args.mode == "finish":
+        if not (args.results_dir and str(args.results_dir).strip()) or not (args.render_dir and str(args.render_dir).strip()):
+            parser.error("mode=finish 需要非空 --results-dir 与 --render-dir")
+        m = finish_user(args.provider, args.source_dir, args.store, args.render_dir, args.results_dir,
+                        bilingual_dir=args.bilingual_dir, limit=args.limit)
+        print(json.dumps(m["summary"], ensure_ascii=False))
+        return 0
+
     translate_fn = make_translate_fn(args.executor, args.model)
     manifest = translate_user(
         args.provider, args.source_dir, args.store, args.render_dir, translate_fn,

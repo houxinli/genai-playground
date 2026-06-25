@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-121-agent-translate-path",
+  "title": "translate-user agent 执行器路线(prepare/finish)",
+  "status": "active",
+  "branch": "feat/translate-user-agent-path",
+  "objective": "把 translate_document 拆成 prepare_document/finish_document;加 prepare_user(逐篇导 bundle)/finish_user(吃 result→发布渲染合并)+ --mode prepare/finish CLI + Make。让 SFW 作者用本地 agent 当译者跑全程。",
+  "github": {
+    "issue": 121,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "translate_user.py:_revision_bundle_legacy 共用 + prepare_document/finish_document + prepare_user/finish_user + --mode prepare/finish CLI",
+      "translate_user_test:prepare→agent→finish 端到端(mock)+ 无 result→no_result",
+      "Makefile translate-user 加 MODE/JOBS_DIR/RESULTS_DIR;基线"
+    ],
+    "out": [
+      "真实整篇翻译(单独 demo,数据 git-ignored);规则影响分析"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "finish 确定性重建 rev+bundle+legacy(与 prepare 一致),import_result 用重建的 task",
+      "reason": "prepare/finish 跨进程;export_job/build_revision 确定性,task_digest 内容寻址一致,result 对得上。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "拆 prepare/finish + user 级 + CLI/Make",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "端到端 mock 通"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "测试+基线+docs",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "374 绿"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "PR+CI+review+合并",
+      "status": "in_progress",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "CI 绿",
+        "合并"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S3",
+    "instruction": "开 PR closes #121,过 CI,处理 review,合并。",
+    "acceptance": [
+      "CI 绿",
+      "合并"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python scripts/validate_agent_tasks.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "374 passed",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/check_docs_drift.py",
+        "status": "passed",
+        "summary": "通过",
+        "timestamp": null
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "passed",
+        "timestamp": null
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260624T150000Z-claude-code",
+    "timestamp": "2026-06-24T15:00:00Z",
+    "agent": "claude-code",
+    "summary": "translate-user agent prepare/finish 路线落地;374 绿;待 PR + 18330282 实跑",
+    "observed_head": "becf64b"
+  },
+  "next_task": null
+}

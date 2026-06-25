@@ -286,7 +286,7 @@ seed-entities:
 # 用法: make translate-user PROVIDER=pixiv SOURCE=data/pixiv/18330282 STORE=... RENDER=... [EXECUTOR=openrouter] [LIMIT=1] [BILINGUAL=...] [MODEL=x-ai/grok-4.3]
 translate-user:
 	@test -n "$(PROVIDER)" && test -n "$(SOURCE)" && test -n "$(STORE)" || { echo "translate-user 需要 PROVIDER= SOURCE= STORE="; exit 2; }
-	$(PY) tasks/translation/src/core/translate_user.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --store "$(STORE)" $(if $(RENDER),--render-dir "$(RENDER)") $(if $(BILINGUAL),--bilingual-dir "$(BILINGUAL)") $(if $(EXECUTOR),--executor "$(EXECUTOR)") $(if $(MODEL),--model "$(MODEL)") $(if $(LIMIT),--limit $(LIMIT))
+	$(PY) tasks/translation/src/core/translate_user.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --store "$(STORE)" $(if $(MODE),--mode "$(MODE)") $(if $(RENDER),--render-dir "$(RENDER)") $(if $(JOBS_DIR),--jobs-dir "$(JOBS_DIR)") $(if $(RESULTS_DIR),--results-dir "$(RESULTS_DIR)") $(if $(BILINGUAL),--bilingual-dir "$(BILINGUAL)") $(if $(EXECUTOR),--executor "$(EXECUTOR)") $(if $(MODEL),--model "$(MODEL)") $(if $(LIMIT),--limit $(LIMIT))
 
 # OpenRouter Grok 执行器:job bundle → 实际翻译 → result.json(需 OPENROUTER_API_KEY)。
 # 用法: make translate-exec BUNDLE=job.json OUT=result.json [MODEL=x-ai/grok-4.3]
