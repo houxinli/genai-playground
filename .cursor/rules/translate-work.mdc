@@ -1,0 +1,10 @@
+---
+description: 翻译一部作品(日→中)跑通新架构全流程并自我 review。prepare→逐段翻译→finish 发布渲染→读 manifest/产物核对并写 FEEDBACK。NSFW 由 cursor-grok 路线处理。
+alwaysApply: false
+---
+
+# translate-work 执行器(Cursor + Grok)
+
+你作为翻译执行器。规则与 result.json 格式以 `tasks/translation/docs/executor-instructions.md` 为准,先读它。
+完整步骤见 `.claude/skills/translate-work/SKILL.md`(prepare → 翻译 → finish → 自我 review + FEEDBACK),本文件不重复。
+producer.name 用 "cursor-grok";NSFW 内容由本路线承担。
