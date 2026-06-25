@@ -163,7 +163,15 @@ class TranslateUserTest(unittest.TestCase):
             v1 = tu.verify_user("pixiv", src_dir, store, render, results)
             self.assertTrue(v1["ok"], v1["documents"])
             self.assertTrue(v1["documents"][0]["published"])
+            self.assertTrue(v1["documents"][0]["version_matches_source"])
             self.assertTrue(v1["documents"][0]["rendered"])
+
+            # Codex #130:源改了(新 revision)但旧 ref 仍在 → verify 不能算通过
+            (src_dir / "700001.txt").write_text(
+                (src_dir / "700001.txt").read_text(encoding="utf-8") + "\n新增一段正文。\n", encoding="utf-8")
+            v2 = tu.verify_user("pixiv", src_dir, store, render, results)
+            self.assertFalse(v2["ok"])
+            self.assertFalse(v2["documents"][0]["version_matches_source"])  # 旧版本不对应新源
 
     def test_finish_respects_limit(self):
         # Codex #122:finish 也要按 limit 切片,不扫 limit 之外的文件(否则报无关 no_result)

@@ -248,20 +248,26 @@ def verify_user(provider, source_dir, store_root, render_dir, results_dir=None, 
     for src in sources:
         rep: Dict[str, Any] = {"source": src.name}
         try:
-            doc = si.build_document_revision(provider, src)["document_id"]
+            rev = si.build_document_revision(provider, src)
         except Exception as exc:
             rep.update(ok=False, error=f"{type(exc).__name__}: {exc}")
             docs.append(rep)
             continue
+        doc = rev["document_id"]
+        rev_id = rev["revision_id"]
         sid = doc.rsplit(":", 1)[-1]
         rep["source_id"] = sid
         rep["result_json"] = bool(results_dir and (results_dir / f"{sid}.result.json").is_file())
         rep["candidates"] = len(store.list_shard("candidate", doc))
-        rep["published"] = store.current_ref(doc) is not None
+        # 发布须对应**当前源 revision**:旧 current ref(源已变、新版从未 finish)不能算通过(Codex #130)。
+        current = store.current_ref(doc)
+        rep["published"] = current is not None
+        version = store.get("document-version", doc, current["version_id"]) if current else None
+        rep["version_matches_source"] = bool(version and version.get("revision_id") == rev_id)
         rep["rendered"] = bool(render_dir and (render_dir / f"{sid}.zh.txt").is_file()
                                and (render_dir / f"{sid}.bilingual.txt").is_file())
-        # result.json 仅当传了 results_dir 才作硬条件;核心真相是 入库+发布+渲染。
-        rep["ok"] = (rep["candidates"] > 0 and rep["published"] and rep["rendered"]
+        # result.json 仅当传了 results_dir 才作硬条件;核心真相是 入库 + 发布到当前 revision + 渲染。
+        rep["ok"] = (rep["candidates"] > 0 and rep["version_matches_source"] and rep["rendered"]
                      and (rep["result_json"] or results_dir is None))
         docs.append(rep)
     ok = bool(docs) and all(d.get("ok") for d in docs)
