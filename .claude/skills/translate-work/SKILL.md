@@ -51,3 +51,4 @@ allowed-tools: Bash(make translate-user *), Read, Write
 
 - 只产候选 + 自我 review,**不**改发布策略、不批准实体;importer/择优/发布由底层保证。
 - 大作品按相同模式逐篇;`LIMIT` 可控范围。
+- **内容策略(如 NSFW 由哪个执行器承担)以 [`AGENTS.md`](../../../AGENTS.md) 与各执行器自身适配(`.claude` / `.cursor` 规则)为准**,本 skill 不内联策略——按你所在执行器的既定约定执行(该 handoff 给别人的就 handoff,该自己做的就做)。
