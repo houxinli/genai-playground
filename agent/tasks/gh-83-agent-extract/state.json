@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-83-agent-extract",
   "title": "Agent 人名抽取(Cursor 执行器,#83 P1b-2b)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/agent-name-extraction",
   "objective": "build_extraction_job(revision→待抽取文本 job)+ import_extraction_result(agent 产 {mention,readings,suggested_target,confidence} → 喂 import_proposals,作用域取自 document_id,readings 透传进新建候选实体)+ 通用 skill extract-names(Cursor+Grok 当抽取生产者)+ CLI/make。CI 用 mock 测,不在代码内调模型。",
   "github": {
     "issue": 83,
-    "pull_request": null
+    "pull_request": 119
   },
   "scope": {
     "in": [
@@ -70,7 +70,7 @@
     {
       "id": "S3",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S2"
       ],
@@ -80,14 +80,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR(addresses #83 agent 抽取),过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python scripts/validate_agent_tasks.py"
@@ -96,13 +89,13 @@
       {
         "command": "conda run -n llm python -m pytest tasks/translation/src -q",
         "status": "passed",
-        "summary": "369 passed",
+        "summary": "372 passed",
         "timestamp": null
       },
       {
         "command": "conda run -n llm python scripts/check_docs_drift.py",
         "status": "passed",
-        "summary": "通过(基线 369)",
+        "summary": "通过(基线 372)",
         "timestamp": null
       },
       {
@@ -115,11 +108,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260624T140000Z-claude-code",
-    "timestamp": "2026-06-24T14:00:00Z",
+    "checkpoint_id": "cp-20260624T143000Z-claude-code",
+    "timestamp": "2026-06-24T14:30:00Z",
     "agent": "claude-code",
-    "summary": "agent 人名抽取(job/import + readings 透传 + skill extract-names)落地;369 绿",
-    "observed_head": "6eb27a0"
+    "summary": "PR #119 合并(含 2 review:读音参与匹配 + 校验 result 属本 revision);agent 抽取交付;#83 只剩规则影响分析",
+    "observed_head": "061b84b"
   },
   "next_task": null
 }
