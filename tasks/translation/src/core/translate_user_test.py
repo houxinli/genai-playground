@@ -136,6 +136,43 @@ class TranslateUserTest(unittest.TestCase):
             book = (render_dir / f"{src_dir.name}.zh.txt").read_text(encoding="utf-8")
             self.assertIn("早上好", book)
 
+    def test_verify_true_after_finish_false_on_prepare_only(self):
+        # #129:verify 独立核对落盘——finish 后 ok;只 prepare(Cursor 那种)→ ok=False(没 import/发布/渲染)
+        import json
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"; src_dir.mkdir(); shutil.copy(SRC, src_dir / "700001.txt")
+            bil_dir = tmp / "bil"; bil_dir.mkdir(); shutil.copy(BILINGUAL, bil_dir / "700001.txt")
+            store = tmp / "store"; jobs = tmp / "jobs"; results = tmp / "results"; render = tmp / "out"
+            results.mkdir()
+
+            prep = tu.prepare_user("pixiv", src_dir, store, jobs, bilingual_dir=bil_dir)
+            # 只 prepare:还没翻、没 finish → verify 必须 False(这正是 Cursor 谎报的状态)
+            v0 = tu.verify_user("pixiv", src_dir, store, render, results)
+            self.assertFalse(v0["ok"])
+            self.assertFalse(v0["documents"][0]["published"])  # 没 finish → 没发布
+            self.assertFalse(v0["documents"][0]["rendered"])   # 没渲染产物
+            self.assertFalse(v0["documents"][0]["result_json"])  # 没写 result(Cursor 谎报的核心)
+
+            # 真翻 + finish 后 → verify True
+            for j in prep["jobs"]:
+                bundle = json.loads(Path(j["job"]).read_text(encoding="utf-8"))
+                (results / f"{j['source_id']}.result.json").write_text(
+                    json.dumps(_mock_executor(bundle), ensure_ascii=False), encoding="utf-8")
+            tu.finish_user("pixiv", src_dir, store, render, results, bilingual_dir=bil_dir)
+            v1 = tu.verify_user("pixiv", src_dir, store, render, results)
+            self.assertTrue(v1["ok"], v1["documents"])
+            self.assertTrue(v1["documents"][0]["published"])
+            self.assertTrue(v1["documents"][0]["version_matches_source"])
+            self.assertTrue(v1["documents"][0]["rendered"])
+
+            # Codex #130:源改了(新 revision)但旧 ref 仍在 → verify 不能算通过
+            (src_dir / "700001.txt").write_text(
+                (src_dir / "700001.txt").read_text(encoding="utf-8") + "\n新增一段正文。\n", encoding="utf-8")
+            v2 = tu.verify_user("pixiv", src_dir, store, render, results)
+            self.assertFalse(v2["ok"])
+            self.assertFalse(v2["documents"][0]["version_matches_source"])  # 旧版本不对应新源
+
     def test_finish_respects_limit(self):
         # Codex #122:finish 也要按 limit 切片,不扫 limit 之外的文件(否则报无关 no_result)
         with tempfile.TemporaryDirectory() as t:

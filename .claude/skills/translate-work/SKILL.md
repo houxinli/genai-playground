@@ -32,12 +32,20 @@ allowed-tools: Bash(make translate-user *), Read, Write
    ```
    summary 的 `published` 应为 1。
 
-4. **自我 review + feedback**(必做):
+4. **验证(必做,不可跳过)**:跑独立闸门核对落盘产物——**不要凭记忆/自述声称完成**:
+   ```
+   make translate-user MODE=verify PROVIDER=<provider> SOURCE=$WS/src STORE=$WS/store RENDER=$WS/rendered RESULTS_DIR=$WS/results
+   ```
+   它独立扫盘:result.json 是否真在、store 是否真有 candidate、是否真发布(current ref)、rendered 是否真有。
+   **退出码必须为 0、`ok=true`**。回贴时**把这条命令的真实 JSON 输出原样附上**(不是你的总结)。若 `ok=false`,
+   说明某步没真做——回到对应步骤补做,别声称成功。
+
+5. **自我 review + feedback**(必做):
    - 读 `$WS/rendered/translate_manifest.json`:若 `review_required>0` 或 `status=unresolved`,列出卡住的
      segment + QA 原因,修订对应译文重跑第 3 步,直到 published=1。
    - 通读 `$WS/rendered/<work_id>.zh.txt` 与 `.bilingual.txt`:核对人名一致性、语气自然度、漏译误译、metadata。
-   - 把 feedback 写到 `$WS/FEEDBACK.md`:① 发布计数;② 具体译文问题(segment_id+建议);③ 流程/QA 误报(若有);
-     ④ 对 harness/executor-instructions 的改进建议。最后把要点回贴。
+   - 把 feedback 写到 `$WS/FEEDBACK.md`:① verify 的真实 JSON;② 具体译文问题(segment_id+建议);
+     ③ 流程/QA 误报(若有);④ 对 harness/executor-instructions 的改进建议。最后把要点(含 verify JSON)回贴。
 
 ## 边界
 

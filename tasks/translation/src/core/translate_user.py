@@ -234,6 +234,46 @@ def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, bi
     return manifest
 
 
+def verify_user(provider, source_dir, store_root, render_dir, results_dir=None, *, limit=None) -> Dict[str, Any]:
+    """**独立核对落盘产物,不信 agent 自述**(#129):逐篇查 result.json 是否在、是否入库(candidate)、
+    是否发布(current ref)、是否渲染(zh+bilingual)。任一篇未完整完成 → ok=False。"""
+    source_dir, store_root = Path(source_dir), Path(store_root)
+    render_dir = Path(render_dir) if render_dir else None
+    results_dir = Path(results_dir) if results_dir else None
+    store = ArtifactStore(store_root)
+    sources = sorted(source_dir.glob("*.txt"))
+    if limit is not None:
+        sources = sources[:limit]
+    docs: List[Dict[str, Any]] = []
+    for src in sources:
+        rep: Dict[str, Any] = {"source": src.name}
+        try:
+            rev = si.build_document_revision(provider, src)
+        except Exception as exc:
+            rep.update(ok=False, error=f"{type(exc).__name__}: {exc}")
+            docs.append(rep)
+            continue
+        doc = rev["document_id"]
+        rev_id = rev["revision_id"]
+        sid = doc.rsplit(":", 1)[-1]
+        rep["source_id"] = sid
+        rep["result_json"] = bool(results_dir and (results_dir / f"{sid}.result.json").is_file())
+        rep["candidates"] = len(store.list_shard("candidate", doc))
+        # 发布须对应**当前源 revision**:旧 current ref(源已变、新版从未 finish)不能算通过(Codex #130)。
+        current = store.current_ref(doc)
+        rep["published"] = current is not None
+        version = store.get("document-version", doc, current["version_id"]) if current else None
+        rep["version_matches_source"] = bool(version and version.get("revision_id") == rev_id)
+        rep["rendered"] = bool(render_dir and (render_dir / f"{sid}.zh.txt").is_file()
+                               and (render_dir / f"{sid}.bilingual.txt").is_file())
+        # result.json 仅当传了 results_dir 才作硬条件;核心真相是 入库 + 发布到当前 revision + 渲染。
+        rep["ok"] = (rep["candidates"] > 0 and rep["version_matches_source"] and rep["rendered"]
+                     and (rep["result_json"] or results_dir is None))
+        docs.append(rep)
+    ok = bool(docs) and all(d.get("ok") for d in docs)
+    return {"ok": ok, "verified": sum(1 for d in docs if d.get("ok")), "total": len(docs), "documents": docs}
+
+
 def translate_user(
     provider: str,
     source_dir: Path,
@@ -276,8 +316,8 @@ def translate_user(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("auto", "prepare", "finish"), default="auto",
-                        help="auto=自动执行器全程;prepare=导出 bundle 给 agent;finish=吃 agent result 发布渲染")
+    parser.add_argument("--mode", choices=("auto", "prepare", "finish", "verify"), default="auto",
+                        help="auto=自动执行器全程;prepare=导出 bundle;finish=吃 result 发布渲染;verify=独立核对落盘产物(防造假)")
     parser.add_argument("--provider", required=True, choices=("pixiv", "fanbox"))
     parser.add_argument("--source-dir", required=True, type=Path)
     parser.add_argument("--store", required=True, type=Path)
@@ -300,6 +340,14 @@ def main() -> int:
                          bilingual_dir=args.bilingual_dir, limit=args.limit)
         print(json.dumps({"jobs": len([j for j in m["jobs"] if j.get("job")]), "jobs_dir": str(args.jobs_dir)}, ensure_ascii=False))
         return 0
+    if args.mode == "verify":
+        if not (args.render_dir and str(args.render_dir).strip()):
+            parser.error("mode=verify 需要 --render-dir(核对渲染产物)")
+        rep = verify_user(args.provider, args.source_dir, args.store, args.render_dir,
+                          args.results_dir, limit=args.limit)
+        print(json.dumps(rep, ensure_ascii=False, indent=2))
+        return 0 if rep["ok"] else 1  # 未完整完成 → 非零退出(可作闸门)
+
     if args.mode == "finish":
         if not (args.results_dir and str(args.results_dir).strip()) or not (args.render_dir and str(args.render_dir).strip()):
             parser.error("mode=finish 需要非空 --results-dir 与 --render-dir")
