@@ -196,15 +196,25 @@ def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=No
     return manifest
 
 
-def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, bilingual_dir=None) -> Dict[str, Any]:
-    """agent 路线:对每篇 source 找 results_dir/<source_id>.result.json → finish_document → 合并整本。"""
+def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, bilingual_dir=None, limit=None) -> Dict[str, Any]:
+    """agent 路线:对每篇 source 找 results_dir/<source_id>.result.json → finish_document → 合并整本。
+
+    source_id 与 prepare 一致地取自 document_id(**不是 src.stem**:pixiv 系列文件名是
+    `{series}_{order}_{novel}.txt`,stem≠novel_id,会错配成 no_result,Codex #122)。limit 与 prepare 对齐。"""
     source_dir, store_root = Path(source_dir), Path(store_root)
     results_dir, render_dir = Path(results_dir), Path(render_dir)
     store = ArtifactStore(store_root)
+    sources = sorted(source_dir.glob("*.txt"))
+    if limit is not None:
+        sources = sources[:limit]
     docs = []
-    for src in sorted(source_dir.glob("*.txt")):
-        sid = src.stem
-        result_path = results_dir / f"{sid}.result.json"
+    for src in sources:
+        try:
+            source_id = si.build_document_revision(provider, src)["document_id"].rsplit(":", 1)[-1]
+        except Exception as exc:
+            docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        result_path = results_dir / f"{source_id}.result.json"
         if not result_path.is_file():
             docs.append({"source": src.name, "status": "no_result"})
             continue
@@ -294,7 +304,7 @@ def main() -> int:
         if not (args.results_dir and str(args.results_dir).strip()) or not (args.render_dir and str(args.render_dir).strip()):
             parser.error("mode=finish 需要非空 --results-dir 与 --render-dir")
         m = finish_user(args.provider, args.source_dir, args.store, args.render_dir, args.results_dir,
-                        bilingual_dir=args.bilingual_dir)
+                        bilingual_dir=args.bilingual_dir, limit=args.limit)
         print(json.dumps(m["summary"], ensure_ascii=False))
         return 0
 

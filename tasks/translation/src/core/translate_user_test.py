@@ -136,6 +136,16 @@ class TranslateUserTest(unittest.TestCase):
             book = (render_dir / f"{src_dir.name}.zh.txt").read_text(encoding="utf-8")
             self.assertIn("早上好", book)
 
+    def test_finish_respects_limit(self):
+        # Codex #122:finish 也要按 limit 切片,不扫 limit 之外的文件(否则报无关 no_result)
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "a"; src_dir.mkdir()
+            shutil.copy(SRC, src_dir / "700001.txt")
+            shutil.copy(SRC, src_dir / "700002.txt")
+            m = tu.finish_user("pixiv", src_dir, tmp / "s", tmp / "out", tmp / "empty", limit=1)
+            self.assertEqual(1, m["summary"]["total"])  # 只扫前 1 篇
+
     def test_finish_without_result_is_no_result(self):
         with tempfile.TemporaryDirectory() as t:
             tmp = Path(t)
