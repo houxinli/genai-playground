@@ -80,6 +80,19 @@ class CandidateEvalTest(unittest.TestCase):
         self.assertEqual("fail", ev["verdict"])
         self.assertEqual(["empty_translation"], [f["code"] for f in ev["findings"]])
 
+    def test_findings_codes_match_shared_hard_rule_hits(self):
+        # R1:candidate_eval 的 finding code 必须与共享 hard_rule_hits 完全一致(单一真相源)
+        try:
+            from .qa_gate import hard_rule_hits
+        except ImportError:
+            from qa_gate import hard_rule_hits
+        cases = [("彼女は振り返った。", "她转过身来。"), ("今日", "今日"),
+                 ("＊　＊　＊", "＊　＊　＊"), ("ねえ", "ねえ"), ("x", "  ")]
+        for src, txt in cases:
+            shared = [h["code"] for h in hard_rule_hits(src, txt)]
+            mine = [f["code"] for f in ce._findings(src, txt)]
+            self.assertEqual(shared, mine, (src, txt))
+
     def test_nontranslatable_separator_same_as_source_exempt(self):
         # #124:纯符号分隔符段译==原是正确的,不应判 same_as_source
         for sep in ("＊　＊　＊", "* * *", "――――", "..."):
