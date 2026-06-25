@@ -92,6 +92,45 @@ class ExtractAndLinkTest(unittest.TestCase):
             self.assertEqual([], reviews)
 
 
+class AgentExtractionTest(unittest.TestCase):
+    def test_build_job_has_text_and_skips_tags(self):
+        rev = _revision([
+            _seg("rev_a:000001:dead", "metadata.title", "ユキの話"),
+            _seg("rev_a:000002:beef", "body", "ユキは笑った。"),
+            _seg("rev_a:000003:f00d", "metadata.tags", "[R-18]"),  # 不进 job
+        ])
+        job = ee.build_extraction_job(rev)
+        self.assertEqual(DOC, job["document_id"])
+        self.assertEqual("name-extraction", job["task_type"])
+        kinds = {s["kind"] for s in job["segments"]}
+        self.assertIn("body", kinds); self.assertIn("metadata.title", kinds)
+        self.assertNotIn("metadata.tags", kinds)
+
+    def test_import_result_creates_candidate_with_readings(self):
+        with tempfile.TemporaryDirectory() as t:
+            estore = EntityStore(Path(t) / "e"); queue = ReviewQueue(Path(t) / "q")
+            result = {"proposals": [
+                {"mention": "ユキ", "readings": ["ゆき"], "suggested_target": "小雪", "confidence": 0.9,
+                 "segment_id": "rev_abcd1234:000002:beef"},
+            ]}
+            reviews = ee.import_extraction_result(result, CTX, estore, queue)
+            self.assertTrue(reviews)
+            self.assertEqual("new_candidate", reviews[0]["reason"])
+            ent = [e for e in estore.list_scope(CREATOR) if e["source"] == "ユキ"][0]
+            self.assertEqual(["ゆき"], ent["readings"])   # LLM 给的读音落进候选
+            self.assertEqual("小雪", ent["target"])
+            self.assertEqual("candidate", ent["status"])
+
+    def test_import_result_ignores_result_document_id(self):
+        # document_id 权威取自 scope_ctx,不信 result 里夹带的
+        with tempfile.TemporaryDirectory() as t:
+            estore = EntityStore(Path(t) / "e"); queue = ReviewQueue(Path(t) / "q")
+            result = {"proposals": [{"mention": "田中", "document_id": "pixiv:999:111",
+                                     "suggested_target": "田中", "confidence": 0.8}]}
+            reviews = ee.import_extraction_result(result, CTX, estore, queue)
+            self.assertEqual(DOC, reviews[0]["document_id"])  # 用 scope 的 DOC,非 result 的
+
+
 class CliScopeGuardTest(unittest.TestCase):
     """Codex #117:链接作用域取自 document_id;误填/空路径必须挡住。"""
 

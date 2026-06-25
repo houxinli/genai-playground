@@ -107,6 +107,9 @@ def _validate_proposal(p: Any) -> None:
     conf = p.get("confidence")
     if not isinstance(conf, (int, float)) or not (0 <= conf <= 1):
         raise ValueError(f"proposal.confidence 必须是 0..1 的数: {p!r}")
+    readings = p.get("readings")
+    if readings is not None and not (isinstance(readings, list) and all(isinstance(r, str) for r in readings)):
+        raise ValueError(f"proposal.readings 必须是字符串数组: {p!r}")
 
 
 def _creator_scope(scope_ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -173,6 +176,7 @@ def import_proposals(
             elif suggested:
                 new_entity = build_entity(
                     _creator_scope(scope_ctx), mention, suggested,
+                    readings=(p.get("readings") or None),  # LLM 给的读音落进候选 → 喂读音匹配
                     authority="automatic", status="candidate", updated_at=created_at,
                 )
                 candidate_entity_id = new_entity["entity_id"]
