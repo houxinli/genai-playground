@@ -16,12 +16,12 @@ from typing import Any, Dict, List
 
 try:
     from .artifact_schemas import evaluation_id_for, validate_artifact, validate_candidate_identity
-    from .qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana, _is_translatable_source
+    from .qa_gate import hard_rule_hits
     from .source_identity import _source_hash
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.artifact_schemas import evaluation_id_for, validate_artifact, validate_candidate_identity
-    from core.qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana, _is_translatable_source
+    from core.qa_gate import hard_rule_hits
     from core.source_identity import _source_hash
 
 EVALUATOR_NAME = "deterministic-qa"
@@ -30,26 +30,27 @@ EVALUATOR_VERSION = "candidate-qa-v2"
 _FALLBACK_CREATED_AT = "1970-01-01T00:00:00Z"
 
 
+_FINDING_MESSAGES = {
+    "empty_translation": "译文为空",
+    "failure_marker": "译文含失败标记",
+    "refusal_marker": "译文含拒绝模板",
+    "same_as_source": "译文与原文完全相同",
+    "kana_residue": "译文残留假名",
+}
+
+
 def _findings(source_text: str, text: str) -> List[Dict[str, Any]]:
-    """与 qa_gate 对齐的硬规则 findings(均为 error 级)。"""
+    """硬规则 findings(均为 error 级)。规则判定走 qa_gate.hard_rule_hits(与离线 gate 同一份真相源),
+    此处只把命中 code 包装成 Evaluation finding。"""
     findings: List[Dict[str, Any]] = []
-    stripped = text.strip()
-    if not stripped:
-        findings.append({"code": "empty_translation", "severity": "error", "message": "译文为空"})
-        return findings  # 空译文无需再查其它
-    for marker in FAILURE_MARKERS:
-        if marker in text:
-            findings.append({"code": "failure_marker", "severity": "error",
-                             "message": f"译文含失败标记: {marker}", "evidence": marker})
-    for marker in REFUSAL_MARKERS:
-        if marker in text:
-            findings.append({"code": "refusal_marker", "severity": "error",
-                             "message": f"译文含拒绝模板: {marker}", "evidence": marker})
-    # 译==原:仅当源确有可翻译内容时才算错(纯符号/分隔符段译==原是正确的,豁免)。
-    if stripped == source_text.strip() and _is_translatable_source(source_text):
-        findings.append({"code": "same_as_source", "severity": "error", "message": "译文与原文完全相同"})
-    if _contains_kana(text):
-        findings.append({"code": "kana_residue", "severity": "error", "message": "译文残留假名"})
+    for hit in hard_rule_hits(source_text, text):
+        code = hit["code"]
+        evidence = hit.get("evidence")
+        finding = {"code": code, "severity": "error",
+                   "message": _FINDING_MESSAGES[code] + (f": {evidence}" if evidence else "")}
+        if evidence:
+            finding["evidence"] = evidence
+        findings.append(finding)
     return findings
 
 

@@ -19,6 +19,13 @@ except ImportError:  # unittest discover may import this module as top-level cor
 
 KANA_RE = re.compile(r"[\u3040-\u309f\u30a0-\u30ff]")
 IGNORED_KANA_CHARS = {"・", "ー"}
+_QA_GATE_MESSAGES = {
+    "empty_translation": "译文行为空",
+    "failure_marker": "译文行包含失败标记",
+    "refusal_marker": "译文行疑似包含拒绝模板",
+    "same_as_source": "译文行与原文完全相同",
+    "kana_residue": "译文行残留假名",
+}
 FAILURE_MARKERS = ("[翻译未完成]", "[翻译失败]", "无法翻译", "（以下省略）", "（省略）")
 REFUSAL_MARKERS = (
     "抱歉",
@@ -95,6 +102,27 @@ def _is_translatable_source(text: str) -> bool:
     if _contains_kana(text):
         return True
     return any("一" <= ch <= "鿿" for ch in text)  # CJK 汉字
+
+
+def hard_rule_hits(source: str, translation: str) -> List[Dict[str, str]]:
+    """**单一真相源**:对一对 (源, 译) 跑确定性硬规则,返回有序命中 [{code, evidence?}]。
+
+    candidate_eval(新架构)与 TranslationQAGate(离线 gate)都调本函数,避免两份规则各写一遍、改一处漏一处
+    (#125)。译文为空时只返回 empty(其余不查)。各调用方把 code 包装成自己的 finding/issue 形态。"""
+    if not translation.strip():
+        return [{"code": "empty_translation"}]
+    hits: List[Dict[str, str]] = []
+    for marker in FAILURE_MARKERS:
+        if marker in translation:
+            hits.append({"code": "failure_marker", "evidence": marker})
+    for marker in REFUSAL_MARKERS:
+        if marker in translation:
+            hits.append({"code": "refusal_marker", "evidence": marker})
+    if translation.strip() == source.strip() and _is_translatable_source(source):
+        hits.append({"code": "same_as_source"})
+    if _contains_kana(translation):
+        hits.append({"code": "kana_residue"})
+    return hits
 
 
 def _parse_bilingual_body(body_lines: List[str], line_offset: int = 0) -> Tuple[List[QAPair], List[QAIssue]]:
@@ -279,51 +307,27 @@ class TranslationQAGate:
         issues.extend(_metadata_issues(source_text, output_text))
 
         for pair in pairs:
+            # 硬规则走单一真相源 hard_rule_hits(与 candidate_eval 同一份);此处只负责包装成 QAIssue。
+            for hit in hard_rule_hits(pair.source, pair.translation):
+                code = hit["code"]
+                evidence = hit.get("evidence")
+                message = _QA_GATE_MESSAGES[code] + (f": {evidence}" if evidence else "")
+                detail = {"marker": evidence} if evidence else None
+                issues.append(self._issue_for_pair(pair=pair, code=code, message=message, detail=detail))
+            # 人名坏别名漂移是 qa_gate 专有规则(不在 candidate_eval 硬规则内),空译文跳过。
             translation = pair.translation.strip()
-            if not translation:
-                issues.append(
-                    self._issue_for_pair(pair=pair, code="empty_translation", message="译文行为空")
-                )
-                continue
-            for marker in FAILURE_MARKERS:
-                if marker in translation:
-                    issues.append(
-                        self._issue_for_pair(
-                            pair=pair,
-                            code="failure_marker",
-                            message=f"译文行包含失败标记: {marker}",
-                            detail={"marker": marker},
-                        )
-                    )
-            for marker in REFUSAL_MARKERS:
-                if marker in translation:
-                    issues.append(
-                        self._issue_for_pair(
-                            pair=pair,
-                            code="refusal_marker",
-                            message=f"译文行疑似包含拒绝模板: {marker}",
-                            detail={"marker": marker},
-                        )
-                    )
-            if translation == pair.source.strip() and _is_translatable_source(pair.source):
-                issues.append(
-                    self._issue_for_pair(pair=pair, code="same_as_source", message="译文行与原文完全相同")
-                )
-            if _contains_kana(translation):
-                issues.append(
-                    self._issue_for_pair(pair=pair, code="kana_residue", message="译文行残留假名")
-                )
-            for jp_name, aliases in self.name_aliases.items():
-                for alias in aliases:
-                    if alias in translation:
-                        issues.append(
-                            self._issue_for_pair(
-                                pair=pair,
-                                code="name_alias_drift",
-                                message=f"译文行命中已知人名坏别名: {alias}",
-                                detail={"jp": jp_name, "alias": alias},
+            if translation:
+                for jp_name, aliases in self.name_aliases.items():
+                    for alias in aliases:
+                        if alias in translation:
+                            issues.append(
+                                self._issue_for_pair(
+                                    pair=pair,
+                                    code="name_alias_drift",
+                                    message=f"译文行命中已知人名坏别名: {alias}",
+                                    detail={"jp": jp_name, "alias": alias},
+                                )
                             )
-                        )
 
         summary = {
             "body_lines": len(body_lines),
