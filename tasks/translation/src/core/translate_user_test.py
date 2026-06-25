@@ -110,6 +110,39 @@ class TranslateUserTest(unittest.TestCase):
             self.assertIn("新甲", zh)
             self.assertNotIn("旧甲", zh)   # 不能渲染上一轮的陈旧候选
 
+    def test_prepare_then_agent_translate_then_finish(self):
+        # agent 路线:prepare 导出 bundle → (执行器翻译写 result) → finish 发布渲染合并
+        import json
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"; src_dir.mkdir()
+            shutil.copy(SRC, src_dir / "700001.txt")
+            bil_dir = tmp / "bil"; bil_dir.mkdir()
+            shutil.copy(BILINGUAL, bil_dir / "700001.txt")
+            store_root = tmp / "store"; jobs_dir = tmp / "jobs"; results_dir = tmp / "results"
+            render_dir = tmp / "out"; results_dir.mkdir()
+
+            prep = tu.prepare_user("pixiv", src_dir, store_root, jobs_dir, bilingual_dir=bil_dir)
+            self.assertEqual(1, len(prep["jobs"]))
+            # 模拟执行器:读 job(=bundle)→ 翻译 → 写 result
+            for j in prep["jobs"]:
+                bundle = json.loads(Path(j["job"]).read_text(encoding="utf-8"))
+                result = _mock_executor(bundle)
+                (results_dir / f"{j['source_id']}.result.json").write_text(
+                    json.dumps(result, ensure_ascii=False), encoding="utf-8")
+
+            m = tu.finish_user("pixiv", src_dir, store_root, render_dir, results_dir, bilingual_dir=bil_dir)
+            self.assertEqual(1, m["summary"]["published"])
+            book = (render_dir / f"{src_dir.name}.zh.txt").read_text(encoding="utf-8")
+            self.assertIn("早上好", book)
+
+    def test_finish_without_result_is_no_result(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "a"; src_dir.mkdir(); shutil.copy(SRC, src_dir / "700001.txt")
+            m = tu.finish_user("pixiv", src_dir, tmp / "s", tmp / "out", tmp / "empty_results")
+            self.assertEqual("no_result", m["documents"][0]["status"])
+
     def test_unknown_executor_rejected(self):
         with self.assertRaises(ValueError):
             tu.make_translate_fn("nope")
