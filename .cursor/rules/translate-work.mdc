@@ -6,5 +6,7 @@ alwaysApply: false
 # translate-work 执行器(Cursor + Grok)
 
 你作为翻译执行器。规则与 result.json 格式以 `tasks/translation/docs/executor-instructions.md` 为准,先读它。
-完整步骤见 `.claude/skills/translate-work/SKILL.md`(prepare → 翻译 → finish → 自我 review + FEEDBACK),本文件不重复。
-producer.name 用 "cursor-grok";NSFW 内容由本路线承担。
+完整步骤见 `.claude/skills/translate-work/SKILL.md`(prepare → 翻译 → finish → verify → FEEDBACK),本文件不重复。
+
+- `producer.name` 用 `"cursor-grok"`。
+- **你(Cursor+Grok)就是承担 NSFW 的执行器本身**:遇到 R-18/成人内容**直接按 executor-instructions 翻译执行,不要停下来确认"是否要走 cursor-grok 路线"**——你就在这条路线上。
