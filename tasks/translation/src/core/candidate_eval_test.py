@@ -37,6 +37,24 @@ def _candidate(text):
     }
 
 
+def _candidate_for(text, source):
+    """绑定到任意 source 的自洽 candidate(用于非默认源的用例)。"""
+    h = _source_hash(source)
+    rev = "rev_" + "b" * 16
+    seg = f"{rev}:000000:" + h[:8]
+    normalized = normalize_text(text)
+    return {
+        "schema_version": 3,
+        "candidate_id": candidate_id_v3(rev, seg, h, normalized),
+        "document_id": "pixiv:1:2",
+        "revision_id": rev,
+        "segment_id": seg,
+        "source_hash": h,
+        "normalization_version": 1,
+        "text": normalized,
+    }
+
+
 class CandidateEvalTest(unittest.TestCase):
     def test_good_candidate_passes(self):
         ev = ce.evaluate_candidate(_candidate("她转过身来。"), SOURCE)
@@ -61,6 +79,21 @@ class CandidateEvalTest(unittest.TestCase):
         ev = ce.evaluate_candidate(_candidate("   "), SOURCE)
         self.assertEqual("fail", ev["verdict"])
         self.assertEqual(["empty_translation"], [f["code"] for f in ev["findings"]])
+
+    def test_nontranslatable_separator_same_as_source_exempt(self):
+        # #124:纯符号分隔符段译==原是正确的,不应判 same_as_source
+        for sep in ("＊　＊　＊", "* * *", "――――", "..."):
+            cand = _candidate_for(sep, sep)
+            ev = ce.evaluate_candidate(cand, sep)
+            self.assertEqual("pass", ev["verdict"], f"{sep!r} 应 pass: {ev['findings']}")
+            self.assertNotIn("same_as_source", {f["code"] for f in ev["findings"]})
+
+    def test_translatable_same_as_source_still_fails(self):
+        # 回归:源含汉字/假名时,译==原仍判 same_as_source
+        src = "今日"
+        ev = ce.evaluate_candidate(_candidate_for(src, src), src)
+        self.assertEqual("fail", ev["verdict"])
+        self.assertIn("same_as_source", {f["code"] for f in ev["findings"]})
 
     def test_refusal_and_failure_markers(self):
         ev = ce.evaluate_candidate(_candidate("抱歉，[翻译失败]"), SOURCE)

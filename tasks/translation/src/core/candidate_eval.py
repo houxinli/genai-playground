@@ -16,16 +16,17 @@ from typing import Any, Dict, List
 
 try:
     from .artifact_schemas import evaluation_id_for, validate_artifact, validate_candidate_identity
-    from .qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana
+    from .qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana, _is_translatable_source
     from .source_identity import _source_hash
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.artifact_schemas import evaluation_id_for, validate_artifact, validate_candidate_identity
-    from core.qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana
+    from core.qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana, _is_translatable_source
     from core.source_identity import _source_hash
 
 EVALUATOR_NAME = "deterministic-qa"
-EVALUATOR_VERSION = "candidate-qa-v1"
+# v2:same_as_source 仅对可翻译源触发(分隔符豁免)。规则集变了 → 升版,旧 fail 工件不与新 pass 同版可比(Codex #125)。
+EVALUATOR_VERSION = "candidate-qa-v2"
 _FALLBACK_CREATED_AT = "1970-01-01T00:00:00Z"
 
 
@@ -44,7 +45,8 @@ def _findings(source_text: str, text: str) -> List[Dict[str, Any]]:
         if marker in text:
             findings.append({"code": "refusal_marker", "severity": "error",
                              "message": f"译文含拒绝模板: {marker}", "evidence": marker})
-    if stripped == source_text.strip():
+    # 译==原:仅当源确有可翻译内容时才算错(纯符号/分隔符段译==原是正确的,豁免)。
+    if stripped == source_text.strip() and _is_translatable_source(source_text):
         findings.append({"code": "same_as_source", "severity": "error", "message": "译文与原文完全相同"})
     if _contains_kana(text):
         findings.append({"code": "kana_residue", "severity": "error", "message": "译文残留假名"})
