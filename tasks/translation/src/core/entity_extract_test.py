@@ -92,5 +92,45 @@ class ExtractAndLinkTest(unittest.TestCase):
             self.assertEqual([], reviews)
 
 
+class CliScopeGuardTest(unittest.TestCase):
+    """Codex #117:链接作用域取自 document_id;误填/空路径必须挡住。"""
+
+    def _write_rev(self, tmp):
+        rev_path = Path(tmp) / "rev.json"
+        import json
+        rev_path.write_text(json.dumps({"document_id": DOC, "revision_id": "rev_x", "segments": []}),
+                            encoding="utf-8")
+        return rev_path
+
+    def _run(self, argv):
+        import sys
+        old = sys.argv
+        sys.argv = ["entity_extract.py", *argv]
+        try:
+            return ee.main()
+        finally:
+            sys.argv = old
+
+    def test_mismatched_creator_id_rejected(self):
+        with tempfile.TemporaryDirectory() as t:
+            rev = self._write_rev(t)
+            with self.assertRaises(SystemExit):  # 999999 ≠ document_id 的 50235390
+                self._run(["--revision", str(rev), "--link", "--entity-store", str(Path(t) / "e"),
+                           "--queue", str(Path(t) / "q"), "--creator-id", "999999"])
+
+    def test_link_without_queue_rejected(self):
+        with tempfile.TemporaryDirectory() as t:
+            rev = self._write_rev(t)
+            with self.assertRaises(SystemExit):
+                self._run(["--revision", str(rev), "--link", "--entity-store", str(Path(t) / "e")])
+
+    def test_derives_scope_and_links(self):
+        with tempfile.TemporaryDirectory() as t:
+            rev = self._write_rev(t)  # segments 空 → 0 proposal,但作用域应由 document_id 推得不报错
+            rc = self._run(["--revision", str(rev), "--link", "--entity-store", str(Path(t) / "e"),
+                            "--queue", str(Path(t) / "q")])
+            self.assertEqual(0, rc)
+
+
 if __name__ == "__main__":
     unittest.main()

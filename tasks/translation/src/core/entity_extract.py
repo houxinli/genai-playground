@@ -92,10 +92,10 @@ def extract_and_link(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--revision", required=True, type=Path, help="document-revision JSON")
-    parser.add_argument("--entity-store", required=True, type=Path)
-    parser.add_argument("--queue", required=True, type=Path)
-    parser.add_argument("--provider", required=True)
-    parser.add_argument("--creator-id", required=True)
+    parser.add_argument("--entity-store", type=Path, help="链接需要(--link)")
+    parser.add_argument("--queue", type=Path, help="链接需要(--link)")
+    parser.add_argument("--provider", help="可选;缺省由 document_id 推得,给了则须一致")
+    parser.add_argument("--creator-id", help="可选;缺省由 document_id 推得,给了则须一致")
     parser.add_argument("--link", action="store_true", help="抽取后喂 import_proposals 入 review")
     args = parser.parse_args()
     revision = json.loads(args.revision.read_text(encoding="utf-8"))
@@ -103,11 +103,22 @@ def main() -> int:
     if not args.link:
         print(json.dumps({"proposals": proposals, "count": len(proposals)}, ensure_ascii=False, indent=2))
         return 0
+    # 作用域权威来源是 document_id,而非 caller flags(误填/空 CREATOR_ID 会搜错作用域 → 漏既有实体)。
+    parts = revision["document_id"].split(":")
+    if len(parts) != 3:
+        parser.error(f"document_id 形如 provider:creator:source,实得 {revision['document_id']!r}")
+    provider, creator_id, _source = parts
+    if args.provider and args.provider != provider:
+        parser.error(f"--provider {args.provider!r} 与 document_id 的 {provider!r} 不一致")
+    if args.creator_id and args.creator_id != creator_id:
+        parser.error(f"--creator-id {args.creator_id!r} 与 document_id 的 {creator_id!r} 不一致")
+    if not (args.entity_store and str(args.entity_store).strip()) or not (args.queue and str(args.queue).strip()):
+        parser.error("--link 需要非空 --entity-store 与 --queue")
     try:
         from .entity_store import EntityStore
     except ImportError:
         from entity_store import EntityStore
-    scope_ctx = {"provider": args.provider, "creator_id": args.creator_id, "document_id": revision["document_id"]}
+    scope_ctx = {"provider": provider, "creator_id": creator_id, "document_id": revision["document_id"]}
     reviews = extract_and_link(revision, scope_ctx, EntityStore(args.entity_store),
                                entity_review.ReviewQueue(args.queue))
     print(json.dumps({"proposals": len(proposals), "reviews": len(reviews)}, ensure_ascii=False))

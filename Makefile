@@ -246,7 +246,8 @@ agent-complete:
 # 用法: make extract-entities REVISION=rev.json ENTITY_STORE=... QUEUE=... PROVIDER=pixiv CREATOR_ID=... [LINK=1]
 extract-entities:
 	@test -n "$(REVISION)" || { echo "extract-entities 需要 REVISION="; exit 2; }
-	$(PY) tasks/translation/src/core/entity_extract.py --revision "$(REVISION)" --entity-store "$(ENTITY_STORE)" --queue "$(QUEUE)" --provider "$(PROVIDER)" --creator-id "$(CREATOR_ID)" $(if $(LINK),--link)
+	@if [ -n "$(LINK)" ]; then test -n "$(ENTITY_STORE)" && test -n "$(QUEUE)" || { echo "extract-entities LINK 需要 ENTITY_STORE= 与 QUEUE="; exit 2; }; fi
+	$(PY) tasks/translation/src/core/entity_extract.py --revision "$(REVISION)" $(if $(ENTITY_STORE),--entity-store "$(ENTITY_STORE)") $(if $(QUEUE),--queue "$(QUEUE)") $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(CREATOR_ID),--creator-id "$(CREATOR_ID)") $(if $(LINK),--link)
 
 # 从 JSONL 工件全量重建 SQLite 只读投影(派生索引,可丢弃重建)。
 # 用法: make rebuild-index STORE=<ArtifactStore 根目录> DB=index.db
