@@ -9,9 +9,19 @@ import unittest
 from pathlib import Path
 
 try:
-    from .qa_gate import TranslationQAGate, infer_source_for_output
+    from .qa_gate import TranslationQAGate, _is_translatable_source, infer_source_for_output
 except ImportError:  # unittest discover may import this test as top-level core.qa_gate_test.
-    from qa_gate import TranslationQAGate, infer_source_for_output
+    from qa_gate import TranslationQAGate, _is_translatable_source, infer_source_for_output
+
+
+class TranslatableSourceTest(unittest.TestCase):
+    def test_symbols_not_translatable(self):
+        for s in ("＊　＊　＊", "* * *", "――――", "...", "123", "= = ="):
+            self.assertFalse(_is_translatable_source(s), s)
+
+    def test_japanese_is_translatable(self):
+        for s in ("今日", "ユキ", "彼女は", "A型"):
+            self.assertTrue(_is_translatable_source(s), s)
 
 
 class TranslationQAGateTest(unittest.TestCase):

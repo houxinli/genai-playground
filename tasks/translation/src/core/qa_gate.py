@@ -89,6 +89,14 @@ def _contains_kana(text: str) -> bool:
     return any(ch not in IGNORED_KANA_CHARS for ch in KANA_RE.findall(text or ""))
 
 
+def _is_translatable_source(text: str) -> bool:
+    """源是否含可翻译内容(日文假名或汉字)。纯符号/分隔符/拉丁/数字(＊　＊　＊、* * *、---)
+    没有可翻译内容,正确译文本就等于原文,不应判 same_as_source。两条硬规则路径共用此判定。"""
+    if _contains_kana(text):
+        return True
+    return any("一" <= ch <= "鿿" for ch in text)  # CJK 汉字
+
+
 def _parse_bilingual_body(body_lines: List[str], line_offset: int = 0) -> Tuple[List[QAPair], List[QAIssue]]:
     pairs: List[QAPair] = []
     issues: List[QAIssue] = []
@@ -297,7 +305,7 @@ class TranslationQAGate:
                             detail={"marker": marker},
                         )
                     )
-            if translation == pair.source.strip():
+            if translation == pair.source.strip() and _is_translatable_source(pair.source):
                 issues.append(
                     self._issue_for_pair(pair=pair, code="same_as_source", message="译文行与原文完全相同")
                 )

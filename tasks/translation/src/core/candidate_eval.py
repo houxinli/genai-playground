@@ -16,25 +16,18 @@ from typing import Any, Dict, List
 
 try:
     from .artifact_schemas import evaluation_id_for, validate_artifact, validate_candidate_identity
-    from .qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana
+    from .qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana, _is_translatable_source
     from .source_identity import _source_hash
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.artifact_schemas import evaluation_id_for, validate_artifact, validate_candidate_identity
-    from core.qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana
+    from core.qa_gate import FAILURE_MARKERS, REFUSAL_MARKERS, _contains_kana, _is_translatable_source
     from core.source_identity import _source_hash
 
 EVALUATOR_NAME = "deterministic-qa"
-EVALUATOR_VERSION = "candidate-qa-v1"
+# v2:same_as_source 仅对可翻译源触发(分隔符豁免)。规则集变了 → 升版,旧 fail 工件不与新 pass 同版可比(Codex #125)。
+EVALUATOR_VERSION = "candidate-qa-v2"
 _FALLBACK_CREATED_AT = "1970-01-01T00:00:00Z"
-
-
-def _is_translatable_source(text: str) -> bool:
-    """源是否含可翻译内容(日文假名或汉字)。纯符号/分隔符/拉丁/数字(如 ＊　＊　＊、* * *、---)
-    没有可翻译内容,正确译文本就等于原文,不应判 same_as_source。"""
-    if _contains_kana(text):
-        return True
-    return any("一" <= ch <= "鿿" for ch in text)  # CJK 汉字
 
 
 def _findings(source_text: str, text: str) -> List[Dict[str, Any]]:
