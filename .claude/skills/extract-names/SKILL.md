@@ -16,7 +16,7 @@ allowed-tools: Bash(make extract-job *), Bash(make import-extraction *), Read, W
    (job 含 document_id + 待扫描段 segments[{segment_id,kind,source_text}])。
 2. **读 job,逐部作品通读后抽人名**,写 `result.json`:
    ```json
-   {"proposals": [
+   {"document_id": "<原样回带 job 里的 document_id>", "proposals": [
      {"mention": "原文写法", "readings": ["假名读音"], "suggested_target": "建议中文译名",
       "confidence": 0.0-1.0, "segment_id": "该名首次出现段的 id(从 job.segments 取)"}
    ]}

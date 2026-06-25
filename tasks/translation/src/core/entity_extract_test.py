@@ -121,14 +121,41 @@ class AgentExtractionTest(unittest.TestCase):
             self.assertEqual("小雪", ent["target"])
             self.assertEqual("candidate", ent["status"])
 
-    def test_import_result_ignores_result_document_id(self):
-        # document_id 权威取自 scope_ctx,不信 result 里夹带的
+    def test_import_result_uses_scope_document_id_on_proposals(self):
+        # proposal 的 document_id 权威回填为 scope 的(顶层 result.document_id 校验另见下)
         with tempfile.TemporaryDirectory() as t:
             estore = EntityStore(Path(t) / "e"); queue = ReviewQueue(Path(t) / "q")
-            result = {"proposals": [{"mention": "田中", "document_id": "pixiv:999:111",
-                                     "suggested_target": "田中", "confidence": 0.8}]}
+            result = {"proposals": [{"mention": "田中", "suggested_target": "田中", "confidence": 0.8}]}
             reviews = ee.import_extraction_result(result, CTX, estore, queue)
-            self.assertEqual(DOC, reviews[0]["document_id"])  # 用 scope 的 DOC,非 result 的
+            self.assertEqual(DOC, reviews[0]["document_id"])
+
+    def test_wrong_job_document_id_rejected(self):
+        # Codex #119:result 顶层 document_id 与本 revision 不符 → 拒绝(防 RESULT 指向别的 job)
+        with tempfile.TemporaryDirectory() as t:
+            estore = EntityStore(Path(t) / "e"); queue = ReviewQueue(Path(t) / "q")
+            result = {"document_id": "pixiv:999:111", "proposals": [{"mention": "田中", "confidence": 0.8}]}
+            with self.assertRaises(ValueError):
+                ee.import_extraction_result(result, CTX, estore, queue)
+
+    def test_foreign_segment_id_rejected(self):
+        # Codex #119:proposal.segment_id 不属于本 revision → 拒绝
+        with tempfile.TemporaryDirectory() as t:
+            estore = EntityStore(Path(t) / "e"); queue = ReviewQueue(Path(t) / "q")
+            result = {"proposals": [{"mention": "田中", "confidence": 0.8,
+                                     "segment_id": "rev_dead0000:000009:beef"}]}
+            with self.assertRaises(ValueError):
+                ee.import_extraction_result(result, CTX, estore, queue, valid_segment_ids={"rev_abcd1234:000001:dead"})
+
+    def test_provided_reading_links_kanji_mention_to_existing(self):
+        # Codex #119:汉字 mention「雪」带读音「ゆき」应 reading_match 既有 ユキ,不建近重复 candidate
+        with tempfile.TemporaryDirectory() as t:
+            estore = EntityStore(Path(t) / "e"); queue = ReviewQueue(Path(t) / "q")
+            estore.put(build_entity(CREATOR, "ユキ", "小雪", readings=["ゆき"], status="approved", authority="manual"))
+            before = len(estore.list_scope(CREATOR))
+            result = {"proposals": [{"mention": "雪", "readings": ["ゆき"], "suggested_target": "小雪", "confidence": 0.9}]}
+            reviews = ee.import_extraction_result(result, CTX, estore, queue)
+            self.assertEqual("reading_match", reviews[0]["reason"])
+            self.assertEqual(before, len(estore.list_scope(CREATOR)))  # 不建近重复
 
 
 class CliScopeGuardTest(unittest.TestCase):

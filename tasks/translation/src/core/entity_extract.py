@@ -103,22 +103,33 @@ def build_extraction_job(revision: Dict[str, Any]) -> Dict[str, Any]:
             for s in revision["segments"] if s.get("kind") in _EXTRACT_KINDS]
     return {
         "task_type": "name-extraction",
-        "document_id": revision["document_id"],
+        "document_id": revision["document_id"],  # agent 应在 result 里原样回带,供导回时校验
         "instruction": _EXTRACTION_INSTRUCTION,
         "segments": segs,
     }
 
 
 def import_extraction_result(
-    result: Dict[str, Any], scope_ctx: Dict[str, Any], entity_store, queue, **kw,
+    result: Dict[str, Any], scope_ctx: Dict[str, Any], entity_store, queue,
+    *, valid_segment_ids=None, **kw,
 ) -> List[Dict[str, Any]]:
-    """把 agent 产的抽取 result(proposals)喂 import_proposals。document_id 由 scope_ctx 权威回填
-    (不信 result 里的),proposals 透传 readings/suggested_target/confidence/segment_id/context。"""
+    """把 agent 产的抽取 result(proposals)喂 import_proposals。document_id 由 scope_ctx 权威回填。
+
+    **校验 result 确实来自本 revision 的 job**(否则把名字静默导进错的作用域,#119):
+    - result 若带 document_id,须与 scope 一致(防 RESULT 指向别的 job);
+    - proposal.segment_id 若给,须属于本 revision(valid_segment_ids,从 revision 段集传入)。
+    """
     document_id = scope_ctx["document_id"]
+    rd = result.get("document_id")
+    if rd is not None and rd != document_id:
+        raise ValueError(f"result.document_id {rd!r} 与 revision 的 {document_id!r} 不符(RESULT 指向了别的 job?)")
     proposals = []
     for p in result.get("proposals", []):
         if not p.get("mention"):
             continue
+        sid = p.get("segment_id")
+        if sid is not None and valid_segment_ids is not None and sid not in valid_segment_ids:
+            raise ValueError(f"proposal.segment_id {sid!r} 不属于本 revision(RESULT 与 REVISION 不匹配?)")
         prop = {
             "mention": p["mention"],
             "document_id": document_id,  # 权威来源,不信 result
@@ -178,8 +189,12 @@ def main() -> int:
             from .entity_store import EntityStore
         except ImportError:
             from entity_store import EntityStore
-        reviews = import_extraction_result(result, scope_ctx, EntityStore(args.entity_store),
-                                           entity_review.ReviewQueue(args.queue))
+        valid_sids = {s["segment_id"] for s in revision["segments"]}
+        try:
+            reviews = import_extraction_result(result, scope_ctx, EntityStore(args.entity_store),
+                                               entity_review.ReviewQueue(args.queue), valid_segment_ids=valid_sids)
+        except ValueError as exc:
+            parser.error(str(exc))
         print(json.dumps({"proposals": len(result.get("proposals", [])), "reviews": len(reviews)}, ensure_ascii=False))
         return 0
 

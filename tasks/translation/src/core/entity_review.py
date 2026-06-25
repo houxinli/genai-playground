@@ -168,7 +168,9 @@ def import_proposals(
         else:
             # 无精确匹配:回退 读音/模糊。近似命中链到既有实体并入 review(证据,不自动改/建实体),
             # 避免对既有实体的微变体新建近重复 candidate(#83 P1b-2b)。
-            near = entity_match.best_nonexact_match(mention, reachable_entities, pick_winner=_pick_winner)
+            near = entity_match.best_nonexact_match(
+                mention, reachable_entities, pick_winner=_pick_winner,
+                mention_readings=p.get("readings"))  # agent 给的读音也参与匹配,避免「雪/ゆき」重建近重复
             if near is not None:
                 entity, kind, match_score = near
                 candidate_entity_id = entity["entity_id"]

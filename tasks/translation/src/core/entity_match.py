@@ -40,9 +40,11 @@ def is_exact(mention: str, entity: Dict[str, Any]) -> bool:
     return mention == entity["source"] or mention in entity.get("aliases", [])
 
 
-def reading_equal(mention: str, entity: Dict[str, Any]) -> bool:
-    m = normalize_kana(mention)
-    return any(normalize_kana(f) == m for f in _reading_forms(entity))
+def reading_equal(mention: str, entity: Dict[str, Any], mention_readings: Optional[List[str]] = None) -> bool:
+    """mention(及其外部提供的读音)与实体读音 kana 归一化后是否相等。"""
+    forms = {normalize_kana(f) for f in _reading_forms(entity)}
+    cands = {normalize_kana(mention)} | {normalize_kana(r) for r in (mention_readings or [])}
+    return bool(forms & cands)
 
 
 def fuzzy_score(mention: str, entity: Dict[str, Any]) -> float:
@@ -53,6 +55,7 @@ def fuzzy_score(mention: str, entity: Dict[str, Any]) -> float:
 def best_nonexact_match(
     mention: str, entities: List[Dict[str, Any]], *, fuzzy_threshold: float = 0.82,
     pick_winner: Optional[Callable[[List[Dict[str, Any]]], Dict[str, Any]]] = None,
+    mention_readings: Optional[List[str]] = None,
 ) -> Optional[Tuple[Dict[str, Any], str, float]]:
     """无精确匹配时的最佳近似命中 → (entity, kind, score)。优先读音(更可靠),其次模糊;都不达标返回 None。
 
@@ -65,7 +68,7 @@ def best_nonexact_match(
     for e in entities:
         if is_exact(mention, e):
             continue
-        if reading_equal(mention, e):
+        if reading_equal(mention, e, mention_readings):
             reading_hits.append((e, "reading", 1.0))
             continue
         score = fuzzy_score(mention, e)
