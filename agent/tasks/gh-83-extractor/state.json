@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-83-extractor",
   "title": "Entity 自动抽取器(#83 P1b-2b)",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/entity-extractor",
   "objective": "entity_extract:确定性启发式从 revision 正文/标题抽人名 mention 候选(片假名串 + 称谓 さん/ちゃん/くん/様/先生 前缀),产 proposals(mention/document_id/segment_id/confidence/context)→ 喂 import_proposals 链接入 review。抽取是不可信候选生产者,准度由 review 闸门兜;不跑 LLM。CLI extract-entities 端到端。",
   "github": {
     "issue": 83,
-    "pull_request": null
+    "pull_request": 117
   },
   "scope": {
     "in": [
@@ -76,7 +76,7 @@
     {
       "id": "S3",
       "title": "开 PR、过 CI、处理 review、合并",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S2"
       ],
@@ -86,14 +86,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S3",
-    "instruction": "开 PR(addresses #83 P1b-2b 抽取器),过 CI,处理 review,合并。",
-    "acceptance": [
-      "CI 全绿",
-      "PR 合并"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python scripts/validate_agent_tasks.py"
@@ -121,11 +114,11 @@
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260624T123000Z-claude-code",
-    "timestamp": "2026-06-24T12:30:00Z",
+    "checkpoint_id": "cp-20260624T130000Z-claude-code",
+    "timestamp": "2026-06-24T13:00:00Z",
     "agent": "claude-code",
-    "summary": "entity_extract 启发式抽取器落地+接链接;363 绿;P1b-2b 只剩规则影响分析",
-    "observed_head": "6c1e9e3"
+    "summary": "PR #117 合并(含 2 review:作用域取自 document_id + Make 守护);抽取器交付;#83 只剩规则影响分析",
+    "observed_head": "6155f4f"
   },
   "next_task": null
 }
