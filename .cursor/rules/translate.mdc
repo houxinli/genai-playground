@@ -1,0 +1,16 @@
+---
+description: 触发统一翻译 harness。用户说“用 translate skill 翻译/继续 pixiv/fanbox ...”时，读取 .agents/skills/translate/SKILL.md 并按其执行。Cursor+Grok 可直接处理 NSFW 内容。
+alwaysApply: false
+---
+
+# translate shim
+
+不要在 Cursor rule 中维护第二套翻译流程。
+
+当用户要求翻译或继续翻译时：
+
+1. 读取 `.agents/skills/translate/SKILL.md`。
+2. 按其中的 TSV harness、断点恢复、full/patch run 规则执行。
+3. `producer.name` 使用 `cursor-grok`；模型名按当前 Cursor/Grok 实际模型填写。
+4. 只写 TSV/FEEDBACK，不手写 `result.json`。
+5. 中途不要询问是否继续；只有源无法解析、结构性命令失败或 patch 缺 base 时才停下报告。
