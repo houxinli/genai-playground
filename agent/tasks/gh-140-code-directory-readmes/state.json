@@ -13,6 +13,7 @@
     "in": [
       "scripts/check_code_readmes.py",
       "Makefile",
+      ".github/workflows/tests.yml",
       "受 Git 管理的代码目录 README.md",
       "agent/tasks/gh-140-code-directory-readmes/"
     ],
@@ -36,22 +37,33 @@
     {
       "id": "S1",
       "title": "定义代码目录 README 覆盖规则并补齐第一批文档",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "acceptance": [
         "代码目录集合由脚本从 git ls-files 派生，排除数据/配置/文档/schema/fixtures/checkpoint 目录。",
         "缺失 README 的代码目录补齐 README.md，内容说明当前目录和直接子项。",
         "make agent-validate 与 README 覆盖校验通过。"
       ]
+    },
+    {
+      "id": "S2",
+      "title": "提交实现并发布 PR",
+      "status": "in_progress",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "实现提交包含 README 覆盖脚本、CI/Makefile 集成、代码目录 README 与 checkpoint 更新。",
+        "分支 push 到 origin，并创建关联 #140 的 draft PR。"
+      ]
     }
   ],
   "next_action": {
-    "step_id": "S1",
-    "instruction": "识别受 Git 管理的代码目录，新增覆盖校验脚本与 Make 目标，并为缺失 README 的代码目录补齐轻量说明。",
+    "step_id": "S2",
+    "instruction": "提交 README 覆盖实现，push 分支并创建关联 #140 的 draft PR。",
     "acceptance": [
-      "代码目录集合由脚本从 git ls-files 派生，排除数据/配置/文档/schema/fixtures/checkpoint 目录。",
-      "缺失 README 的代码目录补齐 README.md，内容说明当前目录和直接子项。",
-      "make agent-validate 与 README 覆盖校验通过。"
+      "实现提交包含 README 覆盖脚本、CI/Makefile 集成、代码目录 README 与 checkpoint 更新。",
+      "分支 push 到 origin，并创建关联 #140 的 draft PR。"
     ]
   },
   "validation": {
@@ -59,9 +71,52 @@
       "conda run -n llm python scripts/validate_agent_tasks.py",
       "conda run -n llm python scripts/check_code_readmes.py"
     ],
-    "last_results": []
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m py_compile scripts/check_code_readmes.py scripts/check_code_readmes_test.py",
+        "status": "passed",
+        "summary": "py_compile passed.",
+        "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "make agent-validator-test",
+        "status": "passed",
+        "summary": "28 unittest cases passed.",
+        "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "make agent-validate",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "make code-readmes",
+        "status": "passed",
+        "summary": "Code README coverage OK (44 directories).",
+        "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "make docs-drift",
+        "status": "passed",
+        "summary": "文档漂移检查通过。",
+        "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "git diff --check",
+        "status": "passed",
+        "summary": "No whitespace errors.",
+        "timestamp": "2026-06-26T08:56:42Z"
+      }
+    ]
   },
   "known_unrelated_changes": [],
-  "last_checkpoint": null,
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260626-085642-code-readmes",
+    "timestamp": "2026-06-26T08:56:42Z",
+    "agent": "Codex",
+    "summary": "定义代码目录 README 覆盖规则并补齐缺失 README。",
+    "observed_head": "ee5baa7"
+  },
   "next_task": null
 }

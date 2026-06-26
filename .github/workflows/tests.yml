@@ -28,8 +28,9 @@ jobs:
 
       - name: Agent harness validation
         run: |
-          python -m unittest scripts.validate_agent_tasks_test scripts.bootstrap_agent_task_test scripts.check_docs_drift_test scripts.sync_github_task_test
+          python -m unittest scripts.validate_agent_tasks_test scripts.bootstrap_agent_task_test scripts.check_docs_drift_test scripts.sync_github_task_test scripts.check_code_readmes_test
           python scripts/validate_agent_tasks.py
+          python scripts/check_code_readmes.py
 
       - name: Docs drift gate
         run: |
