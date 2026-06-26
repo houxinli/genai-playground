@@ -2,7 +2,7 @@
 name: translate-work
 description: 把一部作品(pixiv/fanbox 单篇)用 agent 当译者跑通新架构全流程并自我 review。当用户说"翻译某篇/某作品""用 agent 翻 <id>""跑 translate-work"时使用。
 argument-hint: "<provider> <user_id> <work_id>(或源 txt 路径)"
-allowed-tools: Bash(make translate-user *), Read, Write
+allowed-tools: Bash(make translate-user *), Bash(make translate-assemble *), Read, Write
 ---
 
 # translate-work
