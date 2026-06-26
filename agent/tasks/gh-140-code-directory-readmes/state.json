@@ -2,12 +2,12 @@
   "schema_version": 1,
   "task_id": "gh-140-code-directory-readmes",
   "title": "Document tracked code directories",
-  "status": "active",
+  "status": "complete",
   "branch": "docs/code-directory-readmes-gh-140",
   "objective": "为受 Git 管理的代码目录补齐轻量 README，并用可执行校验定义覆盖规则。",
   "github": {
     "issue": 140,
-    "pull_request": null
+    "pull_request": 141
   },
   "scope": {
     "in": [
@@ -48,7 +48,7 @@
     {
       "id": "S2",
       "title": "提交实现并发布 PR",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1"
       ],
@@ -58,14 +58,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S2",
-    "instruction": "提交 README 覆盖实现，push 分支并创建关联 #140 的 draft PR。",
-    "acceptance": [
-      "实现提交包含 README 覆盖脚本、CI/Makefile 集成、代码目录 README 与 checkpoint 更新。",
-      "分支 push 到 origin，并创建关联 #140 的 draft PR。"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python scripts/validate_agent_tasks.py",
@@ -107,16 +100,40 @@
         "status": "passed",
         "summary": "No whitespace errors.",
         "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": "2026-06-26T08:59:54Z"
+      },
+      {
+        "command": "conda run -n llm python scripts/check_code_readmes.py",
+        "status": "passed",
+        "summary": "Code README coverage OK (44 directories).",
+        "timestamp": "2026-06-26T08:59:54Z"
+      },
+      {
+        "command": "git push -u origin docs/code-directory-readmes-gh-140",
+        "status": "passed",
+        "summary": "Branch pushed; pre-push hook ran translation and sunday-movies fast tests successfully.",
+        "timestamp": "2026-06-26T08:59:54Z"
+      },
+      {
+        "command": "GitHub connector create draft PR",
+        "status": "passed",
+        "summary": "Created draft PR #141 targeting main.",
+        "timestamp": "2026-06-26T08:59:54Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260626-085642-code-readmes",
-    "timestamp": "2026-06-26T08:56:42Z",
+    "checkpoint_id": "cp-20260626-085954-pr-opened",
+    "timestamp": "2026-06-26T08:59:54Z",
     "agent": "Codex",
-    "summary": "定义代码目录 README 覆盖规则并补齐缺失 README。",
-    "observed_head": "ee5baa7"
+    "summary": "提交并发布 #140 的代码目录 README 覆盖 PR。",
+    "observed_head": "e56b38e"
   },
   "next_task": null
 }
