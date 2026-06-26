@@ -2,7 +2,7 @@
 name: translate-work
 description: 把一部作品(pixiv/fanbox 单篇)用 agent 当译者跑通新架构全流程并自我 review。当用户说"翻译某篇/某作品""用 agent 翻 <id>""跑 translate-work"时使用。
 argument-hint: "<provider> <user_id> <work_id>(或源 txt 路径)"
-allowed-tools: Bash(make translate-user *), Read, Write
+allowed-tools: Bash(make translate-user *), Bash(make translate-assemble *), Read, Write
 ---
 
 # translate-work
@@ -26,11 +26,18 @@ allowed-tools: Bash(make translate-user *), Read, Write
    ```
    → 得 `$WS/jobs/<work_id>.job.json`(含 task / task_digest / segments[])。
 
-2. **翻译**(读 job,逐段译,写 `$WS/results/<work_id>.result.json`):
-   - 每段一个 candidate;`task_id`/`task_digest`/各 `source_hash` 从 job **原样回填**;
-     `producer.name` 用你这个执行器的标识(如 claude-code / cursor-grok / codex,按你的运行环境)。
+2. **翻译(紧凑格式,省工具调用)**:读 job 的 `segments[]`,逐段译,只写一个**纯译文 tsv**
+   `$WS/results/<work_id>.zh.tsv`——每行 `段号<TAB>中文译文`(段号 = segments 的 0 基序号)。
+   - **不要手写 result.json**:别抄 segment_id/source_hash 那些(下一步 harness 回填)。这样你的输出和
+     工具调用都小很多,几百段也能一轮内分批 `Write` 写完一个平铺文件,不爆配额。
    - 规则要点见 executor-instructions:tags 译成 `原词 / 中文`;纯符号分隔符(＊＊＊)可原样保留(QA 已豁免同形);
-     译文不得残留假名;无法翻译的段留空字符串、不照抄;人名/称谓全篇统一。
+     译文不得残留假名;无法翻译的段留空(该行 TAB 后为空);人名/称谓全篇统一。
+
+2b. **组装 result.json**(harness 回填身份,你不碰 hash):
+   ```
+   make translate-assemble JOB=$WS/jobs/<work_id>.job.json TRANSLATIONS=$WS/results/<work_id>.zh.tsv OUT=$WS/results/<work_id>.result.json PRODUCER=<你的执行器标识>
+   ```
+   缺段/越界会报错——补齐 tsv 重跑。
 
 3. **发布 + 渲染**:
    ```
