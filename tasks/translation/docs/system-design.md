@@ -3,7 +3,7 @@
 > 状态：分阶段实施中。DocumentRevision/Segment、业务 Schema、fixture/golden、source adapter、
 > bilingual shadow renderer、legacy candidate import、translate task export/result import、
 > candidate deterministic QA、Sharded Artifact Store(#54)、DocumentVersion v2 + 保守选择策略(#50)
-> 已进入主干；current ref 发布(原子 CAS)与端到端 slice 已贯通；repair 闭环、knowledge(部分)和 SQLite 尚未完成。
+> 已进入主干；current ref 发布(原子 CAS)与端到端 slice 已贯通；SQLite 投影(#55)、knowledge/实体库(#83)均已落地；repair 闭环尚未完成。
 >
 > 当前可执行命令仍以 [`../README.md`](../README.md) 为准；近期实现顺序与组件状态以
 > [`../../../docs/PROJECT_STATUS.md`](../../../docs/PROJECT_STATUS.md) 为准。
@@ -179,7 +179,7 @@ candidate→attestation/...)写各 shard:POSIX 多文件 rename 非事务,无法
 依赖序保证任何物理崩溃前缀都**引用完整、无悬空引用**,缺失的后续工件可幂等重导补齐。不替代
 Task/Result stale-envelope 校验。legacy/result importer
 已迁移走 store(legacy 连同 DocumentRevision 一并入库;result 导入前要求源 revision 已入库,否则整批
-quarantine)。**仍待 #55**:SQLite 只读投影。
+quarantine)。**SQLite 只读投影已落地(#55)**。
 
 ## 3. 系统总览
 
@@ -749,7 +749,10 @@ entity linking 证据应保存：
 document_id;LLM 给的 readings 透传进新建候选 → 喂读音匹配)。这是 `extract_name_glossary`(#61) 的正确版:
 产物进**实体库**(有作用域/经 review/可锁定),而非塞进每次 prompt。`make extract-job` / `make import-extraction`。
 
-Entity Linking 的**规则影响分析**(§8.3)仍待做(#83 P1b-2b 最后余项)。
+**已落地(2026-06-26,#83 §8.3 规则影响分析)**:`rule_impact.py` / `make rule-impact` 扫每个文档的
+current ref → DocumentVersion → 选中候选译文,**只读**地找出含旧译名(stale_text)的已发布 segment
+(可按 document_id 前缀 scope 过滤),产出"受影响 segment 列表"驱动重译——**不改写历史发布版本**(新候选/新版本
+由执行器走正常翻译流程产生)。至此 #83 P1b-2b 全部落地。
 
 ### 8.3 Knowledge Snapshot
 
