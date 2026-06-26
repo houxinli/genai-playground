@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 try:
-    from . import candidate_eval, legacy_import, openrouter_executor as ox, source_identity as si, version_select
+    from . import candidate_eval, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from .artifact_store import ArtifactStore
     from .pipeline_ingest import merge_author
     from .renderer import render_bilingual, render_zh
@@ -26,7 +26,7 @@ try:
     from .task_export import export_job, ingest_revision
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core import candidate_eval, legacy_import, openrouter_executor as ox, source_identity as si, version_select
+    from core import candidate_eval, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from core.artifact_store import ArtifactStore
     from core.pipeline_ingest import merge_author
     from core.renderer import render_bilingual, render_zh
@@ -215,10 +215,17 @@ def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, bi
             docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
             continue
         result_path = results_dir / f"{source_id}.result.json"
-        if not result_path.is_file():
-            docs.append({"source": src.name, "status": "no_result"})
-            continue
+        tsv_path = results_dir / f"{source_id}.zh.tsv"
         try:
+            # 紧凑路径:有 <id>.zh.tsv 而无 result.json → 自动组装(agent 只需写 tsv,不必单独跑 assemble)。
+            if not result_path.is_file() and tsv_path.is_file():
+                bundle = prepare_document(provider, src, store, bilingual_dir)["bundle"]
+                translations = result_assemble.parse_translations_tsv(tsv_path.read_text(encoding="utf-8"))
+                result = result_assemble.assemble_result(bundle, translations, producer_name="agent")
+                result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            if not result_path.is_file():
+                docs.append({"source": src.name, "status": "no_result"})
+                continue
             result = json.loads(result_path.read_text(encoding="utf-8"))
             docs.append(finish_document(provider, src, store, result, render_dir, bilingual_dir))
         except Exception as exc:

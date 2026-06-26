@@ -33,17 +33,11 @@ allowed-tools: Bash(make translate-user *), Bash(make translate-assemble *), Rea
    - 规则要点见 executor-instructions:tags 译成 `原词 / 中文`;纯符号分隔符(＊＊＊)可原样保留(QA 已豁免同形);
      译文不得残留假名;无法翻译的段留空(该行 TAB 后为空);人名/称谓全篇统一。
 
-2b. **组装 result.json**(harness 回填身份,你不碰 hash):
-   ```
-   make translate-assemble JOB=$WS/jobs/<work_id>.job.json TRANSLATIONS=$WS/results/<work_id>.zh.tsv OUT=$WS/results/<work_id>.result.json PRODUCER=<你的执行器标识>
-   ```
-   缺段/越界会报错——补齐 tsv 重跑。
-
-3. **发布 + 渲染**:
+3. **发布 + 渲染**(finish 会**自动从 `<id>.zh.tsv` 组装** result.json 并回填身份,你不碰 hash):
    ```
    make translate-user MODE=finish PROVIDER=<provider> SOURCE=$WS/src STORE=$WS/store RENDER=$WS/rendered RESULTS_DIR=$WS/results
    ```
-   summary 的 `published` 应为 1。
+   summary 的 `published` 应为 1。(tsv 缺段/越界会报错——补齐重跑。)
 
 4. **验证(必做,不可跳过)**:跑独立闸门核对落盘产物——**不要凭记忆/自述声称完成**:
    ```
