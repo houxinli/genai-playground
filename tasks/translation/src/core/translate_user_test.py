@@ -85,16 +85,18 @@ class TranslateUserTest(unittest.TestCase):
             m = tu.translate_user("pixiv", src_dir, tmp / "s", tmp / "out", _mock_executor)
             self.assertEqual(1, m["summary"]["published"])
 
-    def test_failing_title_stays_unresolved_not_force_published(self):
-        # Codex #107:title 返回未翻日文(same_as_source fail)且无 incumbent → 不得借 tags 兜底强发
+    def test_failing_title_publishes_reviewable_render(self):
+        # QA fail 不阻断 render:无 incumbent 且只有本轮唯一候选时先发布可 review 版本,后续 patch 覆盖。
         bad = {**TR, "朝の挨拶": "朝の挨拶"}  # 标题原样照抄 = QA fail
         with tempfile.TemporaryDirectory() as t:
             tmp = Path(t)
             src_dir = tmp / "auth"; src_dir.mkdir()
             shutil.copy(SRC, src_dir / "700001.txt")
             m = tu.translate_user("pixiv", src_dir, tmp / "s", tmp / "out", _mk(bad))
-            self.assertEqual(0, m["summary"]["published"])
-            self.assertEqual("unresolved", m["documents"][0]["status"])
+            self.assertEqual(1, m["summary"]["published"])
+            self.assertEqual("ok", m["documents"][0]["status"])
+            self.assertEqual(1, m["documents"][0]["review_required"])
+            self.assertTrue(m["documents"][0]["rendered"])
 
     def test_uses_this_run_candidate_not_stale_shard(self):
         # Codex #107:store 已有上一轮非 legacy 候选时,本轮发布/渲染必须用本轮 executor 产物
