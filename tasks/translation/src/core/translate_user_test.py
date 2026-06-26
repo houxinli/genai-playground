@@ -188,9 +188,53 @@ class TranslateUserTest(unittest.TestCase):
             lines = [f"{i}\t{TR[seg['source_text']]}" for i, seg in enumerate(bundle["segments"])]
             (results / f"{sid}.zh.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")  # 只写 tsv
 
-            m = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs, bilingual_dir=bil_dir)
+            m = tu.finish_user(
+                "pixiv",
+                src_dir,
+                store,
+                render,
+                results,
+                jobs_dir=jobs,
+                bilingual_dir=bil_dir,
+                producer_name="cursor-grok",
+                model="grok-test",
+            )
             self.assertEqual(1, m["summary"]["published"])
             self.assertTrue((results / f"{sid}.result.json").is_file())  # finish 自动从原始 job 组装出 result.json
+            result = _json.loads((results / f"{sid}.result.json").read_text(encoding="utf-8"))
+            self.assertEqual({"type": "harness", "name": "cursor-grok", "model": "grok-test"}, result["producer"])
+            self.assertEqual({"cursor-grok"}, {c["result_candidate_key"] for c in result["candidates"]})
+
+    def test_finish_tsv_overwrites_partial_result(self):
+        # Cursor 实测回归:完整 tsv 后仍遗留早期 partial result 时,finish 必须重组,不能使用缺段旧 result。
+        import json as _json
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"; src_dir.mkdir(); shutil.copy(SRC, src_dir / "700001.txt")
+            bil_dir = tmp / "bil"; bil_dir.mkdir(); shutil.copy(BILINGUAL, bil_dir / "700001.txt")
+            store = tmp / "store"; jobs = tmp / "jobs"; results = tmp / "results"; render = tmp / "out"
+            results.mkdir()
+            prep = tu.prepare_user("pixiv", src_dir, store, jobs, bilingual_dir=bil_dir)
+            j = prep["jobs"][0]; sid = j["source_id"]
+            bundle = _json.loads(Path(j["job"]).read_text(encoding="utf-8"))
+            lines = [f"{i}\t{TR[seg['source_text']]}" for i, seg in enumerate(bundle["segments"])]
+            (results / f"{sid}.zh.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            # assemble_result 要求全段,所以直接模拟旧 partial result 的合法外形:同 digest 但 candidates 缺段。
+            full = tu.result_assemble.assemble_result(
+                bundle,
+                {i: TR[seg["source_text"]] for i, seg in enumerate(bundle["segments"])},
+                producer_name="cursor-grok",
+                model="grok-test",
+            )
+            partial = {**full, "candidates": full["candidates"][:2]}
+            (results / f"{sid}.result.json").write_text(_json.dumps(partial, ensure_ascii=False), encoding="utf-8")
+
+            m = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs, bilingual_dir=bil_dir)
+            self.assertEqual(1, m["summary"]["published"])
+            repaired = _json.loads((results / f"{sid}.result.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(bundle["segments"]), len(repaired["candidates"]))
+            self.assertEqual({"type": "harness", "name": "cursor-grok", "model": "grok-test"}, repaired["producer"])
+            self.assertEqual({"cursor-grok"}, {c["result_candidate_key"] for c in repaired["candidates"]})
 
     def test_finish_tsv_assemble_uses_original_job_catches_source_change(self):
         # Codex #136:tsv 用原始 job 组装;prepare 后改源 → 旧译文身份不符 → import 隔离,不发到错 revision

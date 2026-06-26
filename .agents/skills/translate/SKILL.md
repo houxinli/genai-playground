@@ -24,6 +24,7 @@ job.json -> zh.tsv -> result.json -> import -> version -> publish -> render -> v
 
 - 你只写 TSV，不手写 `result.json`。
 - `result.json` 由 harness 从 `job.json + zh.tsv` 机械组装，回填 `segment_id` / `source_hash` / `task_digest`。
+- `MODE=finish`/publish 时把当前执行器作为 `PRODUCER=<cursor-grok|claude-code|codex|openrouter>` 传给 harness；若已有旧 result，harness 会继承其 producer。
 - OpenRouter、Cursor/Grok、Claude Code、Codex、人工翻译都应产同形 TSV，便于 diff、交叉验证和择优。
 
 TSV 每行格式：

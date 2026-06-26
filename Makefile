@@ -283,10 +283,10 @@ seed-entities:
 	$(PY) tasks/translation/src/core/entity_store.py --store "$(ENTITY_STORE)" --scope-level "$(LEVEL)" $(if $(KEY),--scope-key "$(KEY)") --rules "$(RULES)" $(if $(STATUS),--status $(STATUS))
 
 # 通用端到端:一个作者 → 实际翻译 → 发布 + 渲染 + 合并整本(executor 可插拔)。
-# 用法: make translate-user PROVIDER=pixiv SOURCE=data/pixiv/18330282 STORE=... RENDER=... [EXECUTOR=openrouter] [LIMIT=1] [BILINGUAL=...] [MODEL=x-ai/grok-4.3]
+# 用法: make translate-user PROVIDER=pixiv SOURCE=data/pixiv/18330282 STORE=... RENDER=... [EXECUTOR=openrouter] [PRODUCER=cursor-grok] [LIMIT=1] [BILINGUAL=...] [MODEL=x-ai/grok-4.3]
 translate-user:
 	@test -n "$(PROVIDER)" && test -n "$(SOURCE)" && test -n "$(STORE)" || { echo "translate-user 需要 PROVIDER= SOURCE= STORE="; exit 2; }
-	$(PY) tasks/translation/src/core/translate_user.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --store "$(STORE)" $(if $(MODE),--mode "$(MODE)") $(if $(RENDER),--render-dir "$(RENDER)") $(if $(JOBS_DIR),--jobs-dir "$(JOBS_DIR)") $(if $(RESULTS_DIR),--results-dir "$(RESULTS_DIR)") $(if $(BILINGUAL),--bilingual-dir "$(BILINGUAL)") $(if $(EXECUTOR),--executor "$(EXECUTOR)") $(if $(MODEL),--model "$(MODEL)") $(if $(LIMIT),--limit $(LIMIT))
+	$(PY) tasks/translation/src/core/translate_user.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --store "$(STORE)" $(if $(MODE),--mode "$(MODE)") $(if $(RENDER),--render-dir "$(RENDER)") $(if $(JOBS_DIR),--jobs-dir "$(JOBS_DIR)") $(if $(RESULTS_DIR),--results-dir "$(RESULTS_DIR)") $(if $(BILINGUAL),--bilingual-dir "$(BILINGUAL)") $(if $(EXECUTOR),--executor "$(EXECUTOR)") $(if $(PRODUCER),--producer "$(PRODUCER)") $(if $(MODEL),--model "$(MODEL)") $(if $(LIMIT),--limit $(LIMIT))
 
 # 紧凑译文 → result.json(agent 只写 <id>.zh.tsv:段号<TAB>译文,harness 回填身份)。
 # 用法: make translate-assemble JOB=jobs/<id>.job.json TRANSLATIONS=results/<id>.zh.tsv OUT=results/<id>.result.json [PRODUCER=cursor-grok]

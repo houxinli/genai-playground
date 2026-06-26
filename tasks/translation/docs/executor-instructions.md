@@ -79,13 +79,13 @@ Harness 用 `tasks/translation/src/core/result_assemble.py` / `make translate-as
   "task_digest": "<bundle.task_digest 原样回填>",
   "producer": { "type": "harness", "name": "<claude-code|cursor-grok|codex>", "model": "<模型名或 null>" },
   "candidates": [
-    { "result_candidate_key": "option-a",
+    { "result_candidate_key": "<producer-name>",
       "segment_id": "<segment_id>",
       "source_hash": "<bundle.task.source_hashes[segment_id] 原样回填>",
       "text": "<你的中文译文>" }
   ],
   "findings": [],
-  "recommended_candidate_keys": ["option-a"],
+  "recommended_candidate_keys": ["<producer-name>"],
   "completed_at": "<ISO8601 时间>"
 }
 ```

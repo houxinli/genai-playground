@@ -196,7 +196,73 @@ def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=No
     return manifest
 
 
-def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, jobs_dir=None, bilingual_dir=None, limit=None) -> Dict[str, Any]:
+def _stable_result_signature(result: Dict[str, Any]) -> Dict[str, Any]:
+    """比较由 job+TSV 机械派生的稳定字段;completed_at 不参与,避免每次 finish 都改写。"""
+    return {
+        "schema_version": result.get("schema_version"),
+        "task_id": result.get("task_id"),
+        "task_digest": result.get("task_digest"),
+        "producer": result.get("producer"),
+        "recommended_candidate_keys": result.get("recommended_candidate_keys"),
+        "candidates": [
+            {
+                "result_candidate_key": c.get("result_candidate_key"),
+                "segment_id": c.get("segment_id"),
+                "source_hash": c.get("source_hash"),
+                "text": c.get("text"),
+            }
+            for c in result.get("candidates", [])
+        ],
+    }
+
+
+def _sync_result_from_tsv(
+    result_path: Path,
+    tsv_path: Path,
+    job_path: Path,
+    *,
+    producer_name: Optional[str] = None,
+    model: Optional[str] = None,
+) -> bool:
+    """当 TSV 存在时,用 prepare 的原始 job 组装期望 result。缺失/陈旧/partial result 会被覆盖。"""
+    if not tsv_path.is_file():
+        return False
+    if not job_path.is_file():
+        raise ValueError(f"缺原始 job {job_path}(先 prepare),无法从 tsv 组装")
+    bundle = json.loads(job_path.read_text(encoding="utf-8"))
+    translations = result_assemble.parse_translations_tsv(tsv_path.read_text(encoding="utf-8"))
+    current = None
+    if result_path.is_file():
+        current = json.loads(result_path.read_text(encoding="utf-8"))
+    current_producer = current.get("producer", {}) if current else {}
+    effective_producer = producer_name or current_producer.get("name") or "agent"
+    effective_model = model if model is not None else current_producer.get("model")
+    expected = result_assemble.assemble_result(
+        bundle,
+        translations,
+        producer_name=effective_producer,
+        model=effective_model,
+        completed_at=current.get("completed_at") if current else None,
+    )
+    if current is None or _stable_result_signature(current) != _stable_result_signature(expected):
+        result_path.write_text(json.dumps(expected, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return True
+    return False
+
+
+def finish_user(
+    provider,
+    source_dir,
+    store_root,
+    render_dir,
+    results_dir,
+    *,
+    jobs_dir=None,
+    bilingual_dir=None,
+    limit=None,
+    producer_name: Optional[str] = None,
+    model: Optional[str] = None,
+) -> Dict[str, Any]:
     """agent 路线:对每篇 source 找 results_dir/<source_id>.result.json → finish_document → 合并整本。
 
     source_id 与 prepare 一致地取自 document_id(**不是 src.stem**:pixiv 系列文件名是
@@ -217,20 +283,16 @@ def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, jo
         result_path = results_dir / f"{source_id}.result.json"
         tsv_path = results_dir / f"{source_id}.zh.tsv"
         try:
-            # 紧凑路径:有 <id>.zh.tsv 而无 result.json → 自动组装(agent 只需写 tsv,不必单独跑 assemble)。
+            # 紧凑路径:有 <id>.zh.tsv → 自动组装/校准 result(agent 只需写 tsv,不必单独跑 assemble)。
             # **必须用 prepare 当时存的原始 job 组装**(不是按当前源重建):否则 prepare 后源被改/重下时,
             # 旧译文会被盖上新身份、绕过 stale 防护、把译文发到错的 revision(Codex #136)。用原始 job 组装后,
             # 源若变了 → result 的旧 task_digest 与 finish 重建的当前 task 不符 → import_result 隔离掉。
-            if not result_path.is_file() and tsv_path.is_file():
+            # 若已有 result.json 但它是旧的 partial/陈旧产物,完整 TSV 必须重新组装覆盖,否则会把缺段误报成 QA 问题。
+            if tsv_path.is_file():
                 if jobs_dir is None:
                     raise ValueError("从 tsv 组装需要 jobs_dir(prepare 存的原始 job)")
                 job_path = Path(jobs_dir) / f"{source_id}.job.json"
-                if not job_path.is_file():
-                    raise ValueError(f"缺原始 job {job_path}(先 prepare),无法从 tsv 组装")
-                bundle = json.loads(job_path.read_text(encoding="utf-8"))
-                translations = result_assemble.parse_translations_tsv(tsv_path.read_text(encoding="utf-8"))
-                result = result_assemble.assemble_result(bundle, translations, producer_name="agent")
-                result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                _sync_result_from_tsv(result_path, tsv_path, job_path, producer_name=producer_name, model=model)
             if not result_path.is_file():
                 docs.append({"source": src.name, "status": "no_result"})
                 continue
@@ -341,6 +403,7 @@ def main() -> int:
     parser.add_argument("--results-dir", type=Path, default=None, help="mode=finish 的 agent result 目录")
     parser.add_argument("--bilingual-dir", type=Path, default=None, help="可选:已有 legacy 译文作 incumbent")
     parser.add_argument("--executor", default="openrouter", help="mode=auto 的执行器(openrouter)")
+    parser.add_argument("--producer", default=None, help="mode=finish 从 TSV 组装 result 时记录的 producer 名")
     parser.add_argument("--model", default=None)
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 篇(控成本)")
     args = parser.parse_args()
@@ -366,8 +429,10 @@ def main() -> int:
     if args.mode == "finish":
         if not (args.results_dir and str(args.results_dir).strip()) or not (args.render_dir and str(args.render_dir).strip()):
             parser.error("mode=finish 需要非空 --results-dir 与 --render-dir")
+        producer_name = args.producer or (args.executor if args.executor != "openrouter" else None)
         m = finish_user(args.provider, args.source_dir, args.store, args.render_dir, args.results_dir,
-                        jobs_dir=args.jobs_dir, bilingual_dir=args.bilingual_dir, limit=args.limit)
+                        jobs_dir=args.jobs_dir, bilingual_dir=args.bilingual_dir, limit=args.limit,
+                        producer_name=producer_name, model=args.model)
         print(json.dumps(m["summary"], ensure_ascii=False))
         return 0
 
