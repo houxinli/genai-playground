@@ -260,6 +260,27 @@ class TranslateUserTest(unittest.TestCase):
             # 旧译文(原始 job 身份)与当前源不符 → 不得 published
             self.assertEqual(0, m["summary"]["published"])
 
+    def test_finish_uses_existing_result_without_jobs_dir(self):
+        # Codex #138:已有可用 result.json(+tsv 也在)但没传 jobs_dir → 用现成 result,不报 error
+        import json as _json
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"; src_dir.mkdir(); shutil.copy(SRC, src_dir / "700001.txt")
+            bil_dir = tmp / "bil"; bil_dir.mkdir(); shutil.copy(BILINGUAL, bil_dir / "700001.txt")
+            store = tmp / "store"; jobs = tmp / "jobs"; results = tmp / "results"; render = tmp / "out"
+            results.mkdir()
+            prep = tu.prepare_user("pixiv", src_dir, store, jobs, bilingual_dir=bil_dir)
+            j = prep["jobs"][0]; sid = j["source_id"]
+            bundle = _json.loads(Path(j["job"]).read_text(encoding="utf-8"))
+            lines = [f"{i}\t{TR[seg['source_text']]}" for i, seg in enumerate(bundle["segments"])]
+            (results / f"{sid}.zh.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs, bilingual_dir=bil_dir)
+            self.assertTrue((results / f"{sid}.result.json").is_file())
+            # 第二次不带 jobs_dir(tsv 仍在)→ 用现成 result,不报 error
+            m = tu.finish_user("pixiv", src_dir, store, render, results, bilingual_dir=bil_dir)
+            self.assertEqual(0, m["summary"]["errors"])
+            self.assertEqual("ok", m["documents"][0]["status"])
+
     def test_finish_respects_limit(self):
         # Codex #122:finish 也要按 limit 切片,不扫 limit 之外的文件(否则报无关 no_result)
         with tempfile.TemporaryDirectory() as t:

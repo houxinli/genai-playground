@@ -292,11 +292,14 @@ def finish_user(
             # 旧译文会被盖上新身份、绕过 stale 防护、把译文发到错的 revision(Codex #136)。用原始 job 组装后,
             # 源若变了 → result 的旧 task_digest 与 finish 重建的当前 task 不符 → import_result 隔离掉。
             # 若已有 result.json 但它是旧的 partial/陈旧产物,完整 TSV 必须重新组装覆盖,否则会把缺段误报成 QA 问题。
-            if tsv_path.is_file():
-                if jobs_dir is None:
-                    raise ValueError("从 tsv 组装需要 jobs_dir(prepare 存的原始 job)")
+            if tsv_path.is_file() and jobs_dir is not None:
+                # 有 tsv + 原始 job → 以 tsv 为准(重)组装,覆盖旧/不全 result。
                 job_path = Path(jobs_dir) / f"{source_id}.job.json"
                 _sync_result_from_tsv(result_path, tsv_path, job_path, producer_name=producer_name, model=model)
+            elif tsv_path.is_file() and jobs_dir is None and not result_path.is_file():
+                # 只有 tsv、既无 job 又无现成 result → 没法组装(Codex #138:仅此时才硬报错)。
+                raise ValueError("从 tsv 组装需要 jobs_dir(prepare 存的原始 job)")
+            # 其余:tsv 在但没 jobs_dir、且已有可用 result.json → 直接用现成 result(不强制重组装、不报错)。
             if not result_path.is_file():
                 docs.append({"source": src.name, "status": "no_result"})
                 continue
