@@ -215,7 +215,7 @@ monitor-translation:
 
 
 # ============ Agent 任务状态 ============
-.PHONY: agent-validate agent-validator-test agent-bootstrap agent-complete
+.PHONY: agent-validate agent-validator-test agent-bootstrap agent-complete code-readmes
 
 agent-validate:
 	$(PY) scripts/validate_agent_tasks.py
@@ -224,8 +224,11 @@ agent-validate:
 docs-drift:
 	$(PY) scripts/check_docs_drift.py
 
+code-readmes:
+	$(PY) scripts/check_code_readmes.py
+
 agent-validator-test:
-	$(PY) -m unittest scripts.validate_agent_tasks_test scripts.bootstrap_agent_task_test scripts.sync_github_task_test
+	$(PY) -m unittest scripts.validate_agent_tasks_test scripts.bootstrap_agent_task_test scripts.sync_github_task_test scripts.check_code_readmes_test
 
 # 用法: make agent-bootstrap TASK_ID=gh-12-slug BRANCH=feat/x TITLE="..." OBJECTIVE="..." [ISSUE=12]
 agent-bootstrap:

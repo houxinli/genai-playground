@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-140-code-directory-readmes",
+  "title": "Document tracked code directories",
+  "status": "complete",
+  "branch": "docs/code-directory-readmes-gh-140",
+  "objective": "为受 Git 管理的代码目录补齐轻量 README，并用可执行校验定义覆盖规则。",
+  "github": {
+    "issue": 140,
+    "pull_request": 141
+  },
+  "scope": {
+    "in": [
+      "scripts/check_code_readmes.py",
+      "Makefile",
+      ".github/workflows/tests.yml",
+      "受 Git 管理的代码目录 README.md",
+      "agent/tasks/gh-140-code-directory-readmes/"
+    ],
+    "out": [
+      "docs-only、config-only、schema-only、data/logs/test fixture/golden 目录",
+      "agent/tasks/gh-* 历史 checkpoint 目录",
+      "翻译业务逻辑、测试基线与运行数据"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    }
+  ],
+  "decisions": [],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "定义代码目录 README 覆盖规则并补齐第一批文档",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "代码目录集合由脚本从 git ls-files 派生，排除数据/配置/文档/schema/fixtures/checkpoint 目录。",
+        "缺失 README 的代码目录补齐 README.md，内容说明当前目录和直接子项。",
+        "make agent-validate 与 README 覆盖校验通过。"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "提交实现并发布 PR",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "实现提交包含 README 覆盖脚本、CI/Makefile 集成、代码目录 README 与 checkpoint 更新。",
+        "分支 push 到 origin，并创建关联 #140 的 draft PR。"
+      ]
+    }
+  ],
+  "next_action": null,
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python scripts/validate_agent_tasks.py",
+      "conda run -n llm python scripts/check_code_readmes.py"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m py_compile scripts/check_code_readmes.py scripts/check_code_readmes_test.py",
+        "status": "passed",
+        "summary": "py_compile passed.",
+        "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "make agent-validator-test",
+        "status": "passed",
+        "summary": "28 unittest cases passed.",
+        "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "make agent-validate",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "make code-readmes",
+        "status": "passed",
+        "summary": "Code README coverage OK (44 directories).",
+        "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "make docs-drift",
+        "status": "passed",
+        "summary": "文档漂移检查通过。",
+        "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "git diff --check",
+        "status": "passed",
+        "summary": "No whitespace errors.",
+        "timestamp": "2026-06-26T08:56:42Z"
+      },
+      {
+        "command": "conda run -n llm python scripts/validate_agent_tasks.py",
+        "status": "passed",
+        "summary": "Agent task validation passed.",
+        "timestamp": "2026-06-26T08:59:54Z"
+      },
+      {
+        "command": "conda run -n llm python scripts/check_code_readmes.py",
+        "status": "passed",
+        "summary": "Code README coverage OK (44 directories).",
+        "timestamp": "2026-06-26T08:59:54Z"
+      },
+      {
+        "command": "git push -u origin docs/code-directory-readmes-gh-140",
+        "status": "passed",
+        "summary": "Branch pushed; pre-push hook ran translation and sunday-movies fast tests successfully.",
+        "timestamp": "2026-06-26T08:59:54Z"
+      },
+      {
+        "command": "GitHub connector create draft PR",
+        "status": "passed",
+        "summary": "Created draft PR #141 targeting main.",
+        "timestamp": "2026-06-26T08:59:54Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260626-085954-pr-opened",
+    "timestamp": "2026-06-26T08:59:54Z",
+    "agent": "Codex",
+    "summary": "提交并发布 #140 的代码目录 README 覆盖 PR。",
+    "observed_head": "e56b38e"
+  },
+  "next_task": null
+}
