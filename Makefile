@@ -240,7 +240,7 @@ agent-complete:
 
 
 # ============ 候选导入(新架构) ============
-.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user rebuild-index translate-assemble extract-entities extract-job import-extraction entity-review-import entity-review-list entity-review-approve entity-review-dismiss
+.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user rebuild-index translate-assemble rule-impact extract-entities extract-job import-extraction entity-review-import entity-review-list entity-review-approve entity-review-dismiss
 
 # Agent 人名抽取(Cursor 等):导出待抽取文本 → agent 抽 → 导回实体库。
 # 用法: make extract-job REVISION=rev.json OUT=job.json
@@ -259,6 +259,12 @@ extract-entities:
 	@test -n "$(REVISION)" || { echo "extract-entities 需要 REVISION="; exit 2; }
 	@if [ -n "$(LINK)" ]; then test -n "$(ENTITY_STORE)" && test -n "$(QUEUE)" || { echo "extract-entities LINK 需要 ENTITY_STORE= 与 QUEUE="; exit 2; }; fi
 	$(PY) tasks/translation/src/core/entity_extract.py --revision "$(REVISION)" $(if $(ENTITY_STORE),--entity-store "$(ENTITY_STORE)") $(if $(QUEUE),--queue "$(QUEUE)") $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(CREATOR_ID),--creator-id "$(CREATOR_ID)") $(if $(LINK),--link)
+
+# 规则影响分析:已发布版本里找用了旧译名的 segment(只读,不改 version)。
+# 用法: make rule-impact STORE=<store> STALE=<旧译名> [SCOPE=pixiv:104039620]
+rule-impact:
+	@test -n "$(STORE)" && test -n "$(STALE)" || { echo "rule-impact 需要 STORE= STALE="; exit 2; }
+	$(PY) tasks/translation/src/core/rule_impact.py --store "$(STORE)" --stale "$(STALE)" $(if $(SCOPE),--scope "$(SCOPE)")
 
 # 从 JSONL 工件全量重建 SQLite 只读投影(派生索引,可丢弃重建)。
 # 用法: make rebuild-index STORE=<ArtifactStore 根目录> DB=index.db
