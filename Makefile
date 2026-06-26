@@ -240,7 +240,7 @@ agent-complete:
 
 
 # ============ 候选导入(新架构) ============
-.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user rebuild-index extract-entities extract-job import-extraction entity-review-import entity-review-list entity-review-approve entity-review-dismiss
+.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user rebuild-index translate-assemble extract-entities extract-job import-extraction entity-review-import entity-review-list entity-review-approve entity-review-dismiss
 
 # Agent 人名抽取(Cursor 等):导出待抽取文本 → agent 抽 → 导回实体库。
 # 用法: make extract-job REVISION=rev.json OUT=job.json
@@ -287,6 +287,12 @@ seed-entities:
 translate-user:
 	@test -n "$(PROVIDER)" && test -n "$(SOURCE)" && test -n "$(STORE)" || { echo "translate-user 需要 PROVIDER= SOURCE= STORE="; exit 2; }
 	$(PY) tasks/translation/src/core/translate_user.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --store "$(STORE)" $(if $(MODE),--mode "$(MODE)") $(if $(RENDER),--render-dir "$(RENDER)") $(if $(JOBS_DIR),--jobs-dir "$(JOBS_DIR)") $(if $(RESULTS_DIR),--results-dir "$(RESULTS_DIR)") $(if $(BILINGUAL),--bilingual-dir "$(BILINGUAL)") $(if $(EXECUTOR),--executor "$(EXECUTOR)") $(if $(MODEL),--model "$(MODEL)") $(if $(LIMIT),--limit $(LIMIT))
+
+# 紧凑译文 → result.json(agent 只写 <id>.zh.tsv:段号<TAB>译文,harness 回填身份)。
+# 用法: make translate-assemble JOB=jobs/<id>.job.json TRANSLATIONS=results/<id>.zh.tsv OUT=results/<id>.result.json [PRODUCER=cursor-grok]
+translate-assemble:
+	@test -n "$(JOB)" && test -n "$(TRANSLATIONS)" && test -n "$(OUT)" || { echo "translate-assemble 需要 JOB= TRANSLATIONS= OUT="; exit 2; }
+	$(PY) tasks/translation/src/core/result_assemble.py --job "$(JOB)" --translations "$(TRANSLATIONS)" --out "$(OUT)" $(if $(PRODUCER),--producer "$(PRODUCER)")
 
 # OpenRouter Grok 执行器:job bundle → 实际翻译 → result.json(需 OPENROUTER_API_KEY)。
 # 用法: make translate-exec BUNDLE=job.json OUT=result.json [MODEL=x-ai/grok-4.3]
