@@ -85,16 +85,18 @@ class TranslateUserTest(unittest.TestCase):
             m = tu.translate_user("pixiv", src_dir, tmp / "s", tmp / "out", _mock_executor)
             self.assertEqual(1, m["summary"]["published"])
 
-    def test_failing_title_stays_unresolved_not_force_published(self):
-        # Codex #107:title 返回未翻日文(same_as_source fail)且无 incumbent → 不得借 tags 兜底强发
+    def test_failing_title_publishes_reviewable_render(self):
+        # QA fail 不阻断 render:无 incumbent 且只有本轮唯一候选时先发布可 review 版本,后续 patch 覆盖。
         bad = {**TR, "朝の挨拶": "朝の挨拶"}  # 标题原样照抄 = QA fail
         with tempfile.TemporaryDirectory() as t:
             tmp = Path(t)
             src_dir = tmp / "auth"; src_dir.mkdir()
             shutil.copy(SRC, src_dir / "700001.txt")
             m = tu.translate_user("pixiv", src_dir, tmp / "s", tmp / "out", _mk(bad))
-            self.assertEqual(0, m["summary"]["published"])
-            self.assertEqual("unresolved", m["documents"][0]["status"])
+            self.assertEqual(1, m["summary"]["published"])
+            self.assertEqual("ok", m["documents"][0]["status"])
+            self.assertEqual(1, m["documents"][0]["review_required"])
+            self.assertTrue(m["documents"][0]["rendered"])
 
     def test_uses_this_run_candidate_not_stale_shard(self):
         # Codex #107:store 已有上一轮非 legacy 候选时,本轮发布/渲染必须用本轮 executor 产物
@@ -188,9 +190,53 @@ class TranslateUserTest(unittest.TestCase):
             lines = [f"{i}\t{TR[seg['source_text']]}" for i, seg in enumerate(bundle["segments"])]
             (results / f"{sid}.zh.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")  # 只写 tsv
 
-            m = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs, bilingual_dir=bil_dir)
+            m = tu.finish_user(
+                "pixiv",
+                src_dir,
+                store,
+                render,
+                results,
+                jobs_dir=jobs,
+                bilingual_dir=bil_dir,
+                producer_name="cursor-grok",
+                model="grok-test",
+            )
             self.assertEqual(1, m["summary"]["published"])
             self.assertTrue((results / f"{sid}.result.json").is_file())  # finish 自动从原始 job 组装出 result.json
+            result = _json.loads((results / f"{sid}.result.json").read_text(encoding="utf-8"))
+            self.assertEqual({"type": "harness", "name": "cursor-grok", "model": "grok-test"}, result["producer"])
+            self.assertEqual({"cursor-grok"}, {c["result_candidate_key"] for c in result["candidates"]})
+
+    def test_finish_tsv_overwrites_partial_result(self):
+        # Cursor 实测回归:完整 tsv 后仍遗留早期 partial result 时,finish 必须重组,不能使用缺段旧 result。
+        import json as _json
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"; src_dir.mkdir(); shutil.copy(SRC, src_dir / "700001.txt")
+            bil_dir = tmp / "bil"; bil_dir.mkdir(); shutil.copy(BILINGUAL, bil_dir / "700001.txt")
+            store = tmp / "store"; jobs = tmp / "jobs"; results = tmp / "results"; render = tmp / "out"
+            results.mkdir()
+            prep = tu.prepare_user("pixiv", src_dir, store, jobs, bilingual_dir=bil_dir)
+            j = prep["jobs"][0]; sid = j["source_id"]
+            bundle = _json.loads(Path(j["job"]).read_text(encoding="utf-8"))
+            lines = [f"{i}\t{TR[seg['source_text']]}" for i, seg in enumerate(bundle["segments"])]
+            (results / f"{sid}.zh.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            # assemble_result 要求全段,所以直接模拟旧 partial result 的合法外形:同 digest 但 candidates 缺段。
+            full = tu.result_assemble.assemble_result(
+                bundle,
+                {i: TR[seg["source_text"]] for i, seg in enumerate(bundle["segments"])},
+                producer_name="cursor-grok",
+                model="grok-test",
+            )
+            partial = {**full, "candidates": full["candidates"][:2]}
+            (results / f"{sid}.result.json").write_text(_json.dumps(partial, ensure_ascii=False), encoding="utf-8")
+
+            m = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs, bilingual_dir=bil_dir)
+            self.assertEqual(1, m["summary"]["published"])
+            repaired = _json.loads((results / f"{sid}.result.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(bundle["segments"]), len(repaired["candidates"]))
+            self.assertEqual({"type": "harness", "name": "cursor-grok", "model": "grok-test"}, repaired["producer"])
+            self.assertEqual({"cursor-grok"}, {c["result_candidate_key"] for c in repaired["candidates"]})
 
     def test_finish_tsv_assemble_uses_original_job_catches_source_change(self):
         # Codex #136:tsv 用原始 job 组装;prepare 后改源 → 旧译文身份不符 → import 隔离,不发到错 revision
@@ -213,6 +259,27 @@ class TranslateUserTest(unittest.TestCase):
             m = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs, bilingual_dir=bil_dir)
             # 旧译文(原始 job 身份)与当前源不符 → 不得 published
             self.assertEqual(0, m["summary"]["published"])
+
+    def test_finish_uses_existing_result_without_jobs_dir(self):
+        # Codex #138:已有可用 result.json(+tsv 也在)但没传 jobs_dir → 用现成 result,不报 error
+        import json as _json
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"; src_dir.mkdir(); shutil.copy(SRC, src_dir / "700001.txt")
+            bil_dir = tmp / "bil"; bil_dir.mkdir(); shutil.copy(BILINGUAL, bil_dir / "700001.txt")
+            store = tmp / "store"; jobs = tmp / "jobs"; results = tmp / "results"; render = tmp / "out"
+            results.mkdir()
+            prep = tu.prepare_user("pixiv", src_dir, store, jobs, bilingual_dir=bil_dir)
+            j = prep["jobs"][0]; sid = j["source_id"]
+            bundle = _json.loads(Path(j["job"]).read_text(encoding="utf-8"))
+            lines = [f"{i}\t{TR[seg['source_text']]}" for i, seg in enumerate(bundle["segments"])]
+            (results / f"{sid}.zh.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs, bilingual_dir=bil_dir)
+            self.assertTrue((results / f"{sid}.result.json").is_file())
+            # 第二次不带 jobs_dir(tsv 仍在)→ 用现成 result,不报 error
+            m = tu.finish_user("pixiv", src_dir, store, render, results, bilingual_dir=bil_dir)
+            self.assertEqual(0, m["summary"]["errors"])
+            self.assertEqual("ok", m["documents"][0]["status"])
 
     def test_finish_respects_limit(self):
         # Codex #122:finish 也要按 limit 切片,不扫 limit 之外的文件(否则报无关 no_result)

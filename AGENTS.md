@@ -39,7 +39,7 @@
   ```bash
   conda run -n llm python -m pytest tasks/translation/src -q
   ```
-  当前 baseline 是 390 测试全绿，PR 合入前必须保持 ≥ 此基线。**此处是基线数字的唯一来源**
+  当前 baseline 是 392 测试全绿，PR 合入前必须保持 ≥ 此基线。**此处是基线数字的唯一来源**
   （`make docs-drift` 在 CI 强制它 == 实际 `pytest --collect-only` 计数；改动测试数必须同 PR 更新这里）。
   （必须用 pytest 统跑：`unittest discover` 不执行 parser/prompt 下的 pytest 风格用例，会假绿。）
 
@@ -76,10 +76,11 @@
 - Prompt / parser 已经独立成包（`src/core/prompt/`、`src/core/parser/`）；新逻辑放对应包内，不要塞回 `translator.py` 或 `pipeline.py`。
 - 上述是当前实现约束。新架构按 `system-design.md` 渐进迁移，不能在现有 TXT/JSON state 之外另起一套未接入主流程的平行状态。
 - 目标架构中，JSON 是规范业务工件，SQLite 是可重建索引和调度层；Agent/API 只能创建 candidate/result，不能直接覆盖发布版本。
-- **翻译执行器**(编码 Agent 当执行器把 job 翻成 candidate):规则与 `result.json` 格式的单一真相源是
-  [`tasks/translation/docs/executor-instructions.md`](tasks/translation/docs/executor-instructions.md)；各 Agent 薄适配
-  (`.agents/skills/translate-job` Codex、`.claude/skills/translate-job` Claude Code、`.cursor/rules/translate-job.mdc` Cursor)
-  只指向它,不重复规则。NSFW 走 Cursor+Grok。
+- **翻译执行器**(编码 Agent/API/人工当执行器):统一中间产物是 `<source_id>.zh.tsv`
+  (`段号<TAB>译文`)；`result.json` 由 harness 从 job + TSV 机械组装,不要由 Agent 手写。规则真相源是
+  [`.agents/skills/translate`](.agents/skills/translate/SKILL.md) 与
+  [`tasks/translation/docs/executor-instructions.md`](tasks/translation/docs/executor-instructions.md)；Cursor 只保留薄
+  rule 触发入口,不得复制业务规则。NSFW 走 Cursor+Grok。
 - 新增 candidate/version/annotation/task schema 时必须带 `schema_version`，并同时补 schema validation、round-trip 和 stale-result 测试。
 
 ## 6. 质量检测分工

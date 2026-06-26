@@ -118,19 +118,23 @@ def finish_document(
         segments_input.append({"segment_id": sid, "incumbent": incumbent, "challengers": challengers})
 
     recs = version_select.recommend_selection(segments_input)
-    # tags 兜底:tags 译文按设计含「原词/中文」→ kana_residue 假阳性 QA fail;无 incumbent 时没有可保护的
-    # 旧值,接受唯一译文。**只放行 metadata.tags**:title/caption/body 的 QA fail(未翻/拒译/假名残留)
-    # 仍须阻止发布,不能借兜底扩散到这些段(Codex #107)。
+    # tags 译文按设计含「原词/中文」→ kana_residue 假阳性 QA fail,直接转成通过选择。
+    # 其它无 incumbent 的单候选 QA fail 仍保留 review_required,但允许先发布/渲染供人工 review。
     kind_by_seg = {s["segment_id"]: s["kind"] for s in rev["segments"]}
-    chal_by_seg = {si["segment_id"]: (si["challengers"][0]["candidate_id"] if si["challengers"] else None)
-                   for si in segments_input}
+    chal_by_seg = {si["segment_id"]: [c["candidate_id"] for c in si["challengers"]] for si in segments_input}
     for r in recs:
+        sole_challenger = chal_by_seg.get(r["segment_id"]) or []
         if (r["selected_candidate_id"] is None
                 and kind_by_seg.get(r["segment_id"]) == "metadata.tags"
-                and chal_by_seg.get(r["segment_id"])):
-            r["selected_candidate_id"] = chal_by_seg[r["segment_id"]]
+                and len(sole_challenger) == 1):
+            r["selected_candidate_id"] = sole_challenger[0]
             r["outcome"] = "select_challenger"
             r["reason_code"] = "metadata_tags_sole_candidate_accepted"
+        elif r["selected_candidate_id"] is None and len(sole_challenger) == 1:
+            # 执行器路线先产可渲染版本:无 incumbent 时,唯一候选即使 QA fail 也进入 draft/current,
+            # review_required 保留给 FEEDBACK/patch。真正缺候选或多候选未决仍阻断建版。
+            r["selected_candidate_id"] = sole_challenger[0]
+            r["reason_code"] = f"reviewable_{r['reason_code']}"
     report["review_required"] = sum(1 for r in recs if r["outcome"] == "review_required")
     if any(r["selected_candidate_id"] is None for r in recs):
         report["status"] = "unresolved"  # body 段无可选(新译 QA fail 且无 incumbent)
@@ -196,7 +200,73 @@ def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=No
     return manifest
 
 
-def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, jobs_dir=None, bilingual_dir=None, limit=None) -> Dict[str, Any]:
+def _stable_result_signature(result: Dict[str, Any]) -> Dict[str, Any]:
+    """比较由 job+TSV 机械派生的稳定字段;completed_at 不参与,避免每次 finish 都改写。"""
+    return {
+        "schema_version": result.get("schema_version"),
+        "task_id": result.get("task_id"),
+        "task_digest": result.get("task_digest"),
+        "producer": result.get("producer"),
+        "recommended_candidate_keys": result.get("recommended_candidate_keys"),
+        "candidates": [
+            {
+                "result_candidate_key": c.get("result_candidate_key"),
+                "segment_id": c.get("segment_id"),
+                "source_hash": c.get("source_hash"),
+                "text": c.get("text"),
+            }
+            for c in result.get("candidates", [])
+        ],
+    }
+
+
+def _sync_result_from_tsv(
+    result_path: Path,
+    tsv_path: Path,
+    job_path: Path,
+    *,
+    producer_name: Optional[str] = None,
+    model: Optional[str] = None,
+) -> bool:
+    """当 TSV 存在时,用 prepare 的原始 job 组装期望 result。缺失/陈旧/partial result 会被覆盖。"""
+    if not tsv_path.is_file():
+        return False
+    if not job_path.is_file():
+        raise ValueError(f"缺原始 job {job_path}(先 prepare),无法从 tsv 组装")
+    bundle = json.loads(job_path.read_text(encoding="utf-8"))
+    translations = result_assemble.parse_translations_tsv(tsv_path.read_text(encoding="utf-8"))
+    current = None
+    if result_path.is_file():
+        current = json.loads(result_path.read_text(encoding="utf-8"))
+    current_producer = current.get("producer", {}) if current else {}
+    effective_producer = producer_name or current_producer.get("name") or "agent"
+    effective_model = model if model is not None else current_producer.get("model")
+    expected = result_assemble.assemble_result(
+        bundle,
+        translations,
+        producer_name=effective_producer,
+        model=effective_model,
+        completed_at=current.get("completed_at") if current else None,
+    )
+    if current is None or _stable_result_signature(current) != _stable_result_signature(expected):
+        result_path.write_text(json.dumps(expected, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return True
+    return False
+
+
+def finish_user(
+    provider,
+    source_dir,
+    store_root,
+    render_dir,
+    results_dir,
+    *,
+    jobs_dir=None,
+    bilingual_dir=None,
+    limit=None,
+    producer_name: Optional[str] = None,
+    model: Optional[str] = None,
+) -> Dict[str, Any]:
     """agent 路线:对每篇 source 找 results_dir/<source_id>.result.json → finish_document → 合并整本。
 
     source_id 与 prepare 一致地取自 document_id(**不是 src.stem**:pixiv 系列文件名是
@@ -217,20 +287,19 @@ def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, jo
         result_path = results_dir / f"{source_id}.result.json"
         tsv_path = results_dir / f"{source_id}.zh.tsv"
         try:
-            # 紧凑路径:有 <id>.zh.tsv 而无 result.json → 自动组装(agent 只需写 tsv,不必单独跑 assemble)。
+            # 紧凑路径:有 <id>.zh.tsv → 自动组装/校准 result(agent 只需写 tsv,不必单独跑 assemble)。
             # **必须用 prepare 当时存的原始 job 组装**(不是按当前源重建):否则 prepare 后源被改/重下时,
             # 旧译文会被盖上新身份、绕过 stale 防护、把译文发到错的 revision(Codex #136)。用原始 job 组装后,
             # 源若变了 → result 的旧 task_digest 与 finish 重建的当前 task 不符 → import_result 隔离掉。
-            if not result_path.is_file() and tsv_path.is_file():
-                if jobs_dir is None:
-                    raise ValueError("从 tsv 组装需要 jobs_dir(prepare 存的原始 job)")
+            # 若已有 result.json 但它是旧的 partial/陈旧产物,完整 TSV 必须重新组装覆盖,否则会把缺段误报成 QA 问题。
+            if tsv_path.is_file() and jobs_dir is not None:
+                # 有 tsv + 原始 job → 以 tsv 为准(重)组装,覆盖旧/不全 result。
                 job_path = Path(jobs_dir) / f"{source_id}.job.json"
-                if not job_path.is_file():
-                    raise ValueError(f"缺原始 job {job_path}(先 prepare),无法从 tsv 组装")
-                bundle = json.loads(job_path.read_text(encoding="utf-8"))
-                translations = result_assemble.parse_translations_tsv(tsv_path.read_text(encoding="utf-8"))
-                result = result_assemble.assemble_result(bundle, translations, producer_name="agent")
-                result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                _sync_result_from_tsv(result_path, tsv_path, job_path, producer_name=producer_name, model=model)
+            elif tsv_path.is_file() and jobs_dir is None and not result_path.is_file():
+                # 只有 tsv、既无 job 又无现成 result → 没法组装(Codex #138:仅此时才硬报错)。
+                raise ValueError("从 tsv 组装需要 jobs_dir(prepare 存的原始 job)")
+            # 其余:tsv 在但没 jobs_dir、且已有可用 result.json → 直接用现成 result(不强制重组装、不报错)。
             if not result_path.is_file():
                 docs.append({"source": src.name, "status": "no_result"})
                 continue
@@ -341,6 +410,7 @@ def main() -> int:
     parser.add_argument("--results-dir", type=Path, default=None, help="mode=finish 的 agent result 目录")
     parser.add_argument("--bilingual-dir", type=Path, default=None, help="可选:已有 legacy 译文作 incumbent")
     parser.add_argument("--executor", default="openrouter", help="mode=auto 的执行器(openrouter)")
+    parser.add_argument("--producer", default=None, help="mode=finish 从 TSV 组装 result 时记录的 producer 名")
     parser.add_argument("--model", default=None)
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 篇(控成本)")
     args = parser.parse_args()
@@ -366,8 +436,10 @@ def main() -> int:
     if args.mode == "finish":
         if not (args.results_dir and str(args.results_dir).strip()) or not (args.render_dir and str(args.render_dir).strip()):
             parser.error("mode=finish 需要非空 --results-dir 与 --render-dir")
+        producer_name = args.producer or (args.executor if args.executor != "openrouter" else None)
         m = finish_user(args.provider, args.source_dir, args.store, args.render_dir, args.results_dir,
-                        jobs_dir=args.jobs_dir, bilingual_dir=args.bilingual_dir, limit=args.limit)
+                        jobs_dir=args.jobs_dir, bilingual_dir=args.bilingual_dir, limit=args.limit,
+                        producer_name=producer_name, model=args.model)
         print(json.dumps(m["summary"], ensure_ascii=False))
         return 0
 
