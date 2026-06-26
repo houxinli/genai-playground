@@ -196,7 +196,7 @@ def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=No
     return manifest
 
 
-def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, bilingual_dir=None, limit=None) -> Dict[str, Any]:
+def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, jobs_dir=None, bilingual_dir=None, limit=None) -> Dict[str, Any]:
     """agent 路线:对每篇 source 找 results_dir/<source_id>.result.json → finish_document → 合并整本。
 
     source_id 与 prepare 一致地取自 document_id(**不是 src.stem**:pixiv 系列文件名是
@@ -218,8 +218,16 @@ def finish_user(provider, source_dir, store_root, render_dir, results_dir, *, bi
         tsv_path = results_dir / f"{source_id}.zh.tsv"
         try:
             # 紧凑路径:有 <id>.zh.tsv 而无 result.json → 自动组装(agent 只需写 tsv,不必单独跑 assemble)。
+            # **必须用 prepare 当时存的原始 job 组装**(不是按当前源重建):否则 prepare 后源被改/重下时,
+            # 旧译文会被盖上新身份、绕过 stale 防护、把译文发到错的 revision(Codex #136)。用原始 job 组装后,
+            # 源若变了 → result 的旧 task_digest 与 finish 重建的当前 task 不符 → import_result 隔离掉。
             if not result_path.is_file() and tsv_path.is_file():
-                bundle = prepare_document(provider, src, store, bilingual_dir)["bundle"]
+                if jobs_dir is None:
+                    raise ValueError("从 tsv 组装需要 jobs_dir(prepare 存的原始 job)")
+                job_path = Path(jobs_dir) / f"{source_id}.job.json"
+                if not job_path.is_file():
+                    raise ValueError(f"缺原始 job {job_path}(先 prepare),无法从 tsv 组装")
+                bundle = json.loads(job_path.read_text(encoding="utf-8"))
                 translations = result_assemble.parse_translations_tsv(tsv_path.read_text(encoding="utf-8"))
                 result = result_assemble.assemble_result(bundle, translations, producer_name="agent")
                 result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -359,7 +367,7 @@ def main() -> int:
         if not (args.results_dir and str(args.results_dir).strip()) or not (args.render_dir and str(args.render_dir).strip()):
             parser.error("mode=finish 需要非空 --results-dir 与 --render-dir")
         m = finish_user(args.provider, args.source_dir, args.store, args.render_dir, args.results_dir,
-                        bilingual_dir=args.bilingual_dir, limit=args.limit)
+                        jobs_dir=args.jobs_dir, bilingual_dir=args.bilingual_dir, limit=args.limit)
         print(json.dumps(m["summary"], ensure_ascii=False))
         return 0
 
