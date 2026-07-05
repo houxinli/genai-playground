@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 try:
+    from . import document_qa
     from .artifact_schemas import (
         build_attestation,
         candidate_id_v3,
@@ -31,6 +32,7 @@ try:
     from .source_identity import _PROVIDER_SPEC, build_document_revision
 except ImportError:  # 作为脚本运行:把 tasks/translation/src 加入 path,走 core.* 以解析 utils
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from core import document_qa
     from core.artifact_schemas import (
         build_attestation,
         candidate_id_v3,
@@ -146,6 +148,11 @@ def build_legacy_candidates(
     bilingual_text = Path(bilingual_path).read_text(encoding="utf-8", errors="ignore")
     translations, issues = parse_bilingual_translations(revision, bilingual_text)
     created_at = _legacy_created_at(revision)
+    document_findings = document_qa.audit_document_translations(revision["segments"], translations)
+    for finding in document_findings:
+        issues.append(f"document_qa {finding['severity']} {finding['code']}: {finding.get('message', '')}")
+    if any(f["severity"] == "error" for f in document_findings):
+        return [], [], issues
 
     segs = {s["segment_id"]: s for s in revision["segments"]}
     candidates: List[Dict[str, Any]] = []

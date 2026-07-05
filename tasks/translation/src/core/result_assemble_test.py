@@ -42,6 +42,16 @@ class ParseTsvTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ra.parse_translations_tsv("0\t甲\n0\t乙")
 
+    def test_v2_src_echo_validates_against_bundle(self):
+        bundle = _bundle()
+        first = bundle["segments"][0]["source_text"][:8]
+        out = ra.parse_translations_tsv(f"0\t{first}\t你好", bundle)
+        self.assertEqual({0: "你好"}, out)
+
+    def test_v2_src_echo_mismatch_errors(self):
+        with self.assertRaises(ValueError):
+            ra.parse_translations_tsv("0\t错源\t你好", _bundle())
+
 
 class AssembleTest(unittest.TestCase):
     def test_assembles_schema_valid_result_and_backfills(self):

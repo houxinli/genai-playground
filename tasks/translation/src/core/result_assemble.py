@@ -17,22 +17,40 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
-def parse_translations_tsv(content: str) -> Dict[int, str]:
-    """解析 `段号<TAB>译文` 文本 → {index: text}。译文按 TAB 后原样保留(可空=拒译);
-    空行跳过;段号非整数 / 重复 → 报错。"""
+def _source_echoes(bundle: Dict[str, Any]) -> Dict[int, str]:
+    return {i: seg["source_text"] for i, seg in enumerate(bundle["segments"])}
+
+
+def parse_translations_tsv(content: str, bundle: Optional[Dict[str, Any]] = None) -> Dict[int, str]:
+    """解析 `段号<TAB>译文` 或 v2 `段号<TAB>src_echo<TAB>译文` 文本。
+
+    传入 bundle 时校验 v2 src_echo 必须等于对应源文前缀;二列表仍兼容但无内容级保护。
+    """
     out: Dict[int, str] = {}
+    echoes = _source_echoes(bundle) if bundle is not None else None
     for lineno, line in enumerate(content.splitlines(), 1):
         if not line.strip():
             continue
-        if "\t" not in line:
-            raise ValueError(f"第 {lineno} 行缺 TAB 分隔(应为 `段号<TAB>译文`): {line!r}")
-        idx_str, _, text = line.partition("\t")
+        parts = line.split("\t", 2)
+        if len(parts) < 2:
+            raise ValueError(f"第 {lineno} 行缺 TAB 分隔(应为 `段号<TAB>译文` 或 v2 `段号<TAB>src_echo<TAB>译文`): {line!r}")
+        idx_str = parts[0]
+        src_echo = None if len(parts) == 2 else parts[1]
+        text = parts[1] if len(parts) == 2 else parts[2]
         try:
             idx = int(idx_str.strip())
         except ValueError:
             raise ValueError(f"第 {lineno} 行段号不是整数: {idx_str!r}")
         if idx in out:
             raise ValueError(f"段号 {idx} 重复(第 {lineno} 行)")
+        if echoes is not None and src_echo is not None:
+            expected = echoes.get(idx)
+            if expected is None:
+                raise ValueError(f"第 {lineno} 行段号 {idx} 不在 job 中")
+            if not src_echo:
+                raise ValueError(f"第 {lineno} 行 src_echo 为空")
+            if expected[:len(src_echo)] != src_echo:
+                raise ValueError(f"第 {lineno} 行 src_echo 与源文不匹配: 段号 {idx}")
         out[idx] = text
     return out
 
@@ -84,7 +102,7 @@ def main() -> int:
         if not str(val).strip():
             parser.error(f"{name} 不能为空")
     bundle = json.loads(args.job.read_text(encoding="utf-8"))
-    translations = parse_translations_tsv(args.translations.read_text(encoding="utf-8"))
+    translations = parse_translations_tsv(args.translations.read_text(encoding="utf-8"), bundle)
     result = assemble_result(bundle, translations, producer_name=args.producer, model=args.model)
     args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"candidates": len(result["candidates"]), "out": str(args.out)}, ensure_ascii=False))

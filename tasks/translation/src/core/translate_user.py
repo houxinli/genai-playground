@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 try:
-    from . import candidate_eval, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
+    from . import candidate_eval, document_qa, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from .artifact_store import ArtifactStore
     from .pipeline_ingest import merge_author
     from .renderer import render_bilingual, render_zh
@@ -26,7 +26,7 @@ try:
     from .task_export import export_job, ingest_revision
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core import candidate_eval, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
+    from core import candidate_eval, document_qa, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from core.artifact_store import ArtifactStore
     from core.pipeline_ingest import merge_author
     from core.renderer import render_bilingual, render_zh
@@ -99,6 +99,15 @@ def finish_document(
         c = cands_in_store.get(cid)
         if c is not None:
             new_by_seg[c["segment_id"]] = c
+
+    document_findings = document_qa.audit_document_translations(
+        rev["segments"], {sid: c["text"] for sid, c in new_by_seg.items()}
+    )
+    report["document_qa_findings"] = document_findings
+    if any(f["severity"] == "error" for f in document_findings):
+        report["status"] = "document_qa_failed"
+        report["published"] = False
+        return report
 
     segments_input: List[Dict[str, Any]] = []
     for sid in seg_ids:
@@ -234,7 +243,7 @@ def _sync_result_from_tsv(
     if not job_path.is_file():
         raise ValueError(f"缺原始 job {job_path}(先 prepare),无法从 tsv 组装")
     bundle = json.loads(job_path.read_text(encoding="utf-8"))
-    translations = result_assemble.parse_translations_tsv(tsv_path.read_text(encoding="utf-8"))
+    translations = result_assemble.parse_translations_tsv(tsv_path.read_text(encoding="utf-8"), bundle)
     current = None
     if result_path.is_file():
         current = json.loads(result_path.read_text(encoding="utf-8"))
