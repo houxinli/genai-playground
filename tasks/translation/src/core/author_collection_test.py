@@ -54,7 +54,7 @@ class AuthorCollectionTest(unittest.TestCase):
                                       out_dir=Path(t) / "coll", gdrive_dir=gd)
             self.assertTrue((gd / "作者Y.zh.txt").is_file())
             self.assertTrue((gd / "作者Y.bilingual.txt").is_file())
-            self.assertEqual(2, len(res["gdrive"]))
+            self.assertEqual(4, len(res["gdrive"]))  # txt + epub × 2 variant
 
     def test_missing_rendered_reported(self):
         with tempfile.TemporaryDirectory() as t:
@@ -77,6 +77,43 @@ class AuthorCollectionTest(unittest.TestCase):
             _make_work(ws, "700001", title="t")
             with self.assertRaises(ValueError):
                 ac.build_collection("  ", "700000", workspaces_root=ws, out_dir=Path(t) / "coll")
+
+    def test_out_dir_guard_rejects_workspaces_root_and_dirty_dirs(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            _make_work(ws, "700001", title="t")
+            # out_dir == workspaces_root → 拒绝(会清掉全部 per-work 产物)
+            with self.assertRaises(ValueError):
+                ac.build_collection("作者", "700000", workspaces_root=ws, out_dir=ws)
+            # out_dir 指向含子目录的已有目录(如 per-work workspace)→ 拒绝
+            with self.assertRaises(ValueError):
+                ac.build_collection("作者", "700000", workspaces_root=ws,
+                                    out_dir=ws / "pixiv-700001")
+            # 重建合法的旧合集目录(只含 txt/epub)→ 允许
+            res = ac.build_collection("作者", "700000", workspaces_root=ws,
+                                      out_dir=Path(t) / "coll")
+            res2 = ac.build_collection("作者", "700000", workspaces_root=ws,
+                                       out_dir=Path(t) / "coll")
+            self.assertEqual(res["sids"], res2["sids"])
+
+    def test_epub_built_with_explicit_toc(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            _make_work(ws, "700001", title="第一篇")
+            _make_work(ws, "700002", title="第二篇")
+            gd = Path(t) / "gdrive"
+            res = ac.build_collection("作者E", "700000", workspaces_root=ws,
+                                      out_dir=Path(t) / "coll", gdrive_dir=gd)
+            self.assertEqual({"zh": 2, "bilingual": 2}, res["epub_chapters"])
+            epub = Path(t) / "coll" / "作者E.zh.epub"
+            self.assertTrue(epub.is_file())
+            with zipfile.ZipFile(epub) as z:
+                nav = z.read("OEBPS/nav.xhtml").decode("utf-8")
+                self.assertIn("第1章 第一篇", nav)
+                self.assertIn("第2章 第二篇", nav)
+            self.assertTrue((gd / "作者E.zh.epub").is_file())
+            self.assertTrue((gd / "作者E.bilingual.epub").is_file())
 
 
 if __name__ == "__main__":

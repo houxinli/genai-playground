@@ -17,13 +17,36 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
-    from .pipeline_ingest import merge_author
+    from .epub_build import build_epub
+    from .pipeline_ingest import _chapter_title, _sid_sort_key, merge_author
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core.pipeline_ingest import merge_author
+    from core.epub_build import build_epub
+    from core.pipeline_ingest import _chapter_title, _sid_sort_key, merge_author
 
 VARIANTS = ("zh", "bilingual")
+
+
+_COLLECTION_SUFFIXES = (".txt", ".epub")
+
+
+def _guard_out_dir(out_dir: Path, workspaces_root: Path) -> None:
+    """rmtree 前置守卫(Codex #143 P1):out_dir 只允许是"专用合集目录"。
+    拒绝:与 workspaces_root 相同或为其祖先(会清掉全部 per-work 产物),或已存在但含
+    子目录/非合集文件(说明指向了别的东西,如 rendered、per-work workspace、外部同步目录)。
+    注:合集目录默认就在 workspaces_root 下(`_collection-<creator>`),位于其内是合法的。"""
+    out_r = out_dir.resolve()
+    ws_r = workspaces_root.resolve()
+    if out_r == ws_r or out_r in ws_r.parents:
+        raise ValueError(f"out_dir 不能等于或包含 workspaces_root: {out_dir}")
+    if out_dir.exists():
+        if not out_dir.is_dir():
+            raise ValueError(f"out_dir 已存在且不是目录: {out_dir}")
+        for entry in out_dir.iterdir():
+            if entry.is_dir() or entry.suffix not in _COLLECTION_SUFFIXES:
+                raise ValueError(
+                    f"out_dir 已存在且含非合集内容({entry.name}),拒绝清空: {out_dir}")
 
 
 def _published_sids(workspaces_root: Path, provider: str, creator_id: str) -> List[str]:
@@ -44,6 +67,7 @@ def build_collection(
     sids = _published_sids(workspaces_root, provider, creator_id)
     if not sids:
         raise ValueError(f"{provider}:{creator_id} 没有已发布篇(workspaces 下无 refs)")
+    _guard_out_dir(out_dir, workspaces_root)
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
@@ -58,25 +82,47 @@ def build_collection(
         if not found:
             missing.append(sid)
     merged = merge_author(out_dir, author_name, sids)
+    epubs = _build_epubs(out_dir, author_name, sids)
     files: List[str] = []
     gdrive_files: List[str] = []
     for var in VARIANTS:
-        fp = out_dir / f"{author_name}.{var}.txt"
-        if fp.is_file():
-            files.append(str(fp))
-            if gdrive_dir is not None:
-                gdrive_dir = Path(gdrive_dir)
-                gdrive_dir.mkdir(parents=True, exist_ok=True)
-                dst = gdrive_dir / f"{author_name}.{var}.txt"
-                shutil.copy(fp, dst)
-                gdrive_files.append(str(dst))
+        for name in (f"{author_name}.{var}.txt", f"{author_name}.{var}.epub"):
+            fp = out_dir / name
+            if fp.is_file():
+                files.append(str(fp))
+                if gdrive_dir is not None:
+                    gdrive_dir = Path(gdrive_dir)
+                    gdrive_dir.mkdir(parents=True, exist_ok=True)
+                    dst = gdrive_dir / name
+                    shutil.copy(fp, dst)
+                    gdrive_files.append(str(dst))
     return {
         "sids": sids,
         "missing": missing,
         "chapters": {k: v.get("chapters") for k, v in merged.items()},
+        "epub_chapters": epubs,
         "files": files,
         "gdrive": gdrive_files,
     }
+
+
+def _build_epubs(out_dir: Path, author_name: str, sids: List[str]) -> Dict[str, int]:
+    """每个 variant 产 `<author>.<var>.epub`(显式 TOC,阅读器不再从 txt 猜章节)。
+    章节与 merge_author 同源:按 source_id 升序,标题取渲染文件的中文 title。"""
+    out: Dict[str, int] = {}
+    for var in VARIANTS:
+        chapters = []
+        for sid in sorted(set(sids), key=_sid_sort_key):
+            f = out_dir / f"{sid}.{var}.txt"
+            if not f.is_file():
+                continue
+            content = f.read_text(encoding="utf-8").rstrip("\n")
+            title = _chapter_title(content) or sid
+            chapters.append((f"第{len(chapters) + 1}章 {title}", content))
+        if chapters:
+            build_epub(out_dir / f"{author_name}.{var}.epub", author_name, author_name, chapters)
+            out[var] = len(chapters)
+    return out
 
 
 def main() -> int:

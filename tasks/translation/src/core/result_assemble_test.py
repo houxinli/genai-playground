@@ -52,6 +52,28 @@ class ParseTsvTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ra.parse_translations_tsv("0\t错源\t你好", _bundle())
 
+    def test_legacy_translation_with_tab_preserved(self):
+        # Codex #143 P2:旧二列行译文含 TAB 时不得被误当 v2 截断——
+        # 文件级判定:存在纯二列行 → 整份按旧格式,TAB 后全部内容原样保留。
+        out = ra.parse_translations_tsv("0\t甲\t乙\n1\t丙")
+        self.assertEqual({0: "甲\t乙", 1: "丙"}, out)
+        out2 = ra.parse_translations_tsv("0\t甲\t乙\n1\t丙", _bundle())
+        self.assertEqual({0: "甲\t乙", 1: "丙"}, out2)
+
+    def test_mixed_v2_like_line_in_legacy_file_errors(self):
+        # 看着像 v2 的行(第二列==源文前缀)混进二列文件 → 报错,拒绝静默降级保护
+        bundle = _bundle()
+        first = bundle["segments"][0]["source_text"][:8]
+        with self.assertRaises(ValueError):
+            ra.parse_translations_tsv(f"0\t{first}\t你好\n1\t纯旧行", bundle)
+
+    def test_v2_empty_translation_kept(self):
+        bundle = _bundle()
+        e0 = bundle["segments"][0]["source_text"][:8]
+        e1 = bundle["segments"][1]["source_text"][:8]
+        out = ra.parse_translations_tsv(f"0\t{e0}\t\n1\t{e1}\t译", bundle)
+        self.assertEqual({0: "", 1: "译"}, out)
+
 
 class AssembleTest(unittest.TestCase):
     def test_assembles_schema_valid_result_and_backfills(self):
