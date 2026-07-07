@@ -99,6 +99,23 @@ class LegacyImportTest(unittest.TestCase):
             self.assertEqual("今天天气真好。", translations[body_segs[1]["segment_id"]])
             self.assertEqual([], issues)
 
+    def test_fullwidth_indent_in_bilingual_body_still_anchors(self):
+        # 旧流水线保留正文全角缩进(　),锚点比较需空白规范化——否则整批"body misaligned"
+        # (真实迁移基线:53230930 修此后 2/8 → 7/8 对齐)。译文行的缩进也应剥掉。
+        rev = si.build_document_revision("pixiv", SRC)
+        body_segs = [s for s in rev["segments"] if s["kind"] == "body"]
+        with tempfile.TemporaryDirectory() as tmp:
+            bil = Path(tmp) / "indent.txt"
+            bil.write_text(
+                "---\nnovel_id: 700001\n---\n　「おはよう」\n　「早上好」\n"
+                "　今日はいい天気だ。\n　今天天气真好。\n",
+                encoding="utf-8",
+            )
+            translations, issues = li.parse_bilingual_translations(rev, bil.read_text(encoding="utf-8"))
+            self.assertEqual([], issues)
+            self.assertEqual("「早上好」", translations[body_segs[0]["segment_id"]])
+            self.assertEqual("今天天气真好。", translations[body_segs[1]["segment_id"]])
+
     def test_metadata_source_change_is_skipped_with_issue(self):
         rev = si.build_document_revision("pixiv", SRC)
         with tempfile.TemporaryDirectory() as tmp:

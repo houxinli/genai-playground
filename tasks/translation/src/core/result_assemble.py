@@ -17,22 +17,49 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
-def parse_translations_tsv(content: str) -> Dict[int, str]:
-    """解析 `段号<TAB>译文` 文本 → {index: text}。译文按 TAB 后原样保留(可空=拒译);
-    空行跳过;段号非整数 / 重复 → 报错。"""
-    out: Dict[int, str] = {}
-    for lineno, line in enumerate(content.splitlines(), 1):
-        if not line.strip():
-            continue
+def _source_echoes(bundle: Dict[str, Any]) -> Dict[int, str]:
+    return {i: seg["source_text"] for i, seg in enumerate(bundle["segments"])}
+
+
+def parse_translations_tsv(content: str, bundle: Optional[Dict[str, Any]] = None) -> Dict[int, str]:
+    """解析 `段号<TAB>译文` 或 v2 `段号<TAB>src_echo<TAB>译文` 文本。
+
+    格式判定是**文件级**的:所有内容行都有 ≥2 个 TAB 才按 v2 解析(传 bundle 时逐行校验
+    src_echo 必须是对应源文前缀);否则整份按旧二列解析——译文取第一个 TAB 之后的**全部**
+    内容(含 TAB 原样保留),不会被误当 v2 截断。混合文件(看着像 v2 却掺二列行)会报错,
+    避免 v2 保护被静默降级。
+    """
+    lines = [(n, l) for n, l in enumerate(content.splitlines(), 1) if l.strip()]
+    for lineno, line in lines:
         if "\t" not in line:
-            raise ValueError(f"第 {lineno} 行缺 TAB 分隔(应为 `段号<TAB>译文`): {line!r}")
-        idx_str, _, text = line.partition("\t")
+            raise ValueError(f"第 {lineno} 行缺 TAB 分隔(应为 `段号<TAB>译文` 或 v2 `段号<TAB>src_echo<TAB>译文`): {line!r}")
+    is_v2 = bool(lines) and all(l.count("\t") >= 2 for _, l in lines)
+    echoes = _source_echoes(bundle) if bundle is not None else None
+    out: Dict[int, str] = {}
+    for lineno, line in lines:
+        if is_v2:
+            idx_str, src_echo, text = line.split("\t", 2)
+        else:
+            idx_str, _, text = line.partition("\t")
+            src_echo = None
         try:
             idx = int(idx_str.strip())
         except ValueError:
             raise ValueError(f"第 {lineno} 行段号不是整数: {idx_str!r}")
         if idx in out:
             raise ValueError(f"段号 {idx} 重复(第 {lineno} 行)")
+        if echoes is not None:
+            expected = echoes.get(idx)
+            if expected is None:
+                raise ValueError(f"第 {lineno} 行段号 {idx} 不在 job 中")
+            if src_echo is not None:
+                if not src_echo:
+                    raise ValueError(f"第 {lineno} 行 src_echo 为空")
+                if expected[:len(src_echo)] != src_echo:
+                    raise ValueError(f"第 {lineno} 行 src_echo 与源文不匹配: 段号 {idx}")
+            elif "\t" in text and expected.startswith(text.split("\t", 1)[0]) and text.split("\t", 1)[0]:
+                # 旧格式行的"译文"以源文前缀开头且后跟 TAB → 疑似 v2 文件掺了二列行,拒绝静默降级
+                raise ValueError(f"第 {lineno} 行疑似 v2 行混入二列文件(src_echo 匹配源文): 段号 {idx}")
         out[idx] = text
     return out
 
@@ -84,7 +111,7 @@ def main() -> int:
         if not str(val).strip():
             parser.error(f"{name} 不能为空")
     bundle = json.loads(args.job.read_text(encoding="utf-8"))
-    translations = parse_translations_tsv(args.translations.read_text(encoding="utf-8"))
+    translations = parse_translations_tsv(args.translations.read_text(encoding="utf-8"), bundle)
     result = assemble_result(bundle, translations, producer_name=args.producer, model=args.model)
     args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"candidates": len(result["candidates"]), "out": str(args.out)}, ensure_ascii=False))

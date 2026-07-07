@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 try:
+    from . import document_qa
     from .artifact_schemas import (
         build_attestation,
         candidate_id_v3,
@@ -31,6 +32,7 @@ try:
     from .source_identity import _PROVIDER_SPEC, build_document_revision
 except ImportError:  # 作为脚本运行:把 tasks/translation/src 加入 path,走 core.* 以解析 utils
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from core import document_qa
     from core.artifact_schemas import (
         build_attestation,
         candidate_id_v3,
@@ -110,21 +112,24 @@ def parse_bilingual_translations(
             continue
         i += 1
 
-    # 正文:源 segment 作锚点,在 bilingual 非空行里逐句定位译文(空行布局不参与)
-    nonblank = [l for l in _raw_body(bilingual_text) if l.strip()]
+    # 正文:源 segment 作锚点,在 bilingual 非空行里逐句定位译文(空行布局不参与)。
+    # 锚点比较做空白规范化(strip):旧流水线保留正文的全角缩进(　),revision 的
+    # source_text 是 strip 过的——纯格式差异不算 misalign。真正的内容错位仍严格 break,
+    # 该篇按 needs_retranslation 处理,不做续读打捞(乱档打捞会产出串对的假货)。
+    nonblank = [l.strip() for l in _raw_body(bilingual_text) if l.strip()]
     k = 0
     for seg_idx, seg in enumerate(body_segs):
         if k >= len(nonblank):
             issues.append(f"body truncated at segment {seg['segment_id']}")
             break
-        if nonblank[k] != seg["source_text"]:
+        if nonblank[k] != seg["source_text"].strip():
             issues.append(f"body misaligned at segment {seg['segment_id']}")
             break
         nxt_seg = body_segs[seg_idx + 1] if seg_idx + 1 < len(body_segs) else None
         if k + 1 >= len(nonblank):
             translations[seg["segment_id"]] = ""  # 末句无译文行 = 空译文
             k += 1
-        elif nxt_seg is not None and nonblank[k + 1] == nxt_seg["source_text"]:
+        elif nxt_seg is not None and nonblank[k + 1] == nxt_seg["source_text"].strip():
             translations[seg["segment_id"]] = ""  # 下一非空行已是下一个源锚点 = 本句空译文
             k += 1
         else:
@@ -146,6 +151,11 @@ def build_legacy_candidates(
     bilingual_text = Path(bilingual_path).read_text(encoding="utf-8", errors="ignore")
     translations, issues = parse_bilingual_translations(revision, bilingual_text)
     created_at = _legacy_created_at(revision)
+    document_findings = document_qa.audit_document_translations(revision["segments"], translations)
+    for finding in document_findings:
+        issues.append(f"document_qa {finding['severity']} {finding['code']}: {finding.get('message', '')}")
+    if any(f["severity"] == "error" for f in document_findings):
+        return [], [], issues
 
     segs = {s["segment_id"]: s for s in revision["segments"]}
     candidates: List[Dict[str, Any]] = []
