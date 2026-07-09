@@ -1542,6 +1542,13 @@ full run 必须覆盖全篇；patch run 只覆盖用户/QA 指定的少量 segme
 
 **Document-level 对齐 QA(2026-07-04)**:`document_qa.audit_document_translations` 负责跨段关系检查,不塞进逐段 `qa_gate`。`duplicate_translation_distinct_source` 是 warning,用于召回和人工审计;`block_paste_run` 要求连续块、恒定 offset、源文显著不同,是 error,`MODE=finish` 阻断发布,legacy bilingual 导入则返回 `document_qa error` issues 并不写入候选/attestation。
 
+**finish republish + 漂移检测(2026-07-09)**:`MODE=finish` 对已有 current ref 的文档——内容未变则幂等
+(同 version_id,不产新版本);TSV 修复过(selections 变化)则带 `parent_version_id` 血缘重建 DocumentVersion
+并 CAS `publish` 推进 ref,报 `republished`/`previous_version_id`。此前 `ref_exists_kept` 永不推进,gh-142
+修复潮实测:修复只更新 rendered、store ref 长期指向旧坏版本。配套 `MODE=verify` 新增 `rendered_matches_ref`
+——rendered 内容必须等于按 current ref selections 重算的渲染(工作流无关:review_required 保留 incumbent
+也自然通过);仅在 `version_matches_source` 成立时可比,源已变的场景仍由后者单独判 fail(#130)。
+
 **QA 非可翻译源豁免(#124,2026-06-24)**:`candidate_eval` 的 same_as_source 仅在源含可翻译内容
 (假名/汉字)时触发;纯符号/分隔符段(＊＊＊、* * *、---)译==原是正确的,不再误判 fail 卡住发布。
 
