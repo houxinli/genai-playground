@@ -35,7 +35,10 @@ TSV 每行优先写 v2:`<0 基段序号><TAB><源文前缀 src_echo><TAB><中文
    make translate-user MODE=prepare PROVIDER=<p> SOURCE=$WS/src STORE=$WS/store JOBS_DIR=$WS/jobs
    ```
 2. **翻译**:读 `$WS/jobs/<work_id>.job.json` 的 `segments[]`,逐段译,写/追加 `$WS/results/<work_id>.zh.tsv`。
-   - tags 段译成 `原词 / 中文`,保留 `[]` 和逗号;译文不得残留假名;人名/术语遵 `job.context_pack`。
+   - tags 段译成 `原词 / 中文`,保留 `[]` 和逗号;人名/术语遵 `job.context_pack`。
+   - **译文不得残留任何假名——人名(みのり→实里 这类)与拟声词/语气词(むにゅ♡→软绵♡ 这类)同样必须译成中文**,不是"可留"项;唯一例外是 tags 段的「原词 / 中文」左半。
+   - **批量自适应**:每批按源文长度控制在约 3000–5000 字符(段落长则少翻几段,短对话可多翻),不要固定死段数——顶到输出上限正是漏译半句/截断的高发原因。
+   - **逐批自检(append 前)**:扫一遍本批产出——①有没有行译文==源文(没翻);②有没有假名残留(tags 行除外);③段号是否连续无重复。有问题先修再写入。自检只针对刚写的批,不重读全篇。
 3. **发布渲染**(finish 自动从 tsv 用原始 job 组装、发布、渲染、合并整本):
    ```
    make translate-user MODE=finish PROVIDER=<p> SOURCE=$WS/src STORE=$WS/store JOBS_DIR=$WS/jobs RENDER=$WS/rendered RESULTS_DIR=$WS/results PRODUCER=<执行器名>
@@ -51,6 +54,11 @@ TSV 每行优先写 v2:`<0 基段序号><TAB><源文前缀 src_echo><TAB><中文
 ## 断点续跑
 
 tsv 不全时 finish 会报缺段。续法:对照 `job.segments` 数量找出 tsv 里缺的段序号,**补译那些行追加到同一个 `<work_id>.zh.tsv`**,再重跑 finish。tsv 已有的行不重译。(无 run_id / 分片目录——就一个扁平 tsv。)
+
+## 并行
+
+**篇与篇之间可以并行**(每篇一个独立 TSV,互不干扰)——多开 loop/子任务按篇分工没问题。
+**一篇之内禁止多 agent 分段拼**:段落对齐靠单一写者顺序追加保证,多写者拼一篇会重新引入错位(gh-142 教训)。
 
 ## review(双语对照复查,独立会话)
 
