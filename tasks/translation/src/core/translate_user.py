@@ -151,17 +151,26 @@ def finish_document(
         return report
 
     created_at = legacy_import._legacy_created_at(rev)
+    # 先按无 parent 构建(确定性 id):与 current 相同 → 幂等重跑;不同(TSV 修复过)→
+    # 带 parent 血缘重建并 CAS 推进 ref。此前 "ref_exists_kept" 永不推进,导致修复只
+    # 更新 rendered、store ref 长期指向旧坏版本(gh-142 修复潮踩坑:rendered 与 ref 漂移)。
     version = version_select.build_document_version(rev, recs, "workflow", created_at)
-    store.put_many(doc, [version])
     current = store.current_ref(doc)
     if current is None:
+        store.put_many(doc, [version])
         store.publish(doc, version["version_id"], expected_version_id=None)
         report["published"] = True
     elif current["version_id"] == version["version_id"]:
+        store.put_many(doc, [version])
         report["published"] = True
     else:
-        report["status"] = "ref_exists_kept"
-        report["published"] = False
+        version = version_select.build_document_version(
+            rev, recs, "workflow", created_at, parent_version_id=current["version_id"])
+        store.put_many(doc, [version])
+        store.publish(doc, version["version_id"], expected_version_id=current["version_id"])
+        report["status"] = "republished"
+        report["previous_version_id"] = current["version_id"]
+        report["published"] = True
     report["version_id"] = version["version_id"]
 
     cands_by_id = {c["candidate_id"]: c for c in store.list_shard("candidate", doc)}
@@ -359,8 +368,23 @@ def verify_user(provider, source_dir, store_root, render_dir, results_dir=None, 
         rep["version_matches_source"] = bool(version and version.get("revision_id") == rev_id)
         rep["rendered"] = bool(render_dir and (render_dir / f"{sid}.zh.txt").is_file()
                                and (render_dir / f"{sid}.bilingual.txt").is_file())
+        # ref 漂移检测(gh-142 踩坑):修复重跑 finish 曾只更新 rendered、不推进 ref →
+        # 盘上 zh.txt 与 store 发布版本长期不一致。判据:rendered 内容 == 按 current ref
+        # 的 selections 重算的渲染(工作流无关——review_required 保留 incumbent 也自然通过)。
+        rep["rendered_matches_ref"] = True
+        # 仅当发布版本对应当前源 revision 才可比(源改了 → segment_id 换代,由
+        # version_matches_source 单独判 fail,这里不重复)。
+        if rep["rendered"] and version and rep["version_matches_source"]:
+            cands_by_id = {c["candidate_id"]: c for c in store.list_shard("candidate", doc)}
+            sel_texts = {seg_id: cands_by_id[cid]["text"]
+                         for seg_id, cid in version.get("selections", {}).items()
+                         if cid in cands_by_id}
+            expected_zh = render_zh(rev, src.read_text(encoding="utf-8"), sel_texts)
+            actual_zh = (render_dir / f"{sid}.zh.txt").read_text(encoding="utf-8")
+            rep["rendered_matches_ref"] = expected_zh == actual_zh
         # result.json 仅当传了 results_dir 才作硬条件;核心真相是 入库 + 发布到当前 revision + 渲染。
         rep["ok"] = (rep["candidates"] > 0 and rep["version_matches_source"] and rep["rendered"]
+                     and rep["rendered_matches_ref"]
                      and (rep["result_json"] or results_dir is None))
         docs.append(rep)
     ok = bool(docs) and all(d.get("ok") for d in docs)
