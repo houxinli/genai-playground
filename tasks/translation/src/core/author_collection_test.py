@@ -78,6 +78,25 @@ class AuthorCollectionTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ac.build_collection("  ", "700000", workspaces_root=ws, out_dir=Path(t) / "coll")
 
+    def test_per_creator_workspace_layout(self):
+        # 迁移布局:一个 creator 一个 workspace,rendered 集中在 <provider>-<creator>/rendered/
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            cws = ws / "pixiv-700000"
+            refs = cws / "store" / "refs" / "pixiv" / "700000"
+            refs.mkdir(parents=True)
+            rd = cws / "rendered"; rd.mkdir()
+            for sid, title in [("700001", "甲"), ("700002", "乙")]:
+                (refs / f"{sid}.json").write_text('{"version_id":"v1"}', encoding="utf-8")
+                for var in ("zh", "bilingual"):
+                    (rd / f"{sid}.{var}.txt").write_text(
+                        f"---\nID: {sid}\ntitle: {title}\n---\n\n正文 {sid} {var}\n", encoding="utf-8")
+            res = ac.build_collection("作者P", "700000", workspaces_root=ws, out_dir=Path(t) / "coll")
+            self.assertEqual(["700001", "700002"], res["sids"])
+            self.assertEqual([], res["missing"])
+            self.assertEqual(2, res["chapters"]["zh"])
+            self.assertTrue((Path(t) / "coll" / "作者P.zh.epub").is_file())
+
     def test_out_dir_guard_rejects_workspaces_root_and_dirty_dirs(self):
         with tempfile.TemporaryDirectory() as t:
             ws = Path(t) / "workspaces"

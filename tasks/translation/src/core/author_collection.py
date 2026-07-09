@@ -49,10 +49,13 @@ def _guard_out_dir(out_dir: Path, workspaces_root: Path) -> None:
                     f"out_dir 已存在且含非合集内容({entry.name}),拒绝清空: {out_dir}")
 
 
-def _published_sids(workspaces_root: Path, provider: str, creator_id: str) -> List[str]:
+def _published_sids(workspaces_root: Path, provider: str, creator_id: str) -> Dict[str, Path]:
+    """已发布 sid → 所属 workspace 根(从 ref 文件位置反推:<ws>/store/refs/<provider>/<creator>/<sid>.json)。
+    同时兼容 per-work(`pixiv-<sid>/`)与 per-creator(`pixiv-<creator>/`)两种布局——
+    rendered 都在各自 workspace 的 `rendered/` 下。"""
     refs = glob.glob(str(workspaces_root / "*" / "store" / "refs" / provider / creator_id / "*.json"))
-    sids = {Path(r).stem for r in refs}
-    return sorted(sids, key=lambda s: (int(s) if s.isdigit() else 0, s))
+    sid2ws = {Path(r).stem: Path(r).parents[4] for r in refs}
+    return dict(sorted(sid2ws.items(), key=lambda kv: (int(kv[0]) if kv[0].isdigit() else 0, kv[0])))
 
 
 def build_collection(
@@ -64,7 +67,8 @@ def build_collection(
         raise ValueError("author_name 不能为空")
     workspaces_root = Path(workspaces_root)
     out_dir = Path(out_dir)
-    sids = _published_sids(workspaces_root, provider, creator_id)
+    sid2ws = _published_sids(workspaces_root, provider, creator_id)
+    sids = list(sid2ws)
     if not sids:
         raise ValueError(f"{provider}:{creator_id} 没有已发布篇(workspaces 下无 refs)")
     _guard_out_dir(out_dir, workspaces_root)
@@ -72,10 +76,10 @@ def build_collection(
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
     missing: List[str] = []
-    for sid in sids:
+    for sid, ws in sid2ws.items():
         found = False
         for var in VARIANTS:
-            src = workspaces_root / f"{provider}-{sid}" / "rendered" / f"{sid}.{var}.txt"
+            src = ws / "rendered" / f"{sid}.{var}.txt"
             if src.is_file():
                 shutil.copy(src, out_dir / f"{sid}.{var}.txt")
                 found = True
