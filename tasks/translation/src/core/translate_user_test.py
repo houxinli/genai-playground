@@ -207,6 +207,60 @@ class TranslateUserTest(unittest.TestCase):
             self.assertEqual({"type": "harness", "name": "cursor-grok", "model": "grok-test"}, result["producer"])
             self.assertEqual({"cursor-grok"}, {c["result_candidate_key"] for c in result["candidates"]})
 
+    def test_finish_republishes_after_tsv_repair_with_lineage(self):
+        # gh-142 修复潮踩坑:此前 finish 遇已有 ref 永不推进("ref_exists_kept"),
+        # 修复只更新 rendered、store ref 长期指向旧坏版本。现在:TSV 改过 → 带 parent
+        # 血缘重建 version 并 CAS 推进 ref;TSV 没改 → 幂等,published 且版本不变。
+        import json as _json
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"; src_dir.mkdir(); shutil.copy(SRC, src_dir / "700001.txt")
+            store = tmp / "store"; jobs = tmp / "jobs"; results = tmp / "results"; render = tmp / "out"
+            results.mkdir()
+            # 生产修复形态:无 bilingual incumbent(挑战者直接生效)
+            prep = tu.prepare_user("pixiv", src_dir, store, jobs)
+            j = prep["jobs"][0]; sid = j["source_id"]
+            bundle = _json.loads(Path(j["job"]).read_text(encoding="utf-8"))
+            tsv = results / f"{sid}.zh.tsv"
+            tsv.write_text("\n".join(
+                f"{i}\t{TR[seg['source_text']]}" for i, seg in enumerate(bundle["segments"])) + "\n",
+                encoding="utf-8")
+            m1 = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs,
+                                producer_name="cursor-grok")
+            v1 = m1["documents"][0]["version_id"]
+            self.assertTrue(m1["documents"][0]["published"])
+            # 幂等重跑:版本不变、published、无 republished
+            m2 = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs,
+                                producer_name="cursor-grok")
+            self.assertEqual(v1, m2["documents"][0]["version_id"])
+            self.assertTrue(m2["documents"][0]["published"])
+            self.assertNotEqual("republished", m2["documents"][0].get("status"))
+            # 修 TSV(重译一行)→ finish 必须推进 ref,且新版本带 parent 血缘
+            lines = tsv.read_text(encoding="utf-8").splitlines()
+            lines[3] = lines[3].split("\t")[0] + "\t「早安」"
+            tsv.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            m3 = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs,
+                                producer_name="cursor-grok")
+            d3 = m3["documents"][0]
+            self.assertEqual("republished", d3["status"])
+            self.assertEqual(v1, d3["previous_version_id"])
+            st = ArtifactStore(store)
+            doc = d3["document_id"]
+            cur = st.current_ref(doc)
+            self.assertEqual(d3["version_id"], cur["version_id"])  # ref 已推进
+            ver = st.get("document-version", doc, cur["version_id"])
+            self.assertEqual(v1, ver.get("parent_version_id"))  # 血缘
+            self.assertIn("「早安」", (render / f"{sid}.zh.txt").read_text(encoding="utf-8"))  # 修复生效
+            # verify 全绿(rendered 与 current ref 一致)
+            v = tu.verify_user("pixiv", src_dir, store, render, results)
+            self.assertTrue(v["ok"], v["documents"])
+            self.assertTrue(v["documents"][0]["rendered_matches_ref"])
+            # 人为把 ref 拨回旧版本(rendered 仍是新的)→ verify 必须抓到漂移
+            st.publish(doc, v1, expected_version_id=cur["version_id"])
+            v_drift = tu.verify_user("pixiv", src_dir, store, render, results)
+            self.assertFalse(v_drift["ok"])
+            self.assertFalse(v_drift["documents"][0]["rendered_matches_ref"])
+
     def test_finish_tsv_overwrites_partial_result(self):
         # Cursor 实测回归:完整 tsv 后仍遗留早期 partial result 时,finish 必须重组,不能使用缺段旧 result。
         import json as _json
