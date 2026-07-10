@@ -35,17 +35,15 @@ def apply_csv_to_playlist(
     *,
     cache_path: Path,
     yt_limit: int = 4,
-    search_missing: bool = False,
     log_path: Optional[Path] = None,
     auth_mode: str = "headers",
     write_back: bool = False,
 ) -> Dict[str, Any]:
     """
-    读取 CSV -> 补齐 videoId（可选搜索）-> 排序 -> 同步到指定 playlist。
+    读取 CSV -> 补齐 videoId（缺失时搜索）-> 排序 -> 同步到指定 playlist。
     返回 summary，包括同步结果与总数。
     """
     logger = get_logger(__name__, log_path)
-    print("ENTER apply_csv_to_playlist", csv_path, playlist_id, auth_mode)
     logger.info("开始同步 CSV -> playlist csv=%s playlist_id=%s auth=%s", csv_path, playlist_id, auth_mode)
     try:
         yt = get_client(auth_mode, headers_path=headers if auth_mode == "headers" else None)

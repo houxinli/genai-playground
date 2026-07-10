@@ -38,32 +38,36 @@ def choose_date(row: Dict[str, Any], cache: SongCache, overrides: Dict[str, Any]
     date_source = ""
     release_date = ""
 
-    candidates = []
     if override_date:
-        candidates.append(("override", override_date))
-    if mb_date:
-        candidates.append(("mb", mb_date))
-    if qq_time:
-        y = parse_year(qq_time)
-        if y:
-            candidates.append(("qq_time_public", qq_time if "-" in qq_time else f"{y:04d}-12-31"))
-    if yt_year:
-        y = parse_year(yt_year)
-        if y:
-            candidates.append(("yt_album_year", f"{y:04d}-12-31"))
-    if fallback_year:
-        candidates.append(("fallback", fallback_year))
-
-    if candidates:
-        # 选择最早日期
-        source, date_val = sorted(candidates, key=lambda x: x[1])[0]
-        release_date = date_val
-        date_source = source
-        reasons.append(source)
+        # 人工 override 无条件生效，不参与"取最早"比较
+        release_date = override_date
+        date_source = "override"
+        reasons.append("override")
     else:
-        release_date = ""
-        date_source = "missing"
-        reasons.append("missing")
+        candidates = []
+        if mb_date:
+            candidates.append(("mb", mb_date))
+        if qq_time:
+            y = parse_year(qq_time)
+            if y:
+                candidates.append(("qq_time_public", qq_time if "-" in qq_time else f"{y:04d}-12-31"))
+        if yt_year:
+            y = parse_year(yt_year)
+            if y:
+                candidates.append(("yt_album_year", f"{y:04d}-12-31"))
+        if fallback_year:
+            candidates.append(("fallback", fallback_year))
+
+        if candidates:
+            # 选择最早日期
+            source, date_val = sorted(candidates, key=lambda x: x[1])[0]
+            release_date = date_val
+            date_source = source
+            reasons.append(source)
+        else:
+            release_date = ""
+            date_source = "missing"
+            reasons.append("missing")
 
     if mb_suspect and not override_date:
         # 标记可疑但保留决定结果；note 用于人工检查
