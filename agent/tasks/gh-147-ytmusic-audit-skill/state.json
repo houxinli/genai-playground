@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-147-ytmusic-audit-skill",
+  "title": "ytmusic: 歌单审计/同步能力沉淀为 CLI + skill",
+  "status": "active",
+  "branch": "feat/ytmusic-audit-skill",
+  "objective": "把 2026-07-09/10 歌单审计会话中的临时能力(审计、选版打分、QQ 拉取、浏览器 InnerTube 推送)沉淀为 tasks/ytmusic 的 CLI 子命令与 ytmusic-sync skill,测试全绿并通过 PR 评审。",
+  "github": {
+    "issue": 147,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/ytmusic/",
+      ".claude/skills/ytmusic-sync/"
+    ],
+    "out": [
+      "tasks/translation/",
+      "tasks/ytmusic/data/ (git-ignored 数据,不入库)"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "tasks/ytmusic/AGENTS.md",
+      "purpose": "ytmusic 子项目设计规则与三歌单流转约定(真相源)",
+      "required": true
+    },
+    {
+      "path": "https://github.com/houxinli/genai-playground/issues/147",
+      "purpose": "Roadmap 与验收标准",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "确定性逻辑进代码(audit/打分/拉取/push),判断与编排进 skill",
+      "reason": "代码可测试不漂移;判断题(翻唱是否可接受等)需要 agent 人审,硬编码会做错",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "艺名对照表做成数据文件",
+      "reason": "中英艺名映射是持续积累的知识,不该埋在代码常量里",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "浏览器 InnerTube 作为凭据过期时的推送 fallback,JS 存文件整段注入",
+      "reason": "2026-07-09 实测可行,且不依赖 headers 有效期",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "P1 基线修复入库(3 个逻辑提交:CLI/死代码/override 修复、move-old 分流、文档)",
+      "status": "in_progress",
+      "depends_on": [],
+      "acceptance": [
+        "git log 上有 3 个按逻辑单元拆分的提交",
+        "pytest tasks/ytmusic/tests 全绿"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "P2 审计与选版代码化(audit.py + aliases 数据文件 + qq_playlist_fetcher.py + cli 子命令 audit/pull-qq)",
+      "status": "pending",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "cli audit --help 与 pull-qq --help 可用",
+        "打分器与 QQ 解析有离线单测"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "P3 浏览器推送工具化(browser_push.js + 注入/使用说明)",
+      "status": "pending",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "JS 文件包含 fetchPlaylist/clear/addAll/rebuild/verify,含批次方向自适应与重试"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "P4 skill 编排(.claude/skills/ytmusic-sync/SKILL.md)",
+      "status": "pending",
+      "depends_on": [
+        "S2",
+        "S3"
+      ],
+      "acceptance": [
+        "SKILL.md 覆盖:流程编排、判断规则、凭据过期 fallback、已知坑;不复制 AGENTS.md 业务规则,只引用"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "推 PR 关联 #147,等 CI 与 Codex 评审",
+      "status": "pending",
+      "depends_on": [
+        "S4"
+      ],
+      "acceptance": [
+        "PR 打开且 CI 绿,评论可见"
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S1",
+    "instruction": "把工作区已有改动按 3 个逻辑单元提交:①fix(ytmusic) CLI/死代码/override ②feat(ytmusic) move-old 按天判界+中外分流 ③docs(ytmusic) AGENTS.md 层级文档+README",
+    "acceptance": [
+      "3 个提交各自自洽,pytest 全绿"
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/ytmusic/tests -q"
+    ],
+    "last_results": []
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": null,
+  "next_task": null
+}
