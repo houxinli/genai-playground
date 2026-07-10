@@ -7,7 +7,7 @@
   "objective": "把 2026-07-09/10 歌单审计会话中的临时能力(审计、选版打分、QQ 拉取、浏览器 InnerTube 推送)沉淀为 tasks/ytmusic 的 CLI 子命令与 ytmusic-sync skill,测试全绿并通过 PR 评审。",
   "github": {
     "issue": 147,
-    "pull_request": null
+    "pull_request": 148
   },
   "scope": {
     "in": [
@@ -113,9 +113,9 @@
   ],
   "next_action": {
     "step_id": "S5",
-    "instruction": "推分支并开 PR 关联 #147;等 CI 与 Codex 评审,按评论修改",
+    "instruction": "处理 PR #148 的 Codex/人工评审意见;通过后合并并写 journal",
     "acceptance": [
-      "PR 打开、CI 绿、评审意见处理完"
+      "评审意见处理完,PR 合并,journal 一条"
     ]
   },
   "validation": {
