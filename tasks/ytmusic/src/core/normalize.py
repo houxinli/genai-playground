@@ -24,3 +24,18 @@ def make_key(title: str, artists: str) -> str:
 def normalized_query(title: str, artists: str) -> Tuple[str, str]:
     """返回用于查询的规范化标题和艺人。"""
     return normalize_title(title), normalize_artists(artists)
+
+
+_KANA_OR_HANGUL = re.compile(r"[぀-ヿ가-힯]")
+_HAN = re.compile(r"[一-鿿]")
+
+
+def is_foreign(title: str, artists: str) -> bool:
+    """
+    中外分流:含假名/谚文视为外文(日语歌名常为纯汉字,靠艺人名里的假名兜底);
+    否则含汉字视为中文;纯拉丁视为外文。
+    """
+    text = f"{title} {artists}"
+    if _KANA_OR_HANGUL.search(text):
+        return True
+    return not _HAN.search(text)
