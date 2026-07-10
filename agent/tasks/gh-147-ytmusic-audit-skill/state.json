@@ -57,7 +57,7 @@
     {
       "id": "S1",
       "title": "P1 基线修复入库(3 个逻辑提交:CLI/死代码/override 修复、move-old 分流、文档)",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "acceptance": [
         "git log 上有 3 个按逻辑单元拆分的提交",
@@ -67,7 +67,7 @@
     {
       "id": "S2",
       "title": "P2 审计与选版代码化(audit.py + aliases 数据文件 + qq_playlist_fetcher.py + cli 子命令 audit/pull-qq)",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "S1"
       ],
@@ -79,7 +79,7 @@
     {
       "id": "S3",
       "title": "P3 浏览器推送工具化(browser_push.js + 注入/使用说明)",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "S1"
       ],
@@ -90,7 +90,7 @@
     {
       "id": "S4",
       "title": "P4 skill 编排(.claude/skills/ytmusic-sync/SKILL.md)",
-      "status": "pending",
+      "status": "completed",
       "depends_on": [
         "S2",
         "S3"
@@ -102,7 +102,7 @@
     {
       "id": "S5",
       "title": "推 PR 关联 #147,等 CI 与 Codex 评审",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         "S4"
       ],
@@ -112,19 +112,32 @@
     }
   ],
   "next_action": {
-    "step_id": "S1",
-    "instruction": "把工作区已有改动按 3 个逻辑单元提交:①fix(ytmusic) CLI/死代码/override ②feat(ytmusic) move-old 按天判界+中外分流 ③docs(ytmusic) AGENTS.md 层级文档+README",
+    "step_id": "S5",
+    "instruction": "推分支并开 PR 关联 #147;等 CI 与 Codex 评审,按评论修改",
     "acceptance": [
-      "3 个提交各自自洽,pytest 全绿"
+      "PR 打开、CI 绿、评审意见处理完"
     ]
   },
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/ytmusic/tests -q"
     ],
-    "last_results": []
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/ytmusic/tests -q",
+        "status": "passed",
+        "summary": "22 passed",
+        "timestamp": "2026-07-10T21:58:17Z"
+      }
+    ]
   },
   "known_unrelated_changes": [],
-  "last_checkpoint": null,
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260710T215817Z-claude-code",
+    "timestamp": "2026-07-10T21:58:17Z",
+    "agent": "claude-code",
+    "summary": "S1-S4 完成: 基线修复入库(3提交)、audit/pull-qq 子命令+艺名对照表、browser_push.js、ytmusic-sync skill",
+    "observed_head": "f8b81d5"
+  },
   "next_task": null
 }
