@@ -52,7 +52,13 @@ def ensure_yt_cache_for_song(
         cache.set(key, "yt", "videoId", song["videoId"])
         if song.get("album_year"):
             cache.set(key, "yt", "album_year", song["album_year"])
-        logger.info("命中缓存 title=%s artists=%s videoId=%s album_year=%s", title, artists, vid, album_year or "")
+        logger.info(
+            "行内已有 videoId title=%s artists=%s videoId=%s album_year=%s",
+            title,
+            artists,
+            song["videoId"],
+            song.get("album_year", ""),
+        )
         return {"videoId": song["videoId"], "album_year": song.get("album_year", ""), "status": "exists"}
 
     # 搜索

@@ -91,8 +91,9 @@ def sync_local_playlists_to_yt(
     updated_entries: List[PlaylistEntry] = []
     for entry in entries:
         csv_path = entry.path
-        if not csv_path.exists():
-            logger.warning("跳过，文件不存在: %s", csv_path)
+        # 注意 Path("") 和 Path(".") 都指向当前目录且 exists() 为真，必须用 is_file 判断
+        if not csv_path.is_file():
+            logger.warning("跳过，不是有效的 CSV 文件: %s (title=%s)", csv_path, entry.title)
             continue
 
         pid = entry.id
@@ -110,7 +111,6 @@ def sync_local_playlists_to_yt(
             playlist_id=pid,
             cache_path=cache_path,
             yt_limit=5,
-            search_missing=False,
             log_path=log_dir / f"update_playlist_{entry.title}.log",
             auth_mode=auth_mode,
             write_back=False,
