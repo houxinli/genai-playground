@@ -111,6 +111,21 @@ def create_parser() -> argparse.ArgumentParser:
         help="保存歌单名->playlistId 映射的 JSON，供 --sync 自动填充",
     )
 
+    audit_parser = subparsers.add_parser("audit", help="逐首核对 CSV 中的 videoId 在 YT 上实际是什么")
+    audit_parser.add_argument("--csv", type=Path, required=True, help="本地歌单 CSV(如 local/昨日重现.csv)")
+    audit_parser.add_argument("--qq-csv", type=Path, default=None, help="对应的 QQ 导出 CSV,提供原曲时长用于比对")
+    audit_parser.add_argument("--report", type=Path, required=True, help="审计报告输出路径(NDJSON)")
+    audit_parser.add_argument(
+        "--snapshot",
+        type=Path,
+        default=None,
+        help="videoId->视频信息 的缓存 JSON,重跑时避免重复请求",
+    )
+
+    pull_parser = subparsers.add_parser("pull-qq", help="拉取 QQ 音乐线上歌单并写成导出格式 CSV")
+    pull_parser.add_argument("--playlist-id", required=True, help="QQ 歌单 id(分享链接里的 id 参数)")
+    pull_parser.add_argument("--out", type=Path, required=True, help="输出 CSV 路径(data/qqmusic/ 下)")
+
     return parser
 
 
@@ -153,9 +168,81 @@ def print_tracks(playlist_title: str, tracks: List[dict]) -> None:
         print(f"{idx:02d}. {title} - {artists}{f' | {album}' if album else ''}")
 
 
+def run_audit(args: argparse.Namespace) -> None:
+    import csv
+    import json
+    import time
+
+    from tasks.ytmusic.src.core.normalize import make_key, normalize_artists, normalize_title
+    from tasks.ytmusic.src.ytmusic.audit import audit_playlist
+
+    rows = list(csv.DictReader(args.csv.open()))
+    qq_intervals = {}
+    if args.qq_csv and args.qq_csv.exists():
+        for r in csv.DictReader(args.qq_csv.open()):
+            k = make_key(normalize_title(r.get("title", "")), normalize_artists(r.get("artists", "")))
+            if r.get("interval_seconds"):
+                qq_intervals[k] = int(r["interval_seconds"])
+
+    snapshot = {}
+    if args.snapshot and args.snapshot.exists():
+        snapshot = json.loads(args.snapshot.read_text())
+    yt = get_client("headers", headers_path=args.headers)
+
+    def get_song(video_id: str):
+        if video_id in snapshot:
+            return snapshot[video_id]
+        try:
+            song = yt.get_song(video_id)
+        except Exception:  # noqa: BLE001
+            return None
+        vd = song.get("videoDetails", {}) or {}
+        info = {
+            "actual_title": vd.get("title", ""),
+            "author": vd.get("author", ""),
+            "length": int(vd.get("lengthSeconds") or 0),
+            "status": (song.get("playabilityStatus", {}) or {}).get("status", ""),
+        }
+        snapshot[video_id] = info
+        time.sleep(0.05)
+        return info
+
+    report = audit_playlist(rows, get_song, qq_intervals)
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    with args.report.open("w", encoding="utf-8") as f:
+        for e in report:
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+    if args.snapshot:
+        args.snapshot.parent.mkdir(parents=True, exist_ok=True)
+        args.snapshot.write_text(json.dumps(snapshot, ensure_ascii=False))
+
+    flagged = [e for e in report if e["flags"]]
+    counts: dict = {}
+    for e in flagged:
+        for fl in e["flags"]:
+            counts[fl.split(":")[0]] = counts.get(fl.split(":")[0], 0) + 1
+    print(f"共 {len(report)} 首, 有问题 {len(flagged)} 首 -> {args.report}")
+    print(json.dumps(counts, ensure_ascii=False))
+
+
+def run_pull_qq(args: argparse.Namespace) -> None:
+    from tasks.ytmusic.src.qqmusic.qq_playlist_fetcher import fetch_playlist_raw, parse_playlist, write_qq_csv
+
+    parsed = parse_playlist(fetch_playlist_raw(args.playlist_id))
+    write_qq_csv(parsed["songs"], args.out)
+    print(f"歌单「{parsed['name']}」共 {len(parsed['songs'])} 首 -> {args.out}")
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = create_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "audit":
+        run_audit(args)
+        return
+    if args.command == "pull-qq":
+        run_pull_qq(args)
+        return
 
     client = get_client("headers", headers_path=args.headers)
     manager = PlaylistManager(client)
