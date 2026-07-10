@@ -1,27 +1,42 @@
-# YouTube Music 播放列表示例任务
+# YouTube Music 歌单迁移与同步
 
-这个任务用于通过 `ytmusicapi` 管理 YouTube Music 播放列表（创建、列出、添加歌曲）。代码入口在 `tasks/ytmusic/src/cli.py`，默认读取 `config/headers_auth.json` 中的认证头。
+把 QQ 音乐导出的歌单迁移到 YouTube Music,以本地 CSV(`data/local/*.csv`)作为歌单的期望状态持续同步。
+整体数据流、目录说明和开发约定见 [`AGENTS.md`](AGENTS.md)。
 
-## 准备工作
-- 建议继续使用仓库里的 `llm` conda 环境：`conda run -n llm python ...`
-- 依赖：`ytmusicapi`，可通过 `conda run -n llm pip install -r tasks/ytmusic/requirements.txt` 安装
-- 在浏览器中登录同一 Google 账号，运行 `python -m ytmusicapi setup` 按提示导出 headers，再把生成的 `headers_auth.json` 放到 `tasks/ytmusic/config/`，或通过 `--headers` 指定自定义路径。
+## 准备
 
-## 快速开始
-- 列出播放列表：`conda run -n llm python tasks/ytmusic/src/cli.py list`
-- 创建播放列表：`conda run -n llm python tasks/ytmusic/src/cli.py create --name "AI Mix" --description "LLM demo" --privacy PRIVATE`
-- 向播放列表添加歌曲：`conda run -n llm python tasks/ytmusic/src/cli.py add --playlist-id <PL_ID> --video-ids VIDEO_ID1 VIDEO_ID2`
-- 查看指定播放列表曲目：`conda run -n llm python tasks/ytmusic/src/cli.py items --url "https://music.youtube.com/playlist?list=..." --limit 200`
-- 删除播放列表内指定标题的曲目：`conda run -n llm python tasks/ytmusic/src/cli.py remove --url "https://music.youtube.com/playlist?list=..." --title "稻香" --limit 500`
+- conda `llm` 环境;依赖只有 `ytmusicapi`:`conda run -n llm pip install -r tasks/ytmusic/requirements.txt`
+- 认证:浏览器登录 Google 账号后运行 `python -m ytmusicapi setup`,把生成的 `headers_auth.json` 放到 `tasks/ytmusic/config/`(该目录整体 git-ignored)。
+- 所有命令都在 `genai-playground` 仓库根目录下运行。
 
-## 目录结构
-- `src/cli.py`：命令行入口。
-- `src/client.py`：加载 `YTMusic` 客户端。
-- `src/playlist_manager.py`：封装播放列表相关操作。
-- `config/`：存放本地的 `headers_auth.json`（已被 `.gitignore` 忽略）。
-- `logs/`：后续可写入调试日志的目录。
+## 常用命令
 
-## 下一步想法
-- 增加搜索歌曲/专辑并直接加入播放列表的命令。
-- 用本地 JSON/YAML 保存播放列表期望状态，增加同步校验命令。
-- 补充单元测试并接入现有 make/conda 流程。
+CLI(`python -m tasks.ytmusic.src.cli`):
+
+```bash
+# 列出歌单
+conda run -n llm python -m tasks.ytmusic.src.cli list
+# 创建歌单
+conda run -n llm python -m tasks.ytmusic.src.cli create --name "AI Mix" --privacy PRIVATE
+# 查看歌单曲目
+conda run -n llm python -m tasks.ytmusic.src.cli items --url "https://music.youtube.com/playlist?list=..."
+# 按标题删除曲目
+conda run -n llm python -m tasks.ytmusic.src.cli remove --url "..." --title "稻香"
+# 把超过 20 年的老歌从一个 CSV 移到另一个(可 --sync 同步 YT)
+conda run -n llm python -m tasks.ytmusic.src.cli move-old \
+  --source-csv tasks/ytmusic/data/local/not_yet.csv \
+  --target-csv tasks/ytmusic/data/local/昨日重现.csv --dry-run
+```
+
+库函数(无 CLI 包装,用 `python -c` 或脚本调):
+
+- `ytmusic.sync_pipeline.apply_csv_to_playlist` — 单个 CSV 同步到指定歌单(清空重建)
+- `ytmusic.playlist_sync_all.sync_local_playlists_to_yt` — 按 `data/local/playlists.json` 批量同步
+- `musicbrainz.mb_cache_updater.update_mb_cache` / `qqmusic.qq_time_fetcher.update_qq_times` — 补发行日期缓存
+- `core.build_local_csv.build_local_csv` — 从缓存+override 生成期望状态 CSV
+
+## 测试
+
+```bash
+conda run -n llm python -m pytest tasks/ytmusic/tests -q
+```
