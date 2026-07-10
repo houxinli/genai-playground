@@ -1,1 +1,2 @@
 ytmusicapi>=1.6.0
+zhconv>=1.4
