@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Sequence
 from urllib.parse import parse_qs, urlparse
 
-from tasks.ytmusic.src.ytmusic.client import DEFAULT_HEADERS_PATH, build_client
+from tasks.ytmusic.src.ytmusic.client import DEFAULT_HEADERS_PATH, get_client
 from tasks.ytmusic.src.ytmusic.playlist_manager import PlaylistManager
 from tasks.ytmusic.src.core.move_old_tracks import move_old_tracks
 
@@ -83,13 +83,20 @@ def create_parser() -> argparse.ArgumentParser:
 
     move_parser = subparsers.add_parser("move-old", help="将 source CSV 中超过指定年限的歌曲移到 target CSV/歌单")
     move_parser.add_argument("--source-csv", type=Path, required=True, help="源 CSV（如 local/not_yet.csv）")
-    move_parser.add_argument("--target-csv", type=Path, required=True, help="目标 CSV（如 local/昨日重现.csv）")
-    move_parser.add_argument("--older-than", type=int, default=20, help="超过多少年算老歌，默认 20 年")
-    move_parser.add_argument("--now-year", type=int, default=None, help="可指定当前年份，默认取系统年份")
+    move_parser.add_argument("--target-csv", type=Path, required=True, help="目标 CSV（中文歌去向，如 local/昨日重现.csv）")
+    move_parser.add_argument(
+        "--foreign-target-csv",
+        type=Path,
+        default=None,
+        help="外文歌（日/韩/西文）的目标 CSV，如 local/Yesterday_once_more.csv；不给则不分流",
+    )
+    move_parser.add_argument("--older-than", type=int, default=20, help="满多少年算老歌，默认 20 年（精确到天）")
+    move_parser.add_argument("--now-year", type=int, default=None, help="指定当前年份（按年粒度），默认按今天精确到天")
     move_parser.add_argument("--dry-run", action="store_true", help="仅预览不落盘")
     move_parser.add_argument("--sync", action="store_true", help="同步更新对应的 YT 歌单")
     move_parser.add_argument("--source-playlist-id", help="源播放列表 ID（配合 --sync）")
     move_parser.add_argument("--target-playlist-id", help="目标播放列表 ID（配合 --sync）")
+    move_parser.add_argument("--foreign-target-playlist-id", help="外文目标播放列表 ID（配合 --sync）")
     move_parser.add_argument("--cache", type=Path, default=Path("tasks/ytmusic/data/cache_mb.json"), help="缓存路径")
     move_parser.add_argument(
         "--log",
@@ -150,7 +157,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = create_parser()
     args = parser.parse_args(argv)
 
-    client = build_client(args.headers)
+    client = get_client("headers", headers_path=args.headers)
     manager = PlaylistManager(client)
 
     if args.command == "list":
@@ -207,27 +214,42 @@ def main(argv: Sequence[str] | None = None) -> None:
         if args.sync and args.playlists_json.exists():
             import json
 
-            mapping = json.loads(args.playlists_json.read_text())
-            src_name = args.source_csv.stem
-            tgt_name = args.target_csv.stem
-            if not args.source_playlist_id and src_name in mapping:
-                args.source_playlist_id = mapping[src_name]
-            if not args.target_playlist_id and tgt_name in mapping:
-                args.target_playlist_id = mapping[tgt_name]
+            raw = json.loads(args.playlists_json.read_text())
+            # 新格式是 [{title,id,path}] 列表,旧格式是 {title: id} 字典
+            if isinstance(raw, list):
+                mapping = {e.get("title", ""): e.get("id", "") for e in raw}
+            else:
+                mapping = raw
+
+            def lookup(stem: str) -> str | None:
+                # CSV 文件名用下划线,歌单名用空格
+                return mapping.get(stem) or mapping.get(stem.replace("_", " "))
+
+            if not args.source_playlist_id:
+                args.source_playlist_id = lookup(args.source_csv.stem)
+            if not args.target_playlist_id:
+                args.target_playlist_id = lookup(args.target_csv.stem)
+            if args.foreign_target_csv and not args.foreign_target_playlist_id:
+                args.foreign_target_playlist_id = lookup(args.foreign_target_csv.stem)
         moved = move_old_tracks(
             source_csv=args.source_csv,
             target_csv=args.target_csv,
             older_than=args.older_than,
             now_year=args.now_year,
+            foreign_target_csv=args.foreign_target_csv,
             dry_run=args.dry_run,
             sync=args.sync,
             source_playlist_id=args.source_playlist_id,
             target_playlist_id=args.target_playlist_id,
+            foreign_target_playlist_id=args.foreign_target_playlist_id,
             headers_path=args.headers,
             cache_path=args.cache,
             log_path=args.log,
         )
-        print(f"完成移动，符合条件 {moved['moved_count']} 首，源剩余 {moved['source_count']}，目标现有 {moved['target_count']}")
+        print(
+            f"完成移动(截止 {moved['cutoff_date']}): 中文 {moved['moved_cn']} 首, 外文 {moved['moved_foreign']} 首; "
+            f"源剩余 {moved['source_count']}, 中文目标 {moved['target_count']}, 外文目标 {moved['foreign_target_count']}"
+        )
     else:
         parser.error(f"未知指令: {args.command}")
 
