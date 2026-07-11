@@ -207,6 +207,48 @@ class TranslateUserTest(unittest.TestCase):
             self.assertEqual({"type": "harness", "name": "cursor-grok", "model": "grok-test"}, result["producer"])
             self.assertEqual({"cursor-grok"}, {c["result_candidate_key"] for c in result["candidates"]})
 
+    def test_entity_store_wired_into_prepare_and_finish(self):
+        # gh-149/#83:实体库 → prepare 的 context_pack.entities;finish 必须同库(约束入 task 身份),
+        # 中途改库 → digest 不符 → import 按 stale 隔离(协议行为)。
+        import json as _json
+        try:
+            from .entity_store import EntityStore, entity_id_for
+        except ImportError:
+            from entity_store import EntityStore, entity_id_for
+        def _ent(source, target):
+            scope = {"level": "creator", "key": "pixiv:700000"}
+            return {"schema_version": 1, "entity_id": entity_id_for(scope, source), "scope": scope,
+                    "source": source, "target": target, "type": "person",
+                    "authority": "manual", "status": "approved",
+                    "updated_at": "2026-07-11T00:00:00Z"}
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"; src_dir.mkdir(); shutil.copy(SRC, src_dir / "700001.txt")
+            store = tmp / "store"; jobs = tmp / "jobs"; results = tmp / "results"; render = tmp / "out"
+            results.mkdir()
+            es_root = tmp / "entities"
+            es = EntityStore(es_root)
+            es.put(_ent("おはよう", "早上好"))   # 源文出现 → 注入
+            es.put(_ent("マホ", "真穗"))          # 源文未出现 → 不注入
+            prep = tu.prepare_user("pixiv", src_dir, store, jobs, entity_store=es_root)
+            j = prep["jobs"][0]; sid = j["source_id"]
+            bundle = _json.loads(Path(j["job"]).read_text(encoding="utf-8"))
+            ents = bundle["context_pack"]["entities"]
+            self.assertEqual(["おはよう"], [e["source"] for e in ents])
+            self.assertEqual("早上好", ents[0]["target"])
+            # 翻译 + finish(同库)→ 正常发布
+            tsv = results / f"{sid}.zh.tsv"
+            tsv.write_text("\n".join(
+                f"{i}\t{TR[seg['source_text']]}" for i, seg in enumerate(bundle["segments"])) + "\n",
+                encoding="utf-8")
+            m = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs,
+                               entity_store=es_root, producer_name="cursor-grok")
+            self.assertTrue(m["documents"][0]["published"], m["documents"][0])
+            # finish 不带库(或库已变)→ task 身份不一致 → stale 隔离,不污染发布
+            m2 = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs,
+                                producer_name="cursor-grok")
+            self.assertEqual("translate_quarantined", m2["documents"][0]["status"])
+
     def test_finish_republishes_after_tsv_repair_with_lineage(self):
         # gh-142 修复潮踩坑:此前 finish 遇已有 ref 永不推进("ref_exists_kept"),
         # 修复只更新 rendered、store ref 长期指向旧坏版本。现在:TSV 改过 → 带 parent
