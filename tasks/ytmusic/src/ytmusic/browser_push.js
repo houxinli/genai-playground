@@ -79,14 +79,17 @@ __yt.clearPlaylist = async function (plid) {
   const cur = await __yt.fetchPlaylist(plid);
   for (let i = 0; i < cur.length; i += 50) {
     const batch = cur.slice(i, i + 50);
-    for (let a = 0; a < 4; a++) {
+    let ok = false;
+    for (let a = 0; a < 4 && !ok; a++) {
       const rr = await __yt.call('browse/edit_playlist', {
         playlistId: plid,
         actions: batch.map(it => ({ action: 'ACTION_REMOVE_VIDEO', setVideoId: it.setVideoId, removedVideoId: it.videoId })),
       });
-      if (rr.data.status === 'STATUS_SUCCEEDED') break;
-      await new Promise(r => setTimeout(r, 6000));
+      ok = rr.data.status === 'STATUS_SUCCEEDED';
+      if (!ok) await new Promise(r => setTimeout(r, 6000));
     }
+    // 清不掉必须中止:带着残留继续 addAll 会得到"旧内容+新列表"的脏歌单
+    if (!ok) throw new Error(`clear batch failed at ${i}`);
     await new Promise(r => setTimeout(r, 300));
   }
 };
@@ -115,7 +118,9 @@ __yt.verify = async function (plid, list) {
   const got = (await __yt.fetchPlaylist(plid)).map(i => i.videoId);
   let firstDiff = -1;
   for (let i = 0; i < list.length; i++) if (got[i] !== list[i]) { firstDiff = i; break; }
-  return { count: got.length, expected: list.length, firstDiff, got };
+  // ok 同时要求数量一致:目标列表只是前缀而尾部有残留时 firstDiff 也是 -1
+  const ok = firstDiff === -1 && got.length === list.length;
+  return { ok, count: got.length, expected: list.length, firstDiff, got };
 };
 
 // 注意:整个 rebuild 可能超过 CDP 单次调用超时(45s)。歌单大时请分步调用
@@ -126,12 +131,13 @@ __yt.rebuild = async function (plid, list) {
   await __yt.addAll(plid, list, false);
   let v = await __yt.verify(plid, list);
   let mode = 'normal';
-  if (v.firstDiff !== -1 && v.count === list.length) {
+  if (!v.ok && v.count === list.length) {
+    // 数量对但顺序不对 => 该歌单批次落顶部,逆序批次重来
     await __yt.clearPlaylist(plid);
     await new Promise(r => setTimeout(r, 4000));
     await __yt.addAll(plid, list, true);
     v = await __yt.verify(plid, list);
     mode = 'batch-reversed';
   }
-  return { mode, count: v.count, expected: v.expected, orderOK: v.firstDiff === -1, firstDiff: v.firstDiff };
+  return { mode, ok: v.ok, count: v.count, expected: v.expected, firstDiff: v.firstDiff };
 };

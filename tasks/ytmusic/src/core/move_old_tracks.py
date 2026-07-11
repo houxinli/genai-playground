@@ -129,6 +129,8 @@ def move_old_tracks(
                     cache_path=cache_path,
                     yt_limit=5,
                     log_path=Path(f"{csv_path.stem}_update.log"),
+                    # 三个怀旧歌单在 YT 上按从新到旧排(AGENTS.md 流转规则)
+                    newest_first=True,
                 )
 
     summary = {

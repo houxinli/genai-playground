@@ -43,14 +43,14 @@ conda run -n llm python -m tasks.ytmusic.src.cli audit \
 
 本地 CSV 按旧→新存;YT 歌单要**新→旧**,推送前反转、按 videoId 去重。
 
-- **首选** CLI(需要 `config/headers_auth.json` 有效):`apply_csv_to_playlist` 或 move-old `--sync`。
+- **首选** CLI(需要 `config/headers_auth.json` 有效):`apply_csv_to_playlist(newest_first=True)` 或 move-old `--sync`(已内置从新到旧)。
 - **凭据过期(写操作 401 / 库内歌单数为 0)→ 浏览器方案**,不要让用户手工导 headers:
   1. Claude in Chrome 打开已登录的 music.youtube.com;
   2. 把 [`src/ytmusic/browser_push.js`](../../tasks/ytmusic/src/ytmusic/browser_push.js) 整段用 javascript_tool 执行;
   3. 大 videoId 数组嵌入后先核对长度+校验和(算法见 js 文件头注释)再执行;
   4. 大歌单分步调 `clearPlaylist`/`addAll`/`verify`(单次 CDP 调用 45s 上限);
-  5. `verify` 必须 orderOK 才算完成。js 文件头列了全部已知坑(写后读延迟、
-     批次落顶部的歌单、YT 自动替换等价视频、409 重试)。
+  5. `verify`/`rebuild` 返回的 `ok`(顺序逐位一致**且数量相等**)为 true 才算完成。
+     js 文件头列了全部已知坑(写后读延迟、批次落顶部的歌单、YT 自动替换等价视频、409 重试)。
 
 ### 每次动过歌单后
 

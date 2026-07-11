@@ -28,6 +28,21 @@ def sort_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(rows, key=key_fn)
 
 
+def ordered_video_ids(rows: List[Dict[str, Any]], *, newest_first: bool = False) -> List[str]:
+    """按 release_date 排序后提取去重 videoId;newest_first 时反转(YT 歌单从新到旧)。"""
+    sorted_rows = sort_rows(list(rows))
+    if newest_first:
+        sorted_rows.reverse()
+    seen: set = set()
+    video_ids: List[str] = []
+    for r in sorted_rows:
+        vid = r.get("videoId")
+        if vid and vid not in seen:
+            seen.add(vid)
+            video_ids.append(vid)
+    return video_ids
+
+
 def apply_csv_to_playlist(
     headers: Path,
     csv_path: Path,
@@ -38,9 +53,11 @@ def apply_csv_to_playlist(
     log_path: Optional[Path] = None,
     auth_mode: str = "headers",
     write_back: bool = False,
+    newest_first: bool = False,
 ) -> Dict[str, Any]:
     """
     读取 CSV -> 补齐 videoId（缺失时搜索）-> 排序 -> 同步到指定 playlist。
+    newest_first=True 时按发布时间从新到旧写入(本地 CSV 仍是从旧到新)。
     返回 summary，包括同步结果与总数。
     """
     logger = get_logger(__name__, log_path)
@@ -74,15 +91,14 @@ def apply_csv_to_playlist(
         enriched.append(enriched_row)
         log_entries.append({**enriched_row, "status": status})
 
-    sorted_rows = sort_rows(enriched)
-    video_ids = [r.get("videoId") for r in sorted_rows if r.get("videoId")]
-    logger.info("准备写入条目: 总行=%s 有videoId=%s", len(sorted_rows), len(video_ids))
+    video_ids = ordered_video_ids(enriched, newest_first=newest_first)
+    logger.info("准备写入条目: 总行=%s 有videoId=%s newest_first=%s", len(enriched), len(video_ids), newest_first)
     try:
         summary = sync_playlist(yt, playlist_id, video_ids)
     except Exception as e:  # noqa: BLE001
         logger.error("同步歌单失败 playlist=%s err=%s", playlist_id, e)
         raise
-    summary.update({"total_rows": len(sorted_rows), "with_videoId": len(video_ids)})
+    summary.update({"total_rows": len(enriched), "with_videoId": len(video_ids)})
 
     if log_path:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -115,4 +131,4 @@ def apply_csv_to_playlist(
     return summary
 
 
-__all__ = ["apply_csv_to_playlist", "sort_rows"]
+__all__ = ["apply_csv_to_playlist", "ordered_video_ids", "sort_rows"]
