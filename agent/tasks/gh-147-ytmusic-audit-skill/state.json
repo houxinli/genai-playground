@@ -2,7 +2,7 @@
   "schema_version": 1,
   "task_id": "gh-147-ytmusic-audit-skill",
   "title": "ytmusic: 歌单审计/同步能力沉淀为 CLI + skill",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/ytmusic-audit-skill",
   "objective": "把 2026-07-09/10 歌单审计会话中的临时能力(审计、选版打分、QQ 拉取、浏览器 InnerTube 推送)沉淀为 tasks/ytmusic 的 CLI 子命令与 ytmusic-sync skill,测试全绿并通过 PR 评审。",
   "github": {
@@ -102,7 +102,7 @@
     {
       "id": "S5",
       "title": "推 PR 关联 #147,等 CI 与 Codex 评审",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S4"
       ],
@@ -111,13 +111,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S5",
-    "instruction": "处理 PR #148 的 Codex/人工评审意见;通过后合并并写 journal",
-    "acceptance": [
-      "评审意见处理完,PR 合并,journal 一条"
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "conda run -n llm python -m pytest tasks/ytmusic/tests -q"
@@ -126,18 +120,18 @@
       {
         "command": "conda run -n llm python -m pytest tasks/ytmusic/tests -q",
         "status": "passed",
-        "summary": "22 passed",
-        "timestamp": "2026-07-10T21:58:17Z"
+        "summary": "23 passed",
+        "timestamp": "2026-07-11T06:51:01Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260710T215817Z-claude-code",
-    "timestamp": "2026-07-10T21:58:17Z",
+    "checkpoint_id": "cp-20260711T065101Z-claude-code",
+    "timestamp": "2026-07-11T06:51:01Z",
     "agent": "claude-code",
-    "summary": "S1-S4 完成: 基线修复入库(3提交)、audit/pull-qq 子命令+艺名对照表、browser_push.js、ytmusic-sync skill",
-    "observed_head": "f8b81d5"
+    "summary": "Codex 3 条 P2 全部修复并回复;CI 绿;journal 就绪,待合并收口",
+    "observed_head": "314a6ef"
   },
   "next_task": null
 }
