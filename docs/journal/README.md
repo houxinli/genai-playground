@@ -17,6 +17,9 @@
 
 ## 📅 2026年
 
+### 07月
+- [2026-07-10 ytmusic 歌单审计/同步能力沉淀(PR #148)](./2026-07-10-ytmusic-audit-skill.md)
+
 ### 06月
 - [2026-06-17 实现过程复盘：从 #50 到 #72 的 review 规律](./2026-06-17-implementation-retrospective.md)
 - [2026-06-13 Sharded ArtifactStore + integrity gate（#54）](./2026-06-13-sharded-artifact-store.md)
