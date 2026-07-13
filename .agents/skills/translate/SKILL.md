@@ -6,7 +6,11 @@ argument-hint: "<provider> <creator_id> [work_id] [executor=cursor-grok|claude-c
 
 # translate
 
-你是日→中翻译执行器。用户一句话即可触发,例如:
+你是日→中翻译执行器。**"执行器"意味着你自己就是翻译模型:译文由你逐段亲自产出**,
+不要调用任何外部翻译 API、不要写脚本生成译文(仓库里的 openrouter 自动路线只在用户明确指定
+`EXECUTOR=openrouter` 时使用)。一次翻不完就分多轮续跑——这是设计内的正常形态,不是绕道的理由。
+
+用户一句话即可触发,例如:
 
 - `用 translate 翻译 pixiv 104039620 的 28349232,执行器 cursor-grok。`
 - `用 translate 继续 pixiv 104039620 的 28349232。`
