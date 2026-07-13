@@ -207,6 +207,28 @@ class TranslateUserTest(unittest.TestCase):
             self.assertEqual({"type": "harness", "name": "cursor-grok", "model": "grok-test"}, result["producer"])
             self.assertEqual({"cursor-grok"}, {c["result_candidate_key"] for c in result["candidates"]})
 
+    def test_entity_store_wired_into_auto_mode(self):
+        # Codex #151 review:自动路线(translate_user/translate_document)也须透传实体库,
+        # 否则 make translate-user MODE=auto ENTITY_STORE=... 静默丢约束。
+        try:
+            from .entity_store import EntityStore, entity_id_for
+        except ImportError:
+            from entity_store import EntityStore, entity_id_for
+        seen = {}
+        def spy(bundle):
+            seen["entities"] = bundle["context_pack"]["entities"]
+            return _mock_executor(bundle)
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"; src_dir.mkdir(); shutil.copy(SRC, src_dir / "700001.txt")
+            es_root = tmp / "entities"
+            scope = {"level": "creator", "key": "pixiv:700000"}
+            EntityStore(es_root).put({"schema_version": 1, "entity_id": entity_id_for(scope, "おはよう"),
+                "scope": scope, "source": "おはよう", "target": "早上好", "type": "person",
+                "authority": "manual", "status": "approved", "updated_at": "2026-07-13T00:00:00Z"})
+            tu.translate_user("pixiv", src_dir, tmp / "s", tmp / "out", spy, entity_store=es_root)
+            self.assertEqual(["おはよう"], [e["source"] for e in seen["entities"]])
+
     def test_entity_store_wired_into_prepare_and_finish(self):
         # gh-149/#83:实体库 → prepare 的 context_pack.entities;finish 必须同库(约束入 task 身份),
         # 中途改库 → digest 不符 → import 按 stale 隔离(协议行为)。

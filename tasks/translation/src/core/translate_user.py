@@ -191,12 +191,12 @@ def finish_document(
 
 
 def translate_document(
-    provider, source_path, store, translate_fn, render_dir=None, bilingual_dir=None,
+    provider, source_path, store, translate_fn, render_dir=None, bilingual_dir=None, entity_store=None,
 ) -> Dict[str, Any]:
     """自动路线单篇:prepare(导出 bundle)→ translate_fn 翻译 → finish(发布渲染)。"""
-    prep = prepare_document(provider, source_path, store, bilingual_dir)
+    prep = prepare_document(provider, source_path, store, bilingual_dir, entity_store=entity_store)
     result = translate_fn(prep["bundle"])
-    return finish_document(provider, source_path, store, result, render_dir, bilingual_dir)
+    return finish_document(provider, source_path, store, result, render_dir, bilingual_dir, entity_store=entity_store)
 
 
 def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=None, entity_store=None, limit=None) -> Dict[str, Any]:
@@ -404,6 +404,7 @@ def translate_user(
     translate_fn: TranslateFn,
     *,
     bilingual_dir: Optional[Path] = None,
+    entity_store: Optional[Path] = None,
     limit: Optional[int] = None,
 ) -> Dict[str, Any]:
     """整作者:逐篇翻译(独立容错)→ 合并整本。limit 限篇控成本。"""
@@ -415,7 +416,7 @@ def translate_user(
     docs: List[Dict[str, Any]] = []
     for src in sources:
         try:
-            docs.append(translate_document(provider, src, store, translate_fn, render_dir, bilingual_dir))
+            docs.append(translate_document(provider, src, store, translate_fn, render_dir, bilingual_dir, entity_store=entity_store))
         except Exception as exc:  # 逐篇容错
             docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
     rendered_sids = [d["document_id"].rsplit(":", 1)[-1] for d in docs if d.get("rendered")]
@@ -487,7 +488,7 @@ def main() -> int:
     translate_fn = make_translate_fn(args.executor, args.model)
     manifest = translate_user(
         args.provider, args.source_dir, args.store, args.render_dir, translate_fn,
-        bilingual_dir=args.bilingual_dir, limit=args.limit,
+        bilingual_dir=args.bilingual_dir, entity_store=args.entity_store, limit=args.limit,
     )
     print(json.dumps(manifest["summary"], ensure_ascii=False))
     return 0
