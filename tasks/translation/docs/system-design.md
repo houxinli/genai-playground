@@ -1547,6 +1547,11 @@ full run 必须覆盖全篇；patch run 只覆盖用户/QA 指定的少量 segme
 **finish 必须传同一个库**,实体约束中途变更 → context_digest 变 → import 按 stale 隔离(协议行为,需重新 prepare)。
 此前实体链路只在 `translate-bundle`/`export-job` CLI 可用,agent 主路线(prepare/finish)的 context_pack 一直为空。
 
+**空候选不可选(2026-07-13)**:reviewable 放宽(无 incumbent 的唯一候选先发布供 review)**不适用于
+空译文候选**——选空文本=发布带洞版本。空行(拒译/待填)→ 该段无 selection → 整篇 unresolved 阻断建版,
+维持「完全无译文的段阻断建版」不变量(实测:填空 TSV 的空行曾被放宽路径放行,212 篇带洞发布后回滚)。
+守卫先于 tags 兜底(空 tags 候选同样阻断)。
+
 **finish republish + 漂移检测(2026-07-09)**:`MODE=finish` 对已有 current ref 的文档——内容未变则幂等
 (同 version_id,不产新版本);TSV 修复过(selections 变化)则带 `parent_version_id` 血缘重建 DocumentVersion
 并 CAS `publish` 推进 ref,报 `republished`/`previous_version_id`。此前 `ref_exists_kept` 永不推进,gh-142
