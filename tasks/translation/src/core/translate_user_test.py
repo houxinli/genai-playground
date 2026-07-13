@@ -295,6 +295,28 @@ class TranslateUserTest(unittest.TestCase):
             self.assertFalse(d.get("published"))
             self.assertIsNone(ArtifactStore(store).current_ref(d["document_id"]))  # 不产带洞发布
 
+    def test_blank_tags_candidate_also_blocked(self):
+        # Codex #153 review:空译文守卫必须先于 tags 兜底——否则空 tags 候选仍被无条件选中发布。
+        import json as _json
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"; src_dir.mkdir(); shutil.copy(SRC, src_dir / "700001.txt")
+            store = tmp / "store"; jobs = tmp / "jobs"; results = tmp / "results"; render = tmp / "out"
+            results.mkdir()
+            prep = tu.prepare_user("pixiv", src_dir, store, jobs)
+            j = prep["jobs"][0]; sid = j["source_id"]
+            bundle = _json.loads(Path(j["job"]).read_text(encoding="utf-8"))
+            rows = []
+            for i, seg in enumerate(bundle["segments"]):
+                t_ = "" if seg["kind"] == "metadata.tags" else TR[seg["source_text"]]  # 只留空 tags 行
+                rows.append(f"{i}\t{seg['source_text'][:8]}\t{t_}")
+            (results / f"{sid}.zh.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+            m = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs,
+                               producer_name="cursor-grok")
+            d = m["documents"][0]
+            self.assertEqual("unresolved", d["status"])
+            self.assertIsNone(ArtifactStore(store).current_ref(d["document_id"]))
+
     def test_finish_republishes_after_tsv_repair_with_lineage(self):
         # gh-142 修复潮踩坑:此前 finish 遇已有 ref 永不推进("ref_exists_kept"),
         # 修复只更新 rendered、store ref 长期指向旧坏版本。现在:TSV 改过 → 带 parent

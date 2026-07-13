@@ -137,21 +137,22 @@ def finish_document(
     chal_by_seg = {si["segment_id"]: [c["candidate_id"] for c in si["challengers"]] for si in segments_input}
     for r in recs:
         sole_challenger = chal_by_seg.get(r["segment_id"]) or []
-        if (r["selected_candidate_id"] is None
-                and kind_by_seg.get(r["segment_id"]) == "metadata.tags"
-                and len(sole_challenger) == 1):
+        # **空译文候选一律不可选**(先于所有兜底路径,含 tags 分支——Codex #153 review):
+        # 选空文本=发布带洞版本,违反"空候选阻断建版"不变量(gh-142 实测:填空 TSV 的空行被
+        # 放宽路径放行,212 篇带洞发布)。空候选留 None → 整篇 unresolved 阻断。
+        sole_nonempty = (len(sole_challenger) == 1
+                         and (cands_in_store.get(sole_challenger[0]) or {}).get("text", "").strip())
+        if r["selected_candidate_id"] is not None or not sole_nonempty:
+            continue
+        if kind_by_seg.get(r["segment_id"]) == "metadata.tags":
             r["selected_candidate_id"] = sole_challenger[0]
             r["outcome"] = "select_challenger"
             r["reason_code"] = "metadata_tags_sole_candidate_accepted"
-        elif r["selected_candidate_id"] is None and len(sole_challenger) == 1:
-            # 执行器路线先产可渲染版本:无 incumbent 时,唯一候选即使 QA fail 也进入 draft/current,
-            # review_required 保留给 FEEDBACK/patch。真正缺候选或多候选未决仍阻断建版。
-            # **空译文候选除外**:选空文本=发布带洞版本,违反"空候选阻断建版"不变量
-            # (gh-142 实测:填空 TSV 的空行被此路径放行,212 篇带洞发布)。留 None → unresolved 阻断。
-            cand_text = (cands_in_store.get(sole_challenger[0]) or {}).get("text", "")
-            if cand_text.strip():
-                r["selected_candidate_id"] = sole_challenger[0]
-                r["reason_code"] = f"reviewable_{r['reason_code']}"
+        else:
+            # 执行器路线先产可渲染版本:无 incumbent 时,唯一非空候选即使 QA fail 也进入
+            # draft/current,review_required 保留给 FEEDBACK/patch。多候选未决仍阻断建版。
+            r["selected_candidate_id"] = sole_challenger[0]
+            r["reason_code"] = f"reviewable_{r['reason_code']}"
     report["review_required"] = sum(1 for r in recs if r["outcome"] == "review_required")
     if any(r["selected_candidate_id"] is None for r in recs):
         report["status"] = "unresolved"  # body 段无可选(新译 QA fail 且无 incumbent)
