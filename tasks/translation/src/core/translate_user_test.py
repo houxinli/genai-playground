@@ -271,6 +271,30 @@ class TranslateUserTest(unittest.TestCase):
                                 producer_name="cursor-grok")
             self.assertEqual("translate_quarantined", m2["documents"][0]["status"])
 
+    def test_blank_tsv_rows_block_version_not_holey_publish(self):
+        # gh-142 回归:填空 TSV 的空行曾被 reviewable 放宽路径选中 → 212 篇带洞发布。
+        # 空译文候选必须不可选 → 整篇 unresolved 阻断,不产带洞版本。
+        import json as _json
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"; src_dir.mkdir(); shutil.copy(SRC, src_dir / "700001.txt")
+            store = tmp / "store"; jobs = tmp / "jobs"; results = tmp / "results"; render = tmp / "out"
+            results.mkdir()
+            prep = tu.prepare_user("pixiv", src_dir, store, jobs)
+            j = prep["jobs"][0]; sid = j["source_id"]
+            bundle = _json.loads(Path(j["job"]).read_text(encoding="utf-8"))
+            rows = []
+            for i, seg in enumerate(bundle["segments"]):
+                t_ = "" if i == 3 else TR[seg["source_text"]]  # 一行留空
+                rows.append(f"{i}\t{seg['source_text'][:8]}\t{t_}")
+            (results / f"{sid}.zh.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+            m = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs,
+                               producer_name="cursor-grok")
+            d = m["documents"][0]
+            self.assertEqual("unresolved", d["status"])
+            self.assertFalse(d.get("published"))
+            self.assertIsNone(ArtifactStore(store).current_ref(d["document_id"]))  # 不产带洞发布
+
     def test_finish_republishes_after_tsv_repair_with_lineage(self):
         # gh-142 修复潮踩坑:此前 finish 遇已有 ref 永不推进("ref_exists_kept"),
         # 修复只更新 rendered、store ref 长期指向旧坏版本。现在:TSV 改过 → 带 parent
