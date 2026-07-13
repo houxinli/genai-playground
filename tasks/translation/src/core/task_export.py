@@ -202,6 +202,27 @@ def export_job(
     }
 
 
+def resolve_entities_for_revision(revision: Dict[str, Any], entity_store_root: Path) -> List[Dict[str, Any]]:
+    """按文档 scope 从实体库解析本篇适用的实体约束(prepare/finish/CLI 共用同一口径)。
+
+    确定性:resolve_entities 排序+胜出规则确定 → 同库同文入 task 身份一致。实体库在
+    prepare 与 finish 之间被改动 → context_digest 变 → import 按 stale 隔离(需重新 prepare),
+    这是协议行为而非 bug。"""
+    try:
+        from .entity_store import EntityStore, resolve_entities
+    except ImportError:
+        from core.entity_store import EntityStore, resolve_entities
+    src = revision["source"]
+    scope_ctx = {"provider": src["provider"], "creator_id": src["creator_id"],
+                 "document_id": revision["document_id"]}
+    # 系列作用域:revision 只保留 series_title(身份不含 series.id),以其作 series key 的判别。
+    series_title = revision.get("metadata", {}).get("series_title")
+    if series_title:
+        scope_ctx["series"] = series_title
+    text = "\n".join(s["source_text"] for s in revision["segments"])
+    return resolve_entities(scope_ctx, text, EntityStore(Path(entity_store_root)))
+
+
 def ingest_revision(revision: Dict[str, Any], store: Any) -> Dict[str, Any]:
     """把源 DocumentRevision 幂等写入分片 ArtifactStore,作为 translate→import 闭环的入库点。
 
@@ -292,23 +313,7 @@ def main() -> int:
     segment_ids = args.segment or [s["segment_id"] for s in revision["segments"]]
 
     if args.entity_store:
-        try:
-            from .entity_store import resolve_entities
-        except ImportError:
-            from core.entity_store import resolve_entities
-        try:
-            from .entity_store import EntityStore
-        except ImportError:
-            from core.entity_store import EntityStore
-        src = revision["source"]
-        scope_ctx = {"provider": src["provider"], "creator_id": src["creator_id"],
-                     "document_id": revision["document_id"]}
-        # 系列作用域:revision 只保留 series_title(身份不含 series.id),以其作 series key 的判别。
-        series_title = revision.get("metadata", {}).get("series_title")
-        if series_title:
-            scope_ctx["series"] = series_title
-        text = "\n".join(s["source_text"] for s in revision["segments"])
-        resolved = resolve_entities(scope_ctx, text, EntityStore(args.entity_store))
+        resolved = resolve_entities_for_revision(revision, args.entity_store)
         # --context 手填为 override:同 source 以手填为准
         manual_sources = {e.get("source") for e in (entities or [])}
         merged = [e for e in resolved if e["source"] not in manual_sources] + list(entities or [])

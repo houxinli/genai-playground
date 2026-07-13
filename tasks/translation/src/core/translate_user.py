@@ -23,7 +23,7 @@ try:
     from .pipeline_ingest import merge_author
     from .renderer import render_bilingual, render_zh
     from .result_import import import_result
-    from .task_export import export_job, ingest_revision
+    from .task_export import export_job, ingest_revision, resolve_entities_for_revision
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core import candidate_eval, document_qa, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
@@ -31,7 +31,7 @@ except ImportError:  # 作为脚本运行
     from core.pipeline_ingest import merge_author
     from core.renderer import render_bilingual, render_zh
     from core.result_import import import_result
-    from core.task_export import export_job, ingest_revision
+    from core.task_export import export_job, ingest_revision, resolve_entities_for_revision
 
 TranslateFn = Callable[[Dict[str, Any]], Dict[str, Any]]
 
@@ -51,8 +51,11 @@ def make_translate_fn(executor: str, model: Optional[str] = None) -> TranslateFn
     raise ValueError(f"未知/不可自动执行的 executor: {executor!r}(cursor/claude 走 skill 薄壳)")
 
 
-def _revision_bundle_legacy(provider, source_path, store, bilingual_dir):
-    """确定性重建 revision + bundle + legacy 映射(prepare/finish 共用)。ingest/legacy 入库幂等。"""
+def _revision_bundle_legacy(provider, source_path, store, bilingual_dir, entity_store=None):
+    """确定性重建 revision + bundle + legacy 映射(prepare/finish 共用)。ingest/legacy 入库幂等。
+
+    entity_store:实体库根目录,给定则把本篇适用实体解析进 context_pack(折入 task 身份)。
+    **prepare 与 finish 必须传同一个库**:实体约束入 digest,中途改库 → import 按 stale 隔离。"""
     source_path = Path(source_path)
     rev = si.build_document_revision(provider, source_path)
     doc = rev["document_id"]
@@ -64,23 +67,24 @@ def _revision_bundle_legacy(provider, source_path, store, bilingual_dir):
             store.put_many(doc, [*legacy, *atts])
             legacy_by_seg = {c["segment_id"]: c for c in legacy}
     seg_ids = [s["segment_id"] for s in rev["segments"]]
-    bundle = export_job(rev, seg_ids)
+    entities = resolve_entities_for_revision(rev, entity_store) if entity_store else None
+    bundle = export_job(rev, seg_ids, entities=entities)
     return rev, bundle, legacy_by_seg
 
 
-def prepare_document(provider, source_path, store, bilingual_dir=None) -> Dict[str, Any]:
+def prepare_document(provider, source_path, store, bilingual_dir=None, entity_store=None) -> Dict[str, Any]:
     """agent 路线第一步:导出该篇翻译 bundle(并入库 revision/legacy)给执行器(我/Cursor)。"""
-    rev, bundle, _ = _revision_bundle_legacy(provider, source_path, store, bilingual_dir)
+    rev, bundle, _ = _revision_bundle_legacy(provider, source_path, store, bilingual_dir, entity_store=entity_store)
     doc = rev["document_id"]
     return {"document_id": doc, "source_id": doc.rsplit(":", 1)[-1], "bundle": bundle}
 
 
 def finish_document(
-    provider, source_path, store, result, render_dir=None, bilingual_dir=None,
+    provider, source_path, store, result, render_dir=None, bilingual_dir=None, entity_store=None,
 ) -> Dict[str, Any]:
     """agent 路线第二步:吃 executor 产的 result → import→评估→保守择优→version→publish→render。"""
     source_path = Path(source_path)
-    rev, bundle, legacy_by_seg = _revision_bundle_legacy(provider, source_path, store, bilingual_dir)
+    rev, bundle, legacy_by_seg = _revision_bundle_legacy(provider, source_path, store, bilingual_dir, entity_store=entity_store)
     doc = rev["document_id"]
     report: Dict[str, Any] = {"document_id": doc, "segments": len(rev["segments"]), "status": "ok"}
     seg_ids = [s["segment_id"] for s in rev["segments"]]
@@ -187,15 +191,15 @@ def finish_document(
 
 
 def translate_document(
-    provider, source_path, store, translate_fn, render_dir=None, bilingual_dir=None,
+    provider, source_path, store, translate_fn, render_dir=None, bilingual_dir=None, entity_store=None,
 ) -> Dict[str, Any]:
     """自动路线单篇:prepare(导出 bundle)→ translate_fn 翻译 → finish(发布渲染)。"""
-    prep = prepare_document(provider, source_path, store, bilingual_dir)
+    prep = prepare_document(provider, source_path, store, bilingual_dir, entity_store=entity_store)
     result = translate_fn(prep["bundle"])
-    return finish_document(provider, source_path, store, result, render_dir, bilingual_dir)
+    return finish_document(provider, source_path, store, result, render_dir, bilingual_dir, entity_store=entity_store)
 
 
-def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=None, limit=None) -> Dict[str, Any]:
+def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=None, entity_store=None, limit=None) -> Dict[str, Any]:
     """agent 路线:逐篇导出 bundle 到 jobs_dir/<source_id>.job.json,供执行器逐个翻译。"""
     source_dir, store_root, jobs_dir = Path(source_dir), Path(store_root), Path(jobs_dir)
     store = ArtifactStore(store_root)
@@ -206,7 +210,7 @@ def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=No
     jobs = []
     for src in sources:
         try:
-            prep = prepare_document(provider, src, store, bilingual_dir)
+            prep = prepare_document(provider, src, store, bilingual_dir, entity_store=entity_store)
             out = jobs_dir / f"{prep['source_id']}.job.json"
             out.write_text(json.dumps(prep["bundle"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             jobs.append({"source": src.name, "source_id": prep["source_id"], "job": str(out),
@@ -281,6 +285,7 @@ def finish_user(
     *,
     jobs_dir=None,
     bilingual_dir=None,
+    entity_store=None,
     limit=None,
     producer_name: Optional[str] = None,
     model: Optional[str] = None,
@@ -322,7 +327,7 @@ def finish_user(
                 docs.append({"source": src.name, "status": "no_result"})
                 continue
             result = json.loads(result_path.read_text(encoding="utf-8"))
-            docs.append(finish_document(provider, src, store, result, render_dir, bilingual_dir))
+            docs.append(finish_document(provider, src, store, result, render_dir, bilingual_dir, entity_store=entity_store))
         except Exception as exc:
             docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
     rendered_sids = [d["document_id"].rsplit(":", 1)[-1] for d in docs if d.get("rendered")]
@@ -399,6 +404,7 @@ def translate_user(
     translate_fn: TranslateFn,
     *,
     bilingual_dir: Optional[Path] = None,
+    entity_store: Optional[Path] = None,
     limit: Optional[int] = None,
 ) -> Dict[str, Any]:
     """整作者:逐篇翻译(独立容错)→ 合并整本。limit 限篇控成本。"""
@@ -410,7 +416,7 @@ def translate_user(
     docs: List[Dict[str, Any]] = []
     for src in sources:
         try:
-            docs.append(translate_document(provider, src, store, translate_fn, render_dir, bilingual_dir))
+            docs.append(translate_document(provider, src, store, translate_fn, render_dir, bilingual_dir, entity_store=entity_store))
         except Exception as exc:  # 逐篇容错
             docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
     rendered_sids = [d["document_id"].rsplit(":", 1)[-1] for d in docs if d.get("rendered")]
@@ -440,6 +446,8 @@ def main() -> int:
     parser.add_argument("--store", required=True, type=Path)
     parser.add_argument("--render-dir", type=Path, default=None)
     parser.add_argument("--jobs-dir", type=Path, default=None, help="mode=prepare 的 bundle 输出目录")
+    parser.add_argument("--entity-store", type=Path, default=None,
+                        help="可选实体库根目录;prepare 与 finish 必须传同一个(实体约束入 task 身份)")
     parser.add_argument("--results-dir", type=Path, default=None, help="mode=finish 的 agent result 目录")
     parser.add_argument("--bilingual-dir", type=Path, default=None, help="可选:已有 legacy 译文作 incumbent")
     parser.add_argument("--executor", default="openrouter", help="mode=auto 的执行器(openrouter)")
@@ -455,7 +463,7 @@ def main() -> int:
         if not (args.jobs_dir and str(args.jobs_dir).strip()):
             parser.error("mode=prepare 需要非空 --jobs-dir")
         m = prepare_user(args.provider, args.source_dir, args.store, args.jobs_dir,
-                         bilingual_dir=args.bilingual_dir, limit=args.limit)
+                         bilingual_dir=args.bilingual_dir, entity_store=args.entity_store, limit=args.limit)
         print(json.dumps({"jobs": len([j for j in m["jobs"] if j.get("job")]), "jobs_dir": str(args.jobs_dir)}, ensure_ascii=False))
         return 0
     if args.mode == "verify":
@@ -471,7 +479,8 @@ def main() -> int:
             parser.error("mode=finish 需要非空 --results-dir 与 --render-dir")
         producer_name = args.producer or (args.executor if args.executor != "openrouter" else None)
         m = finish_user(args.provider, args.source_dir, args.store, args.render_dir, args.results_dir,
-                        jobs_dir=args.jobs_dir, bilingual_dir=args.bilingual_dir, limit=args.limit,
+                        jobs_dir=args.jobs_dir, bilingual_dir=args.bilingual_dir,
+                        entity_store=args.entity_store, limit=args.limit,
                         producer_name=producer_name, model=args.model)
         print(json.dumps(m["summary"], ensure_ascii=False))
         return 0
@@ -479,7 +488,7 @@ def main() -> int:
     translate_fn = make_translate_fn(args.executor, args.model)
     manifest = translate_user(
         args.provider, args.source_dir, args.store, args.render_dir, translate_fn,
-        bilingual_dir=args.bilingual_dir, limit=args.limit,
+        bilingual_dir=args.bilingual_dir, entity_store=args.entity_store, limit=args.limit,
     )
     print(json.dumps(manifest["summary"], ensure_ascii=False))
     return 0

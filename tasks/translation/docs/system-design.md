@@ -1542,6 +1542,11 @@ full run 必须覆盖全篇；patch run 只覆盖用户/QA 指定的少量 segme
 
 **Document-level 对齐 QA(2026-07-04)**:`document_qa.audit_document_translations` 负责跨段关系检查,不塞进逐段 `qa_gate`。`duplicate_translation_distinct_source` 是 warning,用于召回和人工审计;`block_paste_run` 要求连续块、恒定 offset、源文显著不同,是 error,`MODE=finish` 阻断发布,legacy bilingual 导入则返回 `document_qa error` issues 并不写入候选/attestation。
 
+**实体库接入 prepare/finish(2026-07-11)**:`translate-user` 增 `ENTITY_STORE=`——prepare 时按文档 scope
+用 `resolve_entities_for_revision` 把本篇适用实体解析进 `context_pack.entities`(折入 task 身份);
+**finish 必须传同一个库**,实体约束中途变更 → context_digest 变 → import 按 stale 隔离(协议行为,需重新 prepare)。
+此前实体链路只在 `translate-bundle`/`export-job` CLI 可用,agent 主路线(prepare/finish)的 context_pack 一直为空。
+
 **finish republish + 漂移检测(2026-07-09)**:`MODE=finish` 对已有 current ref 的文档——内容未变则幂等
 (同 version_id,不产新版本);TSV 修复过(selections 变化)则带 `parent_version_id` 血缘重建 DocumentVersion
 并 CAS `publish` 推进 ref,报 `republished`/`previous_version_id`。此前 `ref_exists_kept` 永不推进,gh-142
