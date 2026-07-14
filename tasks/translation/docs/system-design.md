@@ -1549,9 +1549,15 @@ full run 必须覆盖全篇；patch run 只覆盖用户/QA 指定的少量 segme
 
 **bilingual 注音(2026-07-14)**:`renderer.add_furigana` 用 pykakasi 给日文源行的汉字注音(漢字(かな),
 送假名剥到括号外,如 映る→映(うつ)る)。**注音只在作者合集构建时施加**(`author_collection.build_collection(furigana=True)`,
-默认开;`--no-furigana` 关):合集副本里含假名的源文行被注音,再合并/出 epub;逐篇 `.bilingual.txt`(workspace 原件)
+默认开;`--no-furigana` 关):合集副本被注音后再合并/出 epub;逐篇 `.bilingual.txt`(workspace 原件)
 与 `render_bilingual`/`merge_author` 保持原始日文,让 `qa_gate` 能按源文精确重对齐(否则 `今日(きょう)は` 匹配不上
 原始 `今日は` → 误报 missing_pair,Codex #158 P2)。未装 pykakasi 时 add_furigana 原样返回。
+
+`_annotate_furigana_file` **按 body 结构判源文,不靠"整行含假名"**(#159 修回归):pykakasi 会给一切汉字
+(含中文)加日文读音,若按含假名判行,中日混排的 front-matter tags 行(`パイズリ / 乳交` 同行)与含假名残留的
+中文译文行会被整行注音,把 `乳交`→`乳(ちち)交(こう)`、`快点`→`快(かい)点(てん)`。故:①跳过 front-matter
+(title/caption/tags 均中日混排在此)②body 非空行严格交替 源文/译文,只注源文槽 ③源文槽无假名则跳过
+(防译文多行致奇偶漂移误注中文)。因此 front-matter 的日文 title/tags 不注音,只 body 源文注音。
 
 **空候选不可选(2026-07-13)**:reviewable 放宽(无 incumbent 的唯一候选先发布供 review)**不适用于
 空译文候选**——选空文本=发布带洞版本。空行(拒译/待填)→ 该段无 selection → 整篇 unresolved 阻断建版,
