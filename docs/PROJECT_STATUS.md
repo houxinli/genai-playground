@@ -36,10 +36,13 @@ source -> revision -> legacy/new candidates -> evaluations
        -> conservative recommendation -> draft version -> bilingual/zh
 ```
 
-该数据平面 slice（身份→store→版本→保守选择→bilingual/zh）已完成。**下一步(2026-06-19 重排)：
-Knowledge/context-builder 层 #83 P1a**——最小 context-builder 让 bundle 携带 Context Pack(术语+
-作用域实体+邻句),它是翻译质量(人名一致性)的真正来源、harness 路径当前缺的上下文载体,且端到端
-demo 须带上下文才有意义。完整顺序以 system-design §20.2 为准;此处与 §20.2 一致。
+该数据平面 slice（身份→store→版本→保守选择→bilingual/zh）已完成。Context Pack(#83 P1a)与作用域
+实体库接入翻译主路线(#151)也已落地——实体库已可为真实翻译注入人名约束,库已开始填充(2026-07)。
+
+**下一步(2026-07-13 重排)**:①填充/维护各作者名词库,让新翻译自动锁人名(通道已通,库刚起步);
+②三个修复队列清账(迁移填空 5471 行、假名残留 2636 行、压缩体重译 13 篇),待 Cursor/Codex 额度;
+③译文选择/review 闭环(issue #149:review-queue 消费面 + 压缩比报警);④instruction-pack/repair
+job(#83 P1b-c)。完整顺序以 system-design §20.2 为准。
 
 完整目标设计与实施检查点见
 [`tasks/translation/docs/system-design.md`](../tasks/translation/docs/system-design.md)（§20.2 接下来推荐顺序）。
