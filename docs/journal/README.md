@@ -18,6 +18,7 @@
 ## 📅 2026年
 
 ### 07月
+- [2026-07-13 翻译质量修复潮 + 旧流水线迁移(gh-142 系列 PR #143–#153)](./2026-07-13-translation-quality-and-migration.md)
 - [2026-07-10 ytmusic 歌单审计/同步能力沉淀(PR #148)](./2026-07-10-ytmusic-audit-skill.md)
 
 ### 06月
