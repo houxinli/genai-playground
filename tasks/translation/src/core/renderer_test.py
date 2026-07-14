@@ -119,5 +119,20 @@ class RendererGoldenTest(unittest.TestCase):
             render_bilingual(rev, path.read_text(encoding="utf-8"), {})
 
 
+    def test_furigana_annotates_kanji(self):
+        try:
+            import pykakasi  # noqa
+        except ImportError:
+            self.skipTest("pykakasi 未安装")
+        try:
+            from .renderer import add_furigana
+        except ImportError:
+            from renderer import add_furigana
+        # 只给汉字注音,送假名剥到括号外;纯假名/符号不动
+        self.assertEqual("パッケージに映(うつ)るのは", add_furigana("パッケージに映るのは"))
+        self.assertEqual("「おはよう」", add_furigana("「おはよう」"))
+        self.assertIn("巨乳(きょにゅう)", add_furigana("巨乳の彼女"))
+
+
 if __name__ == "__main__":
     unittest.main()

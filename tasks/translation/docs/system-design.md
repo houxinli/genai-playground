@@ -1547,6 +1547,10 @@ full run 必须覆盖全篇；patch run 只覆盖用户/QA 指定的少量 segme
 **finish 必须传同一个库**,实体约束中途变更 → context_digest 变 → import 按 stale 隔离(协议行为,需重新 prepare)。
 此前实体链路只在 `translate-bundle`/`export-job` CLI 可用,agent 主路线(prepare/finish)的 context_pack 一直为空。
 
+**bilingual 注音(2026-07-14)**:`renderer.add_furigana` 用 pykakasi 给日文源行的汉字注音(漢字(かな),
+送假名剥到括号外,如 映る→映(うつ)る);`render_bilingual(..., furigana=True)` 时对源文行生效,translate_user
+主路线(finish)已开启,pipeline_ingest legacy 路径与 renderer 默认不注音(保 golden)。未装 pykakasi 时原样返回。
+
 **空候选不可选(2026-07-13)**:reviewable 放宽(无 incumbent 的唯一候选先发布供 review)**不适用于
 空译文候选**——选空文本=发布带洞版本。空行(拒译/待填)→ 该段无 selection → 整篇 unresolved 阻断建版,
 维持「完全无译文的段阻断建版」不变量(实测:填空 TSV 的空行曾被放宽路径放行,212 篇带洞发布后回滚)。

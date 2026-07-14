@@ -189,7 +189,7 @@ def finish_document(
         render_dir = Path(render_dir)
         render_dir.mkdir(parents=True, exist_ok=True)
         sid = doc.rsplit(":", 1)[-1]
-        (render_dir / f"{sid}.bilingual.txt").write_text(render_bilingual(rev, source_text, translations), encoding="utf-8")
+        (render_dir / f"{sid}.bilingual.txt").write_text(render_bilingual(rev, source_text, translations, furigana=True), encoding="utf-8")
         (render_dir / f"{sid}.zh.txt").write_text(render_zh(rev, source_text, translations), encoding="utf-8")
         report["rendered"] = True
     return report
