@@ -140,9 +140,11 @@ class AuthorCollectionTest(unittest.TestCase):
         (refs / f"{sid}.json").write_text('{"version_id":"v1"}', encoding="utf-8")
         rd = ws_root / f"{provider}-{sid}" / "rendered"
         rd.mkdir(parents=True, exist_ok=True)
-        # bilingual: 日文源文行(含假名+汉字) + 中文译文行(无假名)
+        # bilingual:front-matter 里有中日混排 tags 行(`源词 / 中文` 同行);body 为 源文/译文 交替对。
         (rd / f"{sid}.bilingual.txt").write_text(
-            "---\nID: {0}\ntitle: 今日は\n---\n\n今日は晴れです\n今天是晴天\n".format(sid), encoding="utf-8")
+            "---\nID: {0}\ntitle: 今日は\n"
+            "tags: [パイズリ / 乳交, 巨乳 / 巨乳]\n"
+            "---\n\n今日は晴れです\n今天是晴天\n\n巨乳が好きです\n喜欢巨乳\n".format(sid), encoding="utf-8")
         (rd / f"{sid}.zh.txt").write_text(
             "---\nID: {0}\ntitle: 晴天\n---\n\n今天是晴天\n".format(sid), encoding="utf-8")
 
@@ -157,9 +159,28 @@ class AuthorCollectionTest(unittest.TestCase):
             ac.build_collection("作者F", "700000", workspaces_root=ws,
                                 out_dir=Path(t) / "coll", furigana=True)
             bil = (Path(t) / "coll" / "作者F.bilingual.txt").read_text(encoding="utf-8")
-            self.assertIn("(", bil)              # 源文汉字被注音
-            self.assertIn("今天是晴天", bil)      # 中文译文行原样(无注音括号窜入)
-            self.assertNotIn("今天(", bil)        # 中文行没被误注音
+            self.assertIn("(", bil)              # body 源文汉字被注音
+            self.assertIn("今天是晴天", bil)      # 中文译文行原样
+            self.assertIn("喜欢巨乳", bil)        # 中文译文行原样(不被注音)
+            self.assertNotIn("今天(", bil)        # 中文译文行没被误注音
+            self.assertNotIn("喜欢(", bil)
+
+    def test_furigana_does_not_corrupt_mixed_frontmatter_tags(self):
+        """回归:中日混排 tags 行(`パイズリ / 乳交`)不得把中文 乳交 注成 乳(ちち)交(こう)。
+        根因是曾按"整行含假名"判源文,把 front-matter 混排行整行注音。现跳过 front-matter。"""
+        try:
+            import pykakasi  # noqa: F401
+        except Exception:
+            self.skipTest("pykakasi 未安装")
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            self._make_ja_work(ws, "700001")
+            ac.build_collection("作者H", "700000", workspaces_root=ws,
+                                out_dir=Path(t) / "coll", furigana=True)
+            bil = (Path(t) / "coll" / "作者H.bilingual.txt").read_text(encoding="utf-8")
+            self.assertIn("パイズリ / 乳交", bil)   # tags 行原样,中文侧未被日文读音污染
+            self.assertNotIn("乳(ちち)交", bil)
+            self.assertNotIn("巨乳(きょにゅう) / 巨乳(きょにゅう)", bil)
 
     def test_no_furigana_keeps_source_raw(self):
         with tempfile.TemporaryDirectory() as t:

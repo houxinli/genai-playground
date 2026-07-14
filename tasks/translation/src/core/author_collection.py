@@ -30,17 +30,36 @@ except ImportError:
 
 VARIANTS = ("zh", "bilingual")
 
-# 日文假名(平/片)——bilingual 里源文行必含假名,中文译文行不含,以此区分只给源文注音。
+# 日文假名(平/片)——真源文行含假名;中文译文行原则上不含(deepseek 偶有假名残留另算)。
 _KANA = re.compile(r"[぀-ゟ゠-ヿ]")
 
 
 def _annotate_furigana_file(path: Path) -> None:
-    """就地给一个 bilingual 文件的日文源文行加汉字注音(furigana)。
+    """就地给一个**单篇** bilingual 文件的日文源文行加汉字注音(furigana)。
 
-    只注含假名的行(源文行),中文译文行/纯符号行不动;pykakasi 缺失时 add_furigana 原样返回。
-    施加在合集副本上,workspace 原件保持原始日文,供 qa_gate 精确重对齐。"""
+    **按结构判源文,不靠"整行含假名"启发式**——否则中日混排的 tags 行(`源词 / 中文` 同行)
+    与含假名残留的中文译文行会被 pykakasi 用日文读音注到中文汉字上(把 `乳交` 注成 `乳(ちち)交(こう)`)。
+    规则:①跳过 front-matter(首个 `---` 到次个 `---`,内含中日混排的 title/caption/tags)②body 区
+    非空行严格交替 源文/译文,只注源文槽;③再加假名保护:源文槽无假名则跳过(防译文多行导致奇偶漂移
+    时误注中文)。pykakasi 缺失时 add_furigana 原样返回。施加在合集副本上,workspace 原件保持原始。"""
     lines = path.read_text(encoding="utf-8").split("\n")
-    out = [add_furigana(ln) if _KANA.search(ln) else ln for ln in lines]
+    front_end = -1
+    if lines and lines[0].strip() == "---":
+        for j in range(1, len(lines)):
+            if lines[j].strip() == "---":
+                front_end = j
+                break
+    out: List[str] = lines[: front_end + 1]  # front-matter 原样(front_end=-1 时为空,从头即 body)
+    expect_source = True
+    for ln in lines[front_end + 1:]:
+        if not ln.strip():
+            out.append(ln)
+            continue
+        if expect_source:
+            out.append(add_furigana(ln) if _KANA.search(ln) else ln)
+        else:
+            out.append(ln)
+        expect_source = not expect_source
     path.write_text("\n".join(out), encoding="utf-8")
 
 
