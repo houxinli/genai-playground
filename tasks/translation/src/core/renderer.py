@@ -19,6 +19,36 @@ try:
 except ImportError:  # core/ 在 sys.path 上
     from source_identity import _PROVIDER_SPEC
 
+import re as _re
+
+_KANJI=_re.compile(r"[一-鿿]")
+_kks=None
+def add_furigana(text: str) -> str:
+    """给日文里的汉字词注音:漢字(かな),共享送假名剥到括号外(映る→映(うつ)る)。
+    需 pykakasi;未安装则原样返回(渲染不因缺依赖而崩)。名字多音字等词典法固有误差可接受。"""
+    global _kks
+    if _kks is None:
+        try:
+            import pykakasi
+            _kks=pykakasi.kakasi()
+        except Exception:
+            _kks=False
+    if not _kks or not _KANJI.search(text):
+        return text
+    out=[]
+    for w in _kks.convert(text):
+        o,h=w["orig"],w["hira"]
+        if not _KANJI.search(o):
+            out.append(o); continue
+        suf=0
+        while suf<min(len(o),len(h)) and o[-1-suf]==h[-1-suf]: suf+=1
+        co=o[:len(o)-suf] if suf else o
+        ch=h[:len(h)-suf] if suf else h
+        ok=o[len(o)-suf:] if suf else ""
+        out.append(f"{co}({ch}){ok}" if co and ch and co!=ch else o)
+    return "".join(out)
+
+
 
 def _split_front_matter(text: str):
     lines = text.splitlines()
@@ -46,7 +76,7 @@ def _segments_index(revision: Dict[str, Any]):
     return segs_by_kind, body_segs
 
 
-def render_bilingual(revision: Dict[str, Any], source_text: str, translations: Dict[str, str]) -> str:
+def render_bilingual(revision: Dict[str, Any], source_text: str, translations: Dict[str, str], furigana: bool = False) -> str:
     """返回 bilingual 文本。translations:segment_id -> 译文(metadata 与 body 段都需提供)。"""
     provider = revision["source"]["provider"]
     caption_key = _PROVIDER_SPEC[provider]["caption_key"]
@@ -73,7 +103,7 @@ def render_bilingual(revision: Dict[str, Any], source_text: str, translations: D
     if front is not None:
         in_series = False
         for line in front:
-            out.append(line)
+            out.append(add_furigana(line) if furigana else line)
             stripped = line.lstrip()
             indent = line[: len(line) - len(stripped)]
             key = stripped.split(":", 1)[0] if ":" in stripped else ""
@@ -99,7 +129,7 @@ def render_bilingual(revision: Dict[str, Any], source_text: str, translations: D
                 f"source line {body_idx} does not match revision segment "
                 f"{seg['segment_id']}: {line.strip()!r} != {seg['source_text']!r}"
             )
-        out.append(line)
+        out.append(add_furigana(line) if furigana else line)
         out.append(_tr(seg))
         body_idx += 1
     if body_idx != len(body_segs):

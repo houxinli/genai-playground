@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -19,13 +20,28 @@ from typing import Any, Dict, List, Optional
 try:
     from .epub_build import build_epub
     from .pipeline_ingest import _chapter_title, _sid_sort_key, merge_author
+    from .renderer import add_furigana
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from core.epub_build import build_epub
     from core.pipeline_ingest import _chapter_title, _sid_sort_key, merge_author
+    from core.renderer import add_furigana
 
 VARIANTS = ("zh", "bilingual")
+
+# 日文假名(平/片)——bilingual 里源文行必含假名,中文译文行不含,以此区分只给源文注音。
+_KANA = re.compile(r"[぀-ゟ゠-ヿ]")
+
+
+def _annotate_furigana_file(path: Path) -> None:
+    """就地给一个 bilingual 文件的日文源文行加汉字注音(furigana)。
+
+    只注含假名的行(源文行),中文译文行/纯符号行不动;pykakasi 缺失时 add_furigana 原样返回。
+    施加在合集副本上,workspace 原件保持原始日文,供 qa_gate 精确重对齐。"""
+    lines = path.read_text(encoding="utf-8").split("\n")
+    out = [add_furigana(ln) if _KANA.search(ln) else ln for ln in lines]
+    path.write_text("\n".join(out), encoding="utf-8")
 
 
 _COLLECTION_SUFFIXES = (".txt", ".epub")
@@ -60,7 +76,7 @@ def _published_sids(workspaces_root: Path, provider: str, creator_id: str) -> Di
 
 def build_collection(
     author_name: str, creator_id: str, *, workspaces_root: Path, out_dir: Path,
-    provider: str = "pixiv", gdrive_dir: Optional[Path] = None,
+    provider: str = "pixiv", gdrive_dir: Optional[Path] = None, furigana: bool = True,
 ) -> Dict[str, Any]:
     """收集 creator 已发布篇 → 合并成作者名整本。返回 {sids, missing, chapters, files, gdrive}。"""
     if not author_name.strip():
@@ -85,6 +101,12 @@ def build_collection(
                 found = True
         if not found:
             missing.append(sid)
+    if furigana:
+        # 合集副本(非 workspace 原件)注音后再合并/出 epub:读者读到带假名的日文,QA 工件不受影响。
+        for sid in sids:
+            fp = out_dir / f"{sid}.bilingual.txt"
+            if fp.is_file():
+                _annotate_furigana_file(fp)
     merged = merge_author(out_dir, author_name, sids)
     epubs = _build_epubs(out_dir, author_name, sids)
     files: List[str] = []
@@ -137,12 +159,15 @@ def main() -> int:
     p.add_argument("--workspaces-root", type=Path, default=Path("tasks/translation/data/workspaces"))
     p.add_argument("--out", type=Path, default=None, help="合集输出目录(默认 workspaces/_collection-<creator>)")
     p.add_argument("--gdrive", type=Path, default=None, help="可选:同时复制整本到此目录")
+    p.add_argument("--no-furigana", dest="furigana", action="store_false",
+                   help="不给 bilingual 合集的日文源文加汉字注音(默认加)")
     args = p.parse_args()
     if not args.author.strip() or not args.creator.strip():
         p.error("--author 与 --creator 不能为空")
     out = args.out or (args.workspaces_root / f"_collection-{args.creator}")
     res = build_collection(args.author, args.creator, workspaces_root=args.workspaces_root,
-                           out_dir=out, provider=args.provider, gdrive_dir=args.gdrive)
+                           out_dir=out, provider=args.provider, gdrive_dir=args.gdrive,
+                           furigana=args.furigana)
     import json
     print(json.dumps(res, ensure_ascii=False, indent=2))
     if res["missing"]:

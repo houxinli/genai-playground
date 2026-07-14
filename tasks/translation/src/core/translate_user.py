@@ -189,6 +189,8 @@ def finish_document(
         render_dir = Path(render_dir)
         render_dir.mkdir(parents=True, exist_ok=True)
         sid = doc.rsplit(":", 1)[-1]
+        # 逐篇 bilingual 保持原始日文(不注音),这样 qa_gate 能按源文精确重对齐;
+        # furigana 注音只在作者合集/epub 构建时施加(见 author_collection），不污染 QA 可复核的工件。
         (render_dir / f"{sid}.bilingual.txt").write_text(render_bilingual(rev, source_text, translations), encoding="utf-8")
         (render_dir / f"{sid}.zh.txt").write_text(render_zh(rev, source_text, translations), encoding="utf-8")
         report["rendered"] = True
