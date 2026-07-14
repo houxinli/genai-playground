@@ -134,6 +134,42 @@ class AuthorCollectionTest(unittest.TestCase):
             self.assertTrue((gd / "作者E.zh.epub").is_file())
             self.assertTrue((gd / "作者E.bilingual.epub").is_file())
 
+    def _make_ja_work(self, ws_root: Path, sid: str, provider="pixiv", creator="700000"):
+        refs = ws_root / f"{provider}-{sid}" / "store" / "refs" / provider / creator
+        refs.mkdir(parents=True, exist_ok=True)
+        (refs / f"{sid}.json").write_text('{"version_id":"v1"}', encoding="utf-8")
+        rd = ws_root / f"{provider}-{sid}" / "rendered"
+        rd.mkdir(parents=True, exist_ok=True)
+        # bilingual: 日文源文行(含假名+汉字) + 中文译文行(无假名)
+        (rd / f"{sid}.bilingual.txt").write_text(
+            "---\nID: {0}\ntitle: 今日は\n---\n\n今日は晴れです\n今天是晴天\n".format(sid), encoding="utf-8")
+        (rd / f"{sid}.zh.txt").write_text(
+            "---\nID: {0}\ntitle: 晴天\n---\n\n今天是晴天\n".format(sid), encoding="utf-8")
+
+    def test_furigana_annotates_source_lines_only(self):
+        try:
+            import pykakasi  # noqa: F401
+        except Exception:
+            self.skipTest("pykakasi 未安装")
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            self._make_ja_work(ws, "700001")
+            ac.build_collection("作者F", "700000", workspaces_root=ws,
+                                out_dir=Path(t) / "coll", furigana=True)
+            bil = (Path(t) / "coll" / "作者F.bilingual.txt").read_text(encoding="utf-8")
+            self.assertIn("(", bil)              # 源文汉字被注音
+            self.assertIn("今天是晴天", bil)      # 中文译文行原样(无注音括号窜入)
+            self.assertNotIn("今天(", bil)        # 中文行没被误注音
+
+    def test_no_furigana_keeps_source_raw(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            self._make_ja_work(ws, "700001")
+            ac.build_collection("作者G", "700000", workspaces_root=ws,
+                                out_dir=Path(t) / "coll", furigana=False)
+            bil = (Path(t) / "coll" / "作者G.bilingual.txt").read_text(encoding="utf-8")
+            self.assertIn("今日は晴れです", bil)  # 源文保持原始日文,无注音
+
 
 if __name__ == "__main__":
     unittest.main()
