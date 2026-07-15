@@ -135,7 +135,9 @@ def merge_author(render_dir: Path, author_key: str, source_ids: List[str]) -> Di
             chapters.append(f"第{len(chapters) + 1}章 {title}\n\n{content}")
         if not chapters:
             continue
-        out_path = render_dir / f"{author_key}.{variant}.txt"
+        # 作者级整本用 `_变体` 后缀(<author>_zh.txt / <author>_bilingual.txt),与逐篇 `{sid}.{var}.txt`
+        # 区分、避免"双点扩展名"歧义(用户约定 2026-07-14)。
+        out_path = render_dir / f"{author_key}_{variant}.txt"
         out_path.write_text("\n\n\n".join(chapters) + "\n", encoding="utf-8")
         out[variant] = {"path": str(out_path), "chapters": len(chapters)}
     return out

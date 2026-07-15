@@ -38,6 +38,10 @@ TSV 每行优先写 v2:`<0 基段序号><TAB><源文前缀 src_echo><TAB><中文
    mkdir -p $WS/src && cp <源 txt> $WS/src/
    make translate-user MODE=prepare PROVIDER=<p> SOURCE=$WS/src STORE=$WS/store JOBS_DIR=$WS/jobs
    ```
+   `make` 默认 `ENTITY_STORE=tasks/translation/data/entities`,prepare 会把该 creator 适用的人名/术语
+   **自动解析进 `job.context_pack.entities`**(openrouter 执行器拼成硬约束、agent 执行器读约束)——
+   **跨段/跨篇人名一致靠这个**,别再往 prompt 手写译名。库里没有的名,翻完用 `make extract-entities`
+   回填(见下)。要临时关闭传 `ENTITY_STORE=`(空)。
 2. **翻译**:读 `$WS/jobs/<work_id>.job.json` 的 `segments[]`,逐段译,写/追加 `$WS/results/<work_id>.zh.tsv`。
    - tags 段译成 `原词 / 中文`,保留 `[]` 和逗号;人名/术语遵 `job.context_pack`。
    - **译文不得残留任何假名——人名(みのり→实里 这类)与拟声词/语气词(むにゅ♡→软绵♡ 这类)同样必须译成中文**,不是"可留"项;唯一例外是 tags 段的「原词 / 中文」左半。

@@ -92,11 +92,11 @@ class PipelineIngestTest(unittest.TestCase):
             (rd / "200.zh.txt").write_text("---\ntitle: 乙\n\n\n乙译文\n", encoding="utf-8")
             res = pipeline_ingest.merge_author(rd, "53230930", ["200", "100"])
             self.assertEqual(2, res["bilingual"]["chapters"])
-            book = (rd / "53230930.bilingual.txt").read_text(encoding="utf-8")
+            book = (rd / "53230930_bilingual.txt").read_text(encoding="utf-8")
             self.assertTrue(book.startswith("第1章 甲\n"))   # 100 在前(标题取译文行)
             self.assertIn("第2章 乙", book)
             self.assertLess(book.index("第1章 甲"), book.index("第2章 乙"))
-            zh = (rd / "53230930.zh.txt").read_text(encoding="utf-8")
+            zh = (rd / "53230930_zh.txt").read_text(encoding="utf-8")
             self.assertIn("第1章 甲", zh); self.assertIn("甲译文", zh)
 
     def test_merge_ignores_stale_files_on_disk(self):
@@ -107,7 +107,7 @@ class PipelineIngestTest(unittest.TestCase):
             (rd / "999.zh.txt").write_text("---\ntitle: 旧\n\n\n遗留译文\n", encoding="utf-8")  # 上次遗留
             res = pipeline_ingest.merge_author(rd, "53230930", ["100"])  # 本次只渲染了 100
             self.assertEqual(1, res["zh"]["chapters"])
-            book = (rd / "53230930.zh.txt").read_text(encoding="utf-8")
+            book = (rd / "53230930_zh.txt").read_text(encoding="utf-8")
             self.assertIn("甲译文", book)
             self.assertNotIn("遗留译文", book)  # 遗留文件不入书
 
@@ -118,7 +118,7 @@ class PipelineIngestTest(unittest.TestCase):
             render_dir = tmp / "out"
             m = pipeline_ingest.ingest_directory("pixiv", src_dir, bil_dir, tmp / "store", render_dir)
             self.assertIn("bilingual", m["merged"])  # 合并书随批量产出
-            self.assertTrue((render_dir / f"{src_dir.name}.bilingual.txt").is_file())
+            self.assertTrue((render_dir / f"{src_dir.name}_bilingual.txt").is_file())
 
     def test_missing_bilingual_is_skipped_not_fatal(self):
         with tempfile.TemporaryDirectory() as t:

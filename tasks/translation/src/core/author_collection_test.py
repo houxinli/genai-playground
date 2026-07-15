@@ -38,7 +38,7 @@ class AuthorCollectionTest(unittest.TestCase):
             self.assertEqual([], res["missing"])
             self.assertEqual(2, res["chapters"]["zh"])
             self.assertEqual(2, res["chapters"]["bilingual"])
-            zh = Path(t) / "coll" / "作者X.zh.txt"
+            zh = Path(t) / "coll" / "作者X_zh.txt"
             self.assertTrue(zh.is_file())
             body = zh.read_text(encoding="utf-8")
             self.assertIn("第1章", body)
@@ -52,8 +52,8 @@ class AuthorCollectionTest(unittest.TestCase):
             gd = Path(t) / "gdrive"
             res = ac.build_collection("作者Y", "700000", workspaces_root=ws,
                                       out_dir=Path(t) / "coll", gdrive_dir=gd)
-            self.assertTrue((gd / "作者Y.zh.txt").is_file())
-            self.assertTrue((gd / "作者Y.bilingual.txt").is_file())
+            self.assertTrue((gd / "作者Y_zh.txt").is_file())
+            self.assertTrue((gd / "作者Y_bilingual.txt").is_file())
             self.assertEqual(4, len(res["gdrive"]))  # txt + epub × 2 variant
 
     def test_missing_rendered_reported(self):
@@ -95,7 +95,7 @@ class AuthorCollectionTest(unittest.TestCase):
             self.assertEqual(["700001", "700002"], res["sids"])
             self.assertEqual([], res["missing"])
             self.assertEqual(2, res["chapters"]["zh"])
-            self.assertTrue((Path(t) / "coll" / "作者P.zh.epub").is_file())
+            self.assertTrue((Path(t) / "coll" / "作者P_zh.epub").is_file())
 
     def test_out_dir_guard_rejects_workspaces_root_and_dirty_dirs(self):
         with tempfile.TemporaryDirectory() as t:
@@ -125,14 +125,14 @@ class AuthorCollectionTest(unittest.TestCase):
             res = ac.build_collection("作者E", "700000", workspaces_root=ws,
                                       out_dir=Path(t) / "coll", gdrive_dir=gd)
             self.assertEqual({"zh": 2, "bilingual": 2}, res["epub_chapters"])
-            epub = Path(t) / "coll" / "作者E.zh.epub"
+            epub = Path(t) / "coll" / "作者E_zh.epub"
             self.assertTrue(epub.is_file())
             with zipfile.ZipFile(epub) as z:
                 nav = z.read("OEBPS/nav.xhtml").decode("utf-8")
                 self.assertIn("第1章 第一篇", nav)
                 self.assertIn("第2章 第二篇", nav)
-            self.assertTrue((gd / "作者E.zh.epub").is_file())
-            self.assertTrue((gd / "作者E.bilingual.epub").is_file())
+            self.assertTrue((gd / "作者E_zh.epub").is_file())
+            self.assertTrue((gd / "作者E_bilingual.epub").is_file())
 
     def _make_ja_work(self, ws_root: Path, sid: str, provider="pixiv", creator="700000"):
         refs = ws_root / f"{provider}-{sid}" / "store" / "refs" / provider / creator
@@ -158,7 +158,7 @@ class AuthorCollectionTest(unittest.TestCase):
             self._make_ja_work(ws, "700001")
             ac.build_collection("作者F", "700000", workspaces_root=ws,
                                 out_dir=Path(t) / "coll", furigana=True)
-            bil = (Path(t) / "coll" / "作者F.bilingual.txt").read_text(encoding="utf-8")
+            bil = (Path(t) / "coll" / "作者F_bilingual.txt").read_text(encoding="utf-8")
             self.assertIn("(", bil)              # body 源文汉字被注音
             self.assertIn("今天是晴天", bil)      # 中文译文行原样
             self.assertIn("喜欢巨乳", bil)        # 中文译文行原样(不被注音)
@@ -177,7 +177,7 @@ class AuthorCollectionTest(unittest.TestCase):
             self._make_ja_work(ws, "700001")
             ac.build_collection("作者H", "700000", workspaces_root=ws,
                                 out_dir=Path(t) / "coll", furigana=True)
-            bil = (Path(t) / "coll" / "作者H.bilingual.txt").read_text(encoding="utf-8")
+            bil = (Path(t) / "coll" / "作者H_bilingual.txt").read_text(encoding="utf-8")
             self.assertIn("パイズリ / 乳交", bil)   # tags 行原样,中文侧未被日文读音污染
             self.assertNotIn("乳(ちち)交", bil)
             self.assertNotIn("巨乳(きょにゅう) / 巨乳(きょにゅう)", bil)
@@ -188,7 +188,7 @@ class AuthorCollectionTest(unittest.TestCase):
             self._make_ja_work(ws, "700001")
             ac.build_collection("作者G", "700000", workspaces_root=ws,
                                 out_dir=Path(t) / "coll", furigana=False)
-            bil = (Path(t) / "coll" / "作者G.bilingual.txt").read_text(encoding="utf-8")
+            bil = (Path(t) / "coll" / "作者G_bilingual.txt").read_text(encoding="utf-8")
             self.assertIn("今日は晴れです", bil)  # 源文保持原始日文,无注音
 
 
