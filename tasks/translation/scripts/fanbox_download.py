@@ -37,11 +37,12 @@ except Exception as exc:  # pragma: no cover
 
 API_BASE = "https://api.fanbox.cc"
 DEFAULT_HEADERS = {
-    "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
     "Accept": "application/json",
     "Accept-Language": "ja-JP",
-    "Origin": "https://app-api.pixiv.net",
-    "Referer": "https://app-api.pixiv.net/",
+    # api.fanbox.cc 校验 Origin/Referer 必须是 fanbox.cc(此前误设 app-api.pixiv.net → 403 general_error)。
+    "Origin": "https://www.fanbox.cc",
+    "Referer": "https://www.fanbox.cc/",
 }
 
 
@@ -154,6 +155,7 @@ def iterate_creator_posts(
     logger: logging.Logger,
 ) -> Iterable[Dict]:
     session.headers["Referer"] = f"https://{creator_id}.fanbox.cc/"
+    session.headers["Origin"] = f"https://{creator_id}.fanbox.cc"
     fetched = 0
     seen_post_ids = set()
 
