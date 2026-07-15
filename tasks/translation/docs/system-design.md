@@ -1559,6 +1559,15 @@ full run 必须覆盖全篇；patch run 只覆盖用户/QA 指定的少量 segme
 (title/caption/tags 均中日混排在此)②body 非空行严格交替 源文/译文,只注源文槽 ③源文槽无假名则跳过
 (防译文多行致奇偶漂移误注中文)。因此 front-matter 的日文 title/tags 不注音,只 body 源文注音。
 
+**作者级整本命名(2026-07-14 用户约定)**:`merge_author`/`author_collection` 输出用 `<author>_zh.txt`、
+`<author>_bilingual.txt`、`<author>_zh.epub`、`<author>_bilingual.epub`(下划线,非 `.zh.`),与逐篇
+`{sid}.{var}.txt` 区分、避免"双点扩展名"歧义。
+
+**实体库默认接线(2026-07-14)**:`make translate-user` 默认 `ENTITY_STORE=tasks/translation/data/entities`,
+prepare 把该 creator 适用人名/术语解析进 `context_pack.entities`;`openrouter_executor._constraints_block`
+拼成「人名/术语硬约束」注入 system prompt(agent 执行器读约束)。**跨段/跨篇人名一致靠此**——此前 skill 命令
+未传 ENTITY_STORE 导致 context_pack.entities 空、API 批处理各段独立音译(同名多写法);现默认开,传空串可关。
+
 **空候选不可选(2026-07-13)**:reviewable 放宽(无 incumbent 的唯一候选先发布供 review)**不适用于
 空译文候选**——选空文本=发布带洞版本。空行(拒译/待填)→ 该段无 selection → 整篇 unresolved 阻断建版,
 维持「完全无译文的段阻断建版」不变量(实测:填空 TSV 的空行曾被放宽路径放行,212 篇带洞发布后回滚)。

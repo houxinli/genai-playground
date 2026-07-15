@@ -63,7 +63,7 @@ class TranslateUserTest(unittest.TestCase):
             self.assertIsNotNone(store.current_ref(doc))
             zh = (render_dir / "700001.zh.txt").read_text(encoding="utf-8")
             self.assertIn("早上好", zh)            # 译文进了渲染
-            book = (render_dir / f"{src_dir.name}.zh.txt").read_text(encoding="utf-8")
+            book = (render_dir / f"{src_dir.name}_zh.txt").read_text(encoding="utf-8")
             self.assertIn("第1章", book)            # 合并整本
             self.assertIn("早上好", book)
 
@@ -135,7 +135,7 @@ class TranslateUserTest(unittest.TestCase):
 
             m = tu.finish_user("pixiv", src_dir, store_root, render_dir, results_dir, bilingual_dir=bil_dir)
             self.assertEqual(1, m["summary"]["published"])
-            book = (render_dir / f"{src_dir.name}.zh.txt").read_text(encoding="utf-8")
+            book = (render_dir / f"{src_dir.name}_zh.txt").read_text(encoding="utf-8")
             self.assertIn("早上好", book)
 
     def test_verify_true_after_finish_false_on_prepare_only(self):

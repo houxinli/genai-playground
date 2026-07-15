@@ -131,7 +131,7 @@ def build_collection(
     files: List[str] = []
     gdrive_files: List[str] = []
     for var in VARIANTS:
-        for name in (f"{author_name}.{var}.txt", f"{author_name}.{var}.epub"):
+        for name in (f"{author_name}_{var}.txt", f"{author_name}_{var}.epub"):
             fp = out_dir / name
             if fp.is_file():
                 files.append(str(fp))
@@ -165,7 +165,7 @@ def _build_epubs(out_dir: Path, author_name: str, sids: List[str]) -> Dict[str, 
             title = _chapter_title(content) or sid
             chapters.append((f"第{len(chapters) + 1}章 {title}", content))
         if chapters:
-            build_epub(out_dir / f"{author_name}.{var}.epub", author_name, author_name, chapters)
+            build_epub(out_dir / f"{author_name}_{var}.epub", author_name, author_name, chapters)
             out[var] = len(chapters)
     return out
 
