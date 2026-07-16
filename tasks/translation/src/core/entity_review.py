@@ -26,6 +26,7 @@ except ImportError:  # core/ 在 sys.path 上
     from entity_store import EntityStore, _pick_winner, _reachable_scopes, build_entity
 
 _FALLBACK_CREATED_AT = "1970-01-01T00:00:00Z"
+_ENTITY_TYPES = {"person", "org", "place", "term"}
 
 
 def review_id_for(mention: str, document_id: str, segment_id: Optional[str], suggested_target: Optional[str]) -> str:
@@ -110,6 +111,8 @@ def _validate_proposal(p: Any) -> None:
     readings = p.get("readings")
     if readings is not None and not (isinstance(readings, list) and all(isinstance(r, str) for r in readings)):
         raise ValueError(f"proposal.readings 必须是字符串数组: {p!r}")
+    if p.get("type", "person") not in _ENTITY_TYPES:
+        raise ValueError(f"proposal.type 必须是 person/org/place/term: {p!r}")
 
 
 def _creator_scope(scope_ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -179,6 +182,7 @@ def import_proposals(
                 new_entity = build_entity(
                     _creator_scope(scope_ctx), mention, suggested,
                     readings=(p.get("readings") or None),  # LLM 给的读音落进候选 → 喂读音匹配
+                    type=p.get("type", "person"),
                     authority="automatic", status="candidate", updated_at=created_at,
                 )
                 candidate_entity_id = new_entity["entity_id"]

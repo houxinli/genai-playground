@@ -229,6 +229,57 @@ class TranslateUserTest(unittest.TestCase):
             tu.translate_user("pixiv", src_dir, tmp / "s", tmp / "out", spy, entity_store=es_root)
             self.assertEqual(["おはよう"], [e["source"] for e in seen["entities"]])
 
+    def test_auto_mode_normalizes_harvested_variant_and_enqueues_review(self):
+        try:
+            from .entity_review import ReviewQueue
+            from .entity_store import EntityStore, resolve_entities
+        except ImportError:
+            from entity_review import ReviewQueue
+            from entity_store import EntityStore, resolve_entities
+
+        translated = {**TR, "「おはよう」": "「早安」"}
+
+        def extract(_messages):
+            return (
+                '[{"source":"おはよう","target":"早上好","type":"person",'
+                '"confidence":0.9,"variants":["早安"]}]'
+            )
+
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"
+            src_dir.mkdir()
+            shutil.copy(SRC, src_dir / "700001.txt")
+            entity_root = tmp / "entities"
+            queue_root = tmp / "entity-reviews"
+            manifest = tu.translate_user(
+                "pixiv",
+                src_dir,
+                tmp / "store",
+                tmp / "out",
+                _mk(translated),
+                entity_store=entity_root,
+                entity_review_queue=queue_root,
+                extract_fn=extract,
+            )
+            document = manifest["documents"][0]
+            self.assertTrue(document["published"], document)
+            self.assertEqual(1, document["entity_harvest_normalized_segments"])
+            self.assertEqual(1, document["entity_reviews_enqueued"])
+            rendered = (tmp / "out" / "700001.zh.txt").read_text(encoding="utf-8")
+            self.assertIn("早上好", rendered)
+            self.assertNotIn("早安", rendered)
+            self.assertEqual(1, len(ReviewQueue(queue_root).list_pending()))
+            store = EntityStore(entity_root)
+            candidate = store.list_scope({"level": "creator", "key": "pixiv:700000"})[0]
+            self.assertEqual("candidate", candidate["status"])
+            scope_context = {
+                "provider": "pixiv",
+                "creator_id": "700000",
+                "document_id": "pixiv:700000:700001",
+            }
+            self.assertEqual([], resolve_entities(scope_context, "おはよう", store))
+
     def test_entity_store_wired_into_prepare_and_finish(self):
         # gh-149/#83:实体库 → prepare 的 context_pack.entities;finish 必须同库(约束入 task 身份),
         # 中途改库 → digest 不符 → import 按 stale 隔离(协议行为)。

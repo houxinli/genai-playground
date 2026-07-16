@@ -165,6 +165,8 @@ def resolve_entities(
     by_source: Dict[str, List[Dict[str, Any]]] = {}
     for scope in _reachable_scopes(scope_ctx):
         for rec in store.list_scope(scope):
+            if rec.get("status") == "candidate":
+                continue
             by_source.setdefault(rec["source"], []).append(rec)
 
     out: List[Dict[str, Any]] = []

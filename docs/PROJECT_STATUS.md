@@ -3,7 +3,7 @@
 > 当前项目状态、组件健康度和开发计划的真相源。
 > 新的 agent / 新的对话优先读这份文档，再进入具体子系统文档。
 
-**最后更新**: 2026-07-13
+**最后更新**: 2026-07-14
 
 ## Start Here
 
@@ -72,7 +72,7 @@ job(#83 P1b-c)。完整顺序以 system-design §20.2 为准。
 | 修复流程 | 可用 | 标准 repair 已支持经由 `src/translate.py --repair-existing` 进入主流水线；可注入人名规则，也可读取 QA 报告优先修复问题行 | `tasks/translation/src/translate.py` |
 | 打包/提取中文 | 可用 | 已补 `.meta.json` / `index.json` 元数据回退 | `tasks/translation/src/scripts/extract_chinese.py` |
 | 质量检测 | 可用 | 逐段规则 QC/QA gate(双语配对、假名残留、拒绝模板、失败标记、人名坏别名)；document-level QA(block-paste 对齐审计,`block_paste_run` error 阻断发布)；TSV v2 `src_echo` 逐行源文校验；空译文候选一律阻断建版(不产带缺口版本,#153) | `qa_gate.py`, `document_qa.py`, `result_assemble.py` |
-| 人名一致性 | 通道已通,库待填充 | 实体库已接入 agent 主路线(prepare/finish 传 `ENTITY_STORE=`,约束折入 task 身份,#151);但库当前为空,已定人名(桃/沙耶香/花南/遥/奈奈/胡桃/卡露拉)待存入。旧路线人工规则优先、自动预读仍可用 | `translate_user.py`, `entity_store.py`, `translator.py` |
+| 人名一致性 | 通道已通,库待审核/填充 | 实体库已接入 prepare/finish 与 OpenRouter auto 路线；auto 每篇发布后用 LLM 收割专名、按明确 variants 归一本篇 candidate，并把跨篇提案送入 review。`candidate` 不进入 Context Pack，人工 approve/locked 后才约束后续篇；已定人名仍待播种 | `translate_user.py`, `entity_harvest.py`, `entity_store.py` |
 | 成品发布(publish) | 可用 | finish 从 TSV 组装候选→评估→择优→版本→发布→渲染 zh/bilingual;遇已有 ref 带血缘 republish 推进(#145);author-collection 按作者名合并整本 + 生成显式 TOC 的 EPUB(stdlib,解决阅读器猜章节),可选复制 GDrive | `translate_user.py`, `author_collection.py`, `epub_build.py` |
 | 旧流水线迁移 | 进行中 | 6 作者 311/371 篇迁入 per-creator workspace(源文锚点对齐);剩余按小缺口补译/警告复核/乱档重译/缺源重下四类处理 | `pipeline_ingest.py`, `legacy_import.py` |
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
@@ -89,10 +89,10 @@ job(#83 P1b-c)。完整顺序以 system-design §20.2 为准。
 | 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线（v2 含打包产物与截断检查）；1048 单元中 894 个含 error（v2.1 打包按章拆分），坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
 | 多候选与版本 | 已完成保守择优(#50) | `version_select.py`:recommend_selection 判定表 + build_document_version v2 + render_version 渲染 bilingual;硬规则只做 gate,未证明严格改善则保留 incumbent。current ref 发布(原子 CAS,ArtifactStore.publish)+ 端到端 slice 已贯通;自动 repair/Annotation 仍未做 | `tasks/translation/src/core/version_select.py` / Issue #50 |
 | 翻译 Agent harness | 执行器就绪 | 统一 `translate` skill + TSV 中间产物：Agent/API/人工只写 `<source_id>.zh.tsv`，`result.json` 由 harness 从 job+TSV 组装；支持 full run 与少量片段 patch run 语义。OpenRouter Grok 执行器已落地但仍需进一步收敛到同一 TSV 产物；context adapter(review/repair)待实现 | `.agents/skills/translate/SKILL.md` / `tasks/translation/src/core/result_assemble.py` |
-| 端到端翻译(translate-user) | 可用(#106) | `translate_user.py`/`make translate-user`:一个作者 source → 逐篇翻译(executor 可插拔,openrouter=grok-4.3 全自动)→ import → 保守择优(legacy incumbent vs 新译) → 发布 → 渲染 → 合并整本;逐篇容错+LIMIT 控成本。agent 路线已补(#121,prepare/finish)，`MODE=finish` 可从 TSV 自动组装并校准缺失/partial `result.json`(#136)，结构完整时 QA fail 仍发布/渲染为 reviewable version 并保留 `review_required`，`MODE=verify` 独立核对落盘产物(result/入库/发布/渲染)，不信 agent 自述、防谎报完成(#129) | `tasks/translation/src/core/translate_user.py` |
+| 端到端翻译(translate-user) | 可用(#106) | `translate_user.py`/`make translate-user`:一个作者 source → 逐篇翻译(executor 可插拔,openrouter=grok-4.3 全自动)→ import → 保守择优 → 发布/渲染/合并；OpenRouter auto 可在每篇发布后额外收割实体到 review queue。agent prepare/finish 支持 TSV 自动组装与 stale 校验，`MODE=verify` 独立核对 result/入库/发布/渲染 | `tasks/translation/src/core/translate_user.py` |
 | 端到端批量编排(新架构) | 可用(#96) | `pipeline_ingest.py`/`make ingest-user`:一个用户的 source+bilingual 端到端跑进持久 store(revision→legacy candidates→eval→保守择优→version→publish→render bilingual+zh),逐文档容错 + manifest;按作者合并整本(merge_author:第N章 标题,bilingual/zh 各一,#102)。实跑 pixiv 53230930:8 篇,2 已发布、6 因 legacy 译文不全 incomplete | `tasks/translation/src/core/pipeline_ingest.py` |
 | 用户句级反馈 | 未实现 | 尚不能持久化“某句话有问题”并触发定向修复 | 目标见系统设计 |
-| 跨文本知识库 | 部分完成(#83 P1b-1/P1b-2a) | scoped 实体库 + resolver(entity_store.py)接入 Context Pack;Entity Linking 闸门 + review 队列(entity_review.py:抽取外部→链接→candidate→approve 晋升)。自动抽取器/模糊匹配/规则影响分析(P1b-2b)、instruction-pack(P1c)待做 | `entity_store.py` / `entity_review.py` / §7–8 / Issue #83 |
+| 跨文本知识库 | P1b 主链完成 | scoped 实体库 + resolver 接入 Context Pack；启发式/agent/翻译后 LLM 抽取均经 Entity Linking、模糊/读音匹配与 review 队列，规则影响分析可定位旧译名。instruction-pack/repair context 仍待做 | `entity_store.py` / `entity_review.py` / `entity_harvest.py` / §7–8 |
 | 并发调度 | 缺口明显 | 当前仍主要依赖手工并行，没有内建 worker 调度器 | `tasks/translation/src/core/pipeline.py` |
 | 测试 | 基线健康 | pytest 统跑全绿；基线数字唯一来源在 `AGENTS.md` §2，CI `docs-drift` 强制一致（unittest discover 会漏 pytest 风格用例） | `tasks/translation/src/**/*_test.py` |
 | Sunday Movies | 维护模式 | 仓库中保留，但当前不作为近期规划重点 | `tasks/sunday-movies/` |

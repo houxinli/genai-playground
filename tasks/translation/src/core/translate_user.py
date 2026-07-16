@@ -14,11 +14,12 @@ import argparse
 import json
 import os
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 try:
-    from . import candidate_eval, document_qa, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
+    from . import candidate_eval, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from .artifact_store import ArtifactStore
     from .pipeline_ingest import merge_author
     from .renderer import render_bilingual, render_zh
@@ -26,7 +27,7 @@ try:
     from .task_export import export_job, ingest_revision, resolve_entities_for_revision
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core import candidate_eval, document_qa, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
+    from core import candidate_eval, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from core.artifact_store import ArtifactStore
     from core.pipeline_ingest import merge_author
     from core.renderer import render_bilingual, render_zh
@@ -49,6 +50,20 @@ def make_translate_fn(executor: str, model: Optional[str] = None) -> TranslateFn
     if executor == "openrouter":
         return _openrouter_fn(model or ox.DEFAULT_MODEL)
     raise ValueError(f"未知/不可自动执行的 executor: {executor!r}(cursor/claude 走 skill 薄壳)")
+
+
+def make_extract_fn(
+    executor: str,
+    model: Optional[str] = None,
+) -> Optional[Callable[[List[Dict[str, str]]], str]]:
+    """为 OpenRouter auto 路线构造可选的翻译后实体抽取调用。"""
+    if executor == "openrouter":
+        key = os.environ.get("OPENROUTER_API_KEY")
+        if not key:
+            return None
+        m = model or ox.DEFAULT_MODEL
+        return lambda messages: ox.openrouter_call(messages, m, key)
+    return None
 
 
 def _revision_bundle_legacy(provider, source_path, store, bilingual_dir, entity_store=None):
@@ -81,6 +96,7 @@ def prepare_document(provider, source_path, store, bilingual_dir=None, entity_st
 
 def finish_document(
     provider, source_path, store, result, render_dir=None, bilingual_dir=None, entity_store=None,
+    entity_review_queue=None, extract_fn=None,
 ) -> Dict[str, Any]:
     """agent 路线第二步:吃 executor 产的 result → import→评估→保守择优→version→publish→render。"""
     source_path = Path(source_path)
@@ -88,6 +104,29 @@ def finish_document(
     doc = rev["document_id"]
     report: Dict[str, Any] = {"document_id": doc, "segments": len(rev["segments"]), "status": "ok"}
     seg_ids = [s["segment_id"] for s in rev["segments"]]
+
+    harvested_entities: List[Dict[str, Any]] = []
+    candidates = result.get("candidates", [])
+    unique_segments = {candidate.get("segment_id") for candidate in candidates}
+    if extract_fn is not None and entity_store is not None and entity_review_queue is not None and candidates:
+        if len(unique_segments) != len(candidates):
+            report["entity_harvest_skipped"] = "multiple_candidates_per_segment"
+        else:
+            result = deepcopy(result)
+            translations = {candidate["segment_id"]: candidate.get("text", "") for candidate in result["candidates"]}
+            harvested_entities = entity_harvest.extract_entities_via_llm(rev, translations, extract_fn)
+            if harvested_entities:
+                harvested_entities = entity_harvest.enforce_context_targets(
+                    harvested_entities, bundle.get("context_pack", {}).get("entities", [])
+                )
+                normalized = entity_harvest.apply_entity_variants(rev["segments"], translations, harvested_entities)
+                for candidate in result["candidates"]:
+                    candidate["text"] = translations[candidate["segment_id"]]
+                report["entity_harvest"] = {
+                    entity["source"]: entity["target"] for entity in harvested_entities
+                }
+                report["entity_harvest_normalized_segments"] = normalized
+
     rep = import_result(bundle["task"], result, store)
     if rep["quarantined"]:
         report["status"] = "translate_quarantined"
@@ -194,16 +233,28 @@ def finish_document(
         (render_dir / f"{sid}.bilingual.txt").write_text(render_bilingual(rev, source_text, translations), encoding="utf-8")
         (render_dir / f"{sid}.zh.txt").write_text(render_zh(rev, source_text, translations), encoding="utf-8")
         report["rendered"] = True
+
+    if harvested_entities:
+        try:
+            reviews = entity_harvest.enqueue_entity_reviews(
+                rev, harvested_entities, Path(entity_store), Path(entity_review_queue)
+            )
+            report["entity_reviews_enqueued"] = len(reviews)
+        except Exception as exc:
+            report["entity_harvest_error"] = f"{type(exc).__name__}: {exc}"
     return report
 
 
 def translate_document(
     provider, source_path, store, translate_fn, render_dir=None, bilingual_dir=None, entity_store=None,
+    entity_review_queue=None, extract_fn=None,
 ) -> Dict[str, Any]:
-    """自动路线单篇:prepare(导出 bundle)→ translate_fn 翻译 → finish(发布渲染)。"""
+    """自动路线单篇：prepare → translate_fn → finish，可选收割实体提案。"""
     prep = prepare_document(provider, source_path, store, bilingual_dir, entity_store=entity_store)
     result = translate_fn(prep["bundle"])
-    return finish_document(provider, source_path, store, result, render_dir, bilingual_dir, entity_store=entity_store)
+    return finish_document(provider, source_path, store, result, render_dir, bilingual_dir,
+                           entity_store=entity_store, entity_review_queue=entity_review_queue,
+                           extract_fn=extract_fn)
 
 
 def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=None, entity_store=None, limit=None) -> Dict[str, Any]:
@@ -412,9 +463,11 @@ def translate_user(
     *,
     bilingual_dir: Optional[Path] = None,
     entity_store: Optional[Path] = None,
+    entity_review_queue: Optional[Path] = None,
     limit: Optional[int] = None,
+    extract_fn=None,
 ) -> Dict[str, Any]:
-    """整作者:逐篇翻译(独立容错)→ 合并整本。limit 限篇控成本。"""
+    """整作者逐篇翻译并合并整本；auto 路线可在发布后把 LLM 实体提案送入 review。"""
     source_dir, store_root = Path(source_dir), Path(store_root)
     store = ArtifactStore(store_root)
     sources = sorted(source_dir.glob("*.txt"))
@@ -423,7 +476,11 @@ def translate_user(
     docs: List[Dict[str, Any]] = []
     for src in sources:
         try:
-            docs.append(translate_document(provider, src, store, translate_fn, render_dir, bilingual_dir, entity_store=entity_store))
+            docs.append(translate_document(
+                provider, src, store, translate_fn, render_dir, bilingual_dir,
+                entity_store=entity_store, entity_review_queue=entity_review_queue,
+                extract_fn=extract_fn,
+            ))
         except Exception as exc:  # 逐篇容错
             docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
     rendered_sids = [d["document_id"].rsplit(":", 1)[-1] for d in docs if d.get("rendered")]
@@ -455,6 +512,8 @@ def main() -> int:
     parser.add_argument("--jobs-dir", type=Path, default=None, help="mode=prepare 的 bundle 输出目录")
     parser.add_argument("--entity-store", type=Path, default=None,
                         help="可选实体库根目录;prepare 与 finish 必须传同一个(实体约束入 task 身份)")
+    parser.add_argument("--entity-review-queue", type=Path, default=None,
+                        help="auto 模式翻译后 LLM 实体提案的 review 队列根目录")
     parser.add_argument("--results-dir", type=Path, default=None, help="mode=finish 的 agent result 目录")
     parser.add_argument("--bilingual-dir", type=Path, default=None, help="可选:已有 legacy 译文作 incumbent")
     parser.add_argument("--executor", default="openrouter", help="mode=auto 的执行器(openrouter)")
@@ -493,9 +552,14 @@ def main() -> int:
         return 0
 
     translate_fn = make_translate_fn(args.executor, args.model)
+    extract_fn = None
+    if args.entity_store is not None and args.entity_review_queue is not None:
+        extract_fn = make_extract_fn(args.executor, args.model)
     manifest = translate_user(
         args.provider, args.source_dir, args.store, args.render_dir, translate_fn,
-        bilingual_dir=args.bilingual_dir, entity_store=args.entity_store, limit=args.limit,
+        bilingual_dir=args.bilingual_dir, entity_store=args.entity_store,
+        entity_review_queue=args.entity_review_queue, limit=args.limit,
+        extract_fn=extract_fn,
     )
     print(json.dumps(manifest["summary"], ensure_ascii=False))
     return 0
