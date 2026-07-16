@@ -693,7 +693,8 @@ series:B/entity:character_07 -> 由纪
   写入校验 schema + `entity_id==hash(scope+source)` + 字段 fail-fast。
 - **resolve_entities(scope_ctx, text, store)**:展开可达 scope 链(global→…→document),按
   **scope 特异性优先、`locked` 不被更具体作用域里非 locked/非 manual 记录覆盖**选胜出者;只注入
-  source/alias 在文档源文出现的实体(§7.1「只注相关」),产出 §7.1 Context Pack 的 entity 约束。
+  source/alias 在文档源文出现的 approved/locked 实体(§7.1「只注相关」),产出 §7.1 Context Pack 的
+  entity 约束；`candidate` 在人工审核前不参与解析，避免 review 队列里的未决提案污染后续翻译。
 - **播种**:`entity_store.py` CLI 从**人工 curated 规则**(`源=译名|坏译` 或 JSON,`authority=manual`)
   建实体;**不导入自动 namefix 报告**(实测是垃圾,正是 #61 不可信根源)。
 
@@ -748,6 +749,16 @@ entity linking 证据应保存：
 `{mention, readings, suggested_target, confidence}` → `import_extraction_result` 喂链接闸门(作用域取自
 document_id;LLM 给的 readings 透传进新建候选 → 喂读音匹配)。这是 `extract_name_glossary`(#61) 的正确版:
 产物进**实体库**(有作用域/经 review/可锁定),而非塞进每次 prompt。`make extract-job` / `make import-extraction`。
+
+**已落地(2026-07-14,翻译后 LLM 收割)**:`entity_harvest.py` 接入 `translate-user` 的 OpenRouter auto 路线：
+- 每篇翻译完成后额外一次 LLM 调用读取正文源/译对照，产 `{source,target,type,confidence,variants}`；抽取失败
+  不阻断翻译。若同一 source 返回冲突 target，则整项丢弃；源文不存在的幻觉提案不入队。
+- 明确 `variants` 只归一本篇 Result 文本，归一后的文本仍按 Result → Candidate → QA → selection 建版，
+  不直接改历史版本；已有 Context Pack target 永远优先，本轮 LLM 冲突建议只作为待替换 variant。
+- 仅在文档成功发布后把提案交给 `entity_review.import_proposals`；新实体为 creator-scope
+  `automatic/candidate + pending review`，不会进入后续 Context Pack，须人工 approve/locked 才生效。
+- `make translate-user` 默认 review 根目录为 `tasks/translation/data/entity-reviews`；传空
+  `ENTITY_REVIEW_QUEUE=` 可关闭这次额外调用。agent prepare/finish 路线继续使用既有独立抽取 skill，不自动二次调用。
 
 **已落地(2026-06-26,#83 §8.3 规则影响分析)**:`rule_impact.py` / `make rule-impact` 扫每个文档的
 current ref → DocumentVersion → 选中候选译文,**只读**地找出含旧译名(stale_text)的已发布 segment
@@ -1567,6 +1578,10 @@ full run 必须覆盖全篇；patch run 只覆盖用户/QA 指定的少量 segme
 prepare 把该 creator 适用人名/术语解析进 `context_pack.entities`;`openrouter_executor._constraints_block`
 拼成「人名/术语硬约束」注入 system prompt(agent 执行器读约束)。**跨段/跨篇人名一致靠此**——此前 skill 命令
 未传 ENTITY_STORE 导致 context_pack.entities 空、API 批处理各段独立音译(同名多写法);现默认开,传空串可关。
+
+**OpenRouter 翻译后实体收割(2026-07-14)**:`make translate-user MODE=auto` 同时默认
+`ENTITY_REVIEW_QUEUE=tasks/translation/data/entity-reviews`，每篇发布后额外一次 LLM 调用；本篇 variants 归一
+仍生成正常 Candidate，跨篇实体只进 pending review。传 `ENTITY_REVIEW_QUEUE=` 可禁用额外调用和费用。
 
 **空候选不可选(2026-07-13)**:reviewable 放宽(无 incumbent 的唯一候选先发布供 review)**不适用于
 空译文候选**——选空文本=发布带洞版本。空行(拒译/待填)→ 该段无 selection → 整篇 unresolved 阻断建版,

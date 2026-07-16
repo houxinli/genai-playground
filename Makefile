@@ -298,10 +298,12 @@ seed-entities:
 # 用法: make translate-user PROVIDER=pixiv SOURCE=data/pixiv/18330282 STORE=... RENDER=... [EXECUTOR=openrouter] [PRODUCER=cursor-grok] [LIMIT=1] [BILINGUAL=...] [MODEL=x-ai/grok-4.3]
 # ENTITY_STORE 默认接实体库(人名/术语硬约束自动注入 context_pack,executor 逐段遵守 → 跨段/跨篇一致)。
 # 传 ENTITY_STORE= 空串可关闭。库不存在时 resolve_entities 返回空,无副作用。
+# auto/OpenRouter 每篇发布后额外做一次实体收割,提案进入 ENTITY_REVIEW_QUEUE,不自动晋升。
 ENTITY_STORE ?= tasks/translation/data/entities
+ENTITY_REVIEW_QUEUE ?= tasks/translation/data/entity-reviews
 translate-user:
 	@test -n "$(PROVIDER)" && test -n "$(SOURCE)" && test -n "$(STORE)" || { echo "translate-user 需要 PROVIDER= SOURCE= STORE="; exit 2; }
-	$(PY) tasks/translation/src/core/translate_user.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --store "$(STORE)" $(if $(MODE),--mode "$(MODE)") $(if $(RENDER),--render-dir "$(RENDER)") $(if $(JOBS_DIR),--jobs-dir "$(JOBS_DIR)") $(if $(RESULTS_DIR),--results-dir "$(RESULTS_DIR)") $(if $(BILINGUAL),--bilingual-dir "$(BILINGUAL)") $(if $(ENTITY_STORE),--entity-store "$(ENTITY_STORE)") $(if $(EXECUTOR),--executor "$(EXECUTOR)") $(if $(PRODUCER),--producer "$(PRODUCER)") $(if $(MODEL),--model "$(MODEL)") $(if $(LIMIT),--limit $(LIMIT))
+	$(PY) tasks/translation/src/core/translate_user.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --store "$(STORE)" $(if $(MODE),--mode "$(MODE)") $(if $(RENDER),--render-dir "$(RENDER)") $(if $(JOBS_DIR),--jobs-dir "$(JOBS_DIR)") $(if $(RESULTS_DIR),--results-dir "$(RESULTS_DIR)") $(if $(BILINGUAL),--bilingual-dir "$(BILINGUAL)") $(if $(ENTITY_STORE),--entity-store "$(ENTITY_STORE)") $(if $(ENTITY_REVIEW_QUEUE),--entity-review-queue "$(ENTITY_REVIEW_QUEUE)") $(if $(EXECUTOR),--executor "$(EXECUTOR)") $(if $(PRODUCER),--producer "$(PRODUCER)") $(if $(MODEL),--model "$(MODEL)") $(if $(LIMIT),--limit $(LIMIT))
 
 # 紧凑译文 → result.json(agent 只写 <id>.zh.tsv:段号<TAB>译文,harness 回填身份)。
 # 用法: make translate-assemble JOB=jobs/<id>.job.json TRANSLATIONS=results/<id>.zh.tsv OUT=results/<id>.result.json [PRODUCER=cursor-grok]

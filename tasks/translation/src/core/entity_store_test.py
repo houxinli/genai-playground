@@ -130,6 +130,12 @@ class ResolveTest(unittest.TestCase):
         out = resolve_entities(PIXIV_CTX, "今日はユキと出かけた。", store)
         self.assertEqual(["ユキ"], [c["source"] for c in out])  # マホ 未出现 → 不注入
 
+    def test_candidate_entity_is_not_injected_before_review(self):
+        store = self._store(
+            _entity("creator", "pixiv:50235390", "ユキ", "小雪", authority="automatic", status="candidate")
+        )
+        self.assertEqual([], resolve_entities(PIXIV_CTX, "ユキ", store))
+
     def test_alias_presence_triggers_injection_and_constraint_shape(self):
         store = self._store(_entity("creator", "pixiv:50235390", "ユキ", "小雪",
                                      aliases=["ゆきちゃん"], forbidden=["雪"]))

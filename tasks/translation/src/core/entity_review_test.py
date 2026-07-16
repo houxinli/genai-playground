@@ -108,6 +108,14 @@ class DecisionTreeTest(unittest.TestCase):
             self.assertEqual("automatic", ent[0]["authority"])
             self.assertEqual(ent[0]["entity_id"], out[0]["candidate_entity_id"])
 
+    def test_unmatched_preserves_valid_entity_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            h = Harness(tmp)
+            proposal = _proposal("魔法学院", target="魔法学院", confidence=0.9)
+            proposal["type"] = "org"
+            h.imp([proposal])
+            self.assertEqual("org", h.estore.list_scope(CREATOR)[0]["type"])
+
     def test_unmatched_without_target_needs_target(self):
         with tempfile.TemporaryDirectory() as tmp:
             h = Harness(tmp)
