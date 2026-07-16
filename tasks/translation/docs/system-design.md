@@ -1581,6 +1581,11 @@ segment 只有一个物理行,因此 `multiline_translation` 和上/下文、`[t
 `<author>_bilingual.txt`、`<author>_zh.epub`、`<author>_bilingual.epub`(下划线,非 `.zh.`),与逐篇
 `{sid}.{var}.txt` 区分、避免"双点扩展名"歧义。
 
+**发布格式控制 + EPUB 书名(2026-07-16 用户约定)**:`build_collection(formats=...)` 控制发布哪些整本格式,
+**默认 `('epub',)`**(整本 txt 不再默认发布/同步 GDrive;`--formats txt,epub` 可加回)。manifest 记 `formats`,
+`verify_collection` 据此核对(旧 manifest 无字段→默认双格式,向后兼容)。EPUB **书名含 variant**
+(`<author>·中文` / `<author>·日中对照`):此前 zh/bilingual 两本 title 都是作者名,阅读器(微信读书)区分不开。
+
 **作者合集完整性/新鲜度闸门(2026-07-14)**:`author_collection` 构建前必须确认每个 current ref 同时有
 zh/bilingual 两种 rendered；缺任一输入即失败并保留旧合集,不再输出“少几章但命令成功”的部分成品。新整本先在
 临时目录构建并自校验,成功后才替换目标目录；`collection_manifest.json` 记录 schema version、完整 source-id/
