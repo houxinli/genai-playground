@@ -1585,6 +1585,8 @@ segment 只有一个物理行,因此 `multiline_translation` 和上/下文、`[t
 **默认 `('epub',)`**(整本 txt 不再默认发布/同步 GDrive;`--formats txt,epub` 可加回)。manifest 记 `formats`,
 `verify_collection` 据此核对(旧 manifest 无字段→默认双格式,向后兼容)。EPUB **书名含 variant**
 (`<author>·中文` / `<author>·日中对照`):此前 zh/bilingual 两本 title 都是作者名,阅读器(微信读书)区分不开。
+**GDrive 文件名也用友好名**(`<author>·中文.epub` / `<author>·日中对照.epub`,`_gdrive_display_name`):微信读书对本地
+导入 epub 按**文件名**显示、不读 dc:title,统一 `_var` 会显示成 "作者_zh" 或区分不开;本地合集目录仍保留 `_var` 规范名。
 
 **作者合集完整性/新鲜度闸门(2026-07-14)**:`author_collection` 构建前必须确认每个 current ref 同时有
 zh/bilingual 两种 rendered；缺任一输入即失败并保留旧合集,不再输出“少几章但命令成功”的部分成品。新整本先在

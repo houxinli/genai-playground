@@ -54,8 +54,8 @@ class AuthorCollectionTest(unittest.TestCase):
             gd = Path(t) / "gdrive"
             res = ac.build_collection("作者Y", "700000", formats=("txt", "epub"), workspaces_root=ws,
                                       out_dir=Path(t) / "coll", gdrive_dir=gd)
-            self.assertTrue((gd / "作者Y_zh.txt").is_file())
-            self.assertTrue((gd / "作者Y_bilingual.txt").is_file())
+            self.assertTrue((gd / "作者Y·中文.txt").is_file())
+            self.assertTrue((gd / "作者Y·日中对照.txt").is_file())
             self.assertEqual(4, len(res["gdrive"]))  # txt + epub × 2 variant
 
     def test_default_formats_epub_only(self):
@@ -67,9 +67,9 @@ class AuthorCollectionTest(unittest.TestCase):
             res = ac.build_collection("作者D", "700000", workspaces_root=ws,
                                       out_dir=Path(t) / "coll", gdrive_dir=gd)
             self.assertEqual(2, len(res["gdrive"]))              # 只 zh.epub + bilingual.epub
-            self.assertTrue((gd / "作者D_zh.epub").is_file())
-            self.assertTrue((gd / "作者D_bilingual.epub").is_file())
-            self.assertFalse((gd / "作者D_zh.txt").exists())     # 无整本 txt
+            self.assertTrue((gd / "作者D·中文.epub").is_file())
+            self.assertTrue((gd / "作者D·日中对照.epub").is_file())
+            self.assertFalse((gd / "作者D·中文.txt").exists())     # 无整本 txt
             self.assertFalse((Path(t) / "coll" / "作者D_zh.txt").exists())
             self.assertTrue(res["verification"]["ok"])           # epub-only 自校验通过
 
@@ -81,8 +81,8 @@ class AuthorCollectionTest(unittest.TestCase):
             res = ac.build_collection("作者T", "700000", formats=("txt",), workspaces_root=ws,
                                       out_dir=Path(t) / "coll", gdrive_dir=gd)
             self.assertEqual(2, len(res["gdrive"]))
-            self.assertTrue((gd / "作者T_zh.txt").is_file())
-            self.assertFalse((gd / "作者T_zh.epub").exists())
+            self.assertTrue((gd / "作者T·中文.txt").is_file())
+            self.assertFalse((gd / "作者T·中文.epub").exists())
 
     def test_missing_rendered_refuses_partial_collection_and_keeps_previous(self):
         with tempfile.TemporaryDirectory() as t:
@@ -201,8 +201,8 @@ class AuthorCollectionTest(unittest.TestCase):
                 nav = z.read("OEBPS/nav.xhtml").decode("utf-8")
                 self.assertIn("第1章 第一篇", nav)
                 self.assertIn("第2章 第二篇", nav)
-            self.assertTrue((gd / "作者E_zh.epub").is_file())
-            self.assertTrue((gd / "作者E_bilingual.epub").is_file())
+            self.assertTrue((gd / "作者E·中文.epub").is_file())
+            self.assertTrue((gd / "作者E·日中对照.epub").is_file())
 
     def _make_ja_work(self, ws_root: Path, sid: str, provider="pixiv", creator="700000"):
         refs = ws_root / f"{provider}-{sid}" / "store" / "refs" / provider / creator

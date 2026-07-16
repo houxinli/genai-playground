@@ -326,7 +326,10 @@ def build_collection(
         gdrive_dir = Path(gdrive_dir)
         gdrive_dir.mkdir(parents=True, exist_ok=True)
         for name in output_names:
-            dst = gdrive_dir / name
+            # GDrive 上用**人类可读且可区分**的文件名(`<author>·中文.epub` / `<author>·日中对照.epub`):
+            # 微信读书等对本地导入 epub 按**文件名**显示、不读 dc:title,统一 `_zh/_bilingual` 会显示成
+            # "作者_zh" 或区分不开(用户 2026-07-16)。本地合集目录仍保留 `_var` 规范名不动。
+            dst = gdrive_dir / _gdrive_display_name(author_name, name)
             shutil.copy(out_dir / name, dst)
             gdrive_files.append(str(dst))
     return {
@@ -341,8 +344,18 @@ def build_collection(
     }
 
 
-# variant → 书名后缀:让 zh 与 bilingual 两本 epub 书名不同,阅读器(微信读书等)才能区分。
+# variant → 书名/文件名后缀:让 zh 与 bilingual 两本 epub 书名不同,阅读器(微信读书等)才能区分。
 _VARIANT_TITLE = {"zh": "中文", "bilingual": "日中对照"}
+
+
+def _gdrive_display_name(author_name: str, output_name: str) -> str:
+    """本地规范名 `<author>_<var>.<ext>` → GDrive 人类可读名 `<author>·<中文标签>.<ext>`。
+    未识别 variant 时原样返回。用于阅读器按文件名显示的场景(微信读书本地导入)。"""
+    for var, label in _VARIANT_TITLE.items():
+        prefix = f"{author_name}_{var}."
+        if output_name.startswith(prefix):
+            return f"{author_name}·{label}.{output_name[len(prefix):]}"
+    return output_name
 
 
 def _build_epubs(out_dir: Path, author_name: str, sids: List[str]) -> Dict[str, int]:
