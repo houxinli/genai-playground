@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "task_id": "local-20260714-momizi813-review-collection",
+  "title": "momizi813 新篇章复核与合集重建",
+  "status": "blocked",
+  "branch": "main",
+  "objective": "全量复核 momizi813 最新 8 篇的逐段对齐与明显误译，发布修正版，并重建、验证包含全部 137 篇的作者合集与 EPUB；同时让合集构建对缺失 rendered/freshness 漂移失败。",
+  "github": {
+    "issue": null,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/data/workspaces/fanbox-momizi813：最新 8 篇 review、finish、verify 与反馈",
+      "tasks/translation/data/workspaces/_collection-momizi813：137 篇合集与 EPUB 派生产物",
+      "tasks/translation/src/core/document_qa.py 与 openrouter_executor.py：单段输出结构污染闸门",
+      "tasks/translation/src/core/author_collection.py：合集完整性与新鲜度校验",
+      "相关测试、Makefile 与翻译设计文档"
+    ],
+    "out": [
+      "旧 129 篇译文的语义重审",
+      "Google Drive 或其他外部发布",
+      "实体收割算法的后续重构",
+      "提交、push 或 PR（当前沙箱 .git 只读）"
+    ]
+  },
+  "context_files": [
+    {
+      "path": ".agents/skills/translate/SKILL.md",
+      "purpose": "review、finish、verify 的执行规则",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/docs/executor-instructions.md",
+      "purpose": "逐段翻译与 TSV 契约",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "发布版本、派生产物与验证边界",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "复核范围从 32 个硬规则告警扩展为最新 8 篇全量逐段对照。",
+      "reason": "告警样本中出现相邻段和 tags 混入 body 译文，证明问题是系统性对齐污染，不能靠删除假名局部修补。",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "从 current ref 恢复 TSV 后再做内容复核的方案不执行。",
+      "reason": "现有 candidate 含大量物理换行而扁平 TSV 无法无损表示；更重要的是正文包含本执行器不能处理的未成年人露骨内容。",
+      "status": "superseded"
+    },
+    {
+      "id": "D3",
+      "summary": "本任务只构建本地合集，不推送 Google Drive。",
+      "reason": "没有已授权或已确认的外部目标路径，本地构建足以完成可验证交付。",
+      "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "只完成不生成、不重写、不打包正文的通用结构闸门和新鲜度验证。",
+      "reason": "可以安全修复流水线缺陷，但不能继续重译或重新发布所发现的未成年人露骨内容。",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [
+    {
+      "id": "B1",
+      "summary": "最新 8 篇包含未成年人/高中生露骨性内容，本执行器不能重译、润色或重新打包发布。",
+      "attempts": [
+        "只读抽样复核并统计结构污染，不继续生成或修改正文。",
+        "完成通用 OpenRouter/document QA 结构闸门与作者合集新鲜度验证。"
+      ],
+      "needs": [
+        "将后续工作限定为不含未成年人露骨内容的源文或非内容处理范围。"
+      ],
+      "status": "active"
+    }
+  ],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "确认最新 8 篇的结构污染模式",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "量化每篇多行单段译文与 context marker 泄漏",
+        "确认现有 document QA 为什么没有阻断"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "全量语义复核并发布最新 8 篇修正版",
+      "status": "blocked",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "finish 无 error/quarantine/unresolved",
+        "verify ok=true 且 8/8"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "重建并验证 137 篇作者合集与 EPUB",
+      "status": "blocked",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "zh/bilingual TXT 与 EPUB 均含 137 章",
+        "合集 source ids 与已发布 refs 完全一致"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "实现合集新鲜度校验并完成回归验证",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "缺任一 published rendered 时构建失败且不交付部分合集",
+        "相关定向测试和全量 pytest、docs-drift、agent-validate 通过"
+      ]
+    }
+  ],
+  "next_action": null,
+  "validation": {
+    "required_commands": [
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "make docs-drift",
+      "make agent-validate"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "445 passed, 2 warnings",
+        "timestamp": "2026-07-15T06:52:45Z"
+      },
+      {
+        "command": "make docs-drift",
+        "status": "passed",
+        "summary": "文档漂移检查通过",
+        "timestamp": "2026-07-15T06:52:45Z"
+      },
+      {
+        "command": "make agent-validate",
+        "status": "passed",
+        "summary": "Agent task validation passed（checkpoint 前）",
+        "timestamp": "2026-07-15T06:52:45Z"
+      },
+      {
+        "command": "make author-collection-verify CREATOR=momizi813 PROVIDER=fanbox OUT=tasks/translation/data/workspaces/_collection-momizi813",
+        "status": "failed",
+        "summary": "预期失败：旧合集缺 collection_manifest.json",
+        "timestamp": "2026-07-15T06:52:45Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [
+    "AGENTS.md",
+    "Makefile（实体收割部分）",
+    "docs/PROJECT_STATUS.md",
+    "tasks/translation/docs/system-design.md（实体收割部分）",
+    "tasks/translation/src/core/entity_harvest.py",
+    "tasks/translation/src/core/entity_harvest_test.py",
+    "tasks/translation/src/core/entity_review.py",
+    "tasks/translation/src/core/entity_review_test.py",
+    "tasks/translation/src/core/entity_store.py",
+    "tasks/translation/src/core/entity_store_test.py",
+    "tasks/translation/src/core/translate_user.py（实体收割部分）",
+    "tasks/translation/src/core/translate_user_test.py（实体收割部分）",
+    "agent/tasks/local-20260714-llm-entity-harvest"
+  ],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260715T065245Z-codex",
+    "timestamp": "2026-07-15T06:52:45Z",
+    "agent": "codex",
+    "summary": "完成结构污染与合集新鲜度闸门；内容复核/重发因未成年人露骨内容边界阻断。",
+    "observed_head": "97cceed"
+  },
+  "next_task": null
+}

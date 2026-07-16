@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
+import json
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -63,7 +66,8 @@ def _annotate_furigana_file(path: Path) -> None:
     path.write_text("\n".join(out), encoding="utf-8")
 
 
-_COLLECTION_SUFFIXES = (".txt", ".epub")
+_COLLECTION_SUFFIXES = (".txt", ".epub", ".json")
+_MANIFEST_NAME = "collection_manifest.json"
 
 
 def _guard_out_dir(out_dir: Path, workspaces_root: Path) -> None:
@@ -84,75 +88,239 @@ def _guard_out_dir(out_dir: Path, workspaces_root: Path) -> None:
                     f"out_dir 已存在且含非合集内容({entry.name}),拒绝清空: {out_dir}")
 
 
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _published_documents(workspaces_root: Path, provider: str, creator_id: str) -> Dict[str, Dict[str, Any]]:
+    """已发布 sid → workspace/version；同时兼容 per-work 与 per-creator 布局。"""
+    refs = sorted(glob.glob(
+        str(workspaces_root / "*" / "store" / "refs" / provider / creator_id / "*.json")
+    ))
+    documents: Dict[str, Dict[str, Any]] = {}
+    for ref_name in refs:
+        ref_path = Path(ref_name)
+        sid = ref_path.stem
+        ref = json.loads(ref_path.read_text(encoding="utf-8"))
+        version_id = ref.get("version_id")
+        if not isinstance(version_id, str) or not version_id:
+            raise ValueError(f"current ref 缺 version_id: {ref_path}")
+        candidate = {"workspace": ref_path.parents[4], "version_id": version_id}
+        previous = documents.get(sid)
+        if previous is not None and previous["version_id"] != version_id:
+            raise ValueError(
+                f"{provider}:{creator_id}:{sid} 在多个 workspace 指向不同版本: "
+                f"{previous['version_id']} != {version_id}"
+            )
+        if previous is None:
+            documents[sid] = candidate
+            continue
+        previous_score = sum(
+            (previous["workspace"] / "rendered" / f"{sid}.{variant}.txt").is_file()
+            for variant in VARIANTS
+        )
+        candidate_score = sum(
+            (candidate["workspace"] / "rendered" / f"{sid}.{variant}.txt").is_file()
+            for variant in VARIANTS
+        )
+        if candidate_score > previous_score:
+            documents[sid] = candidate
+    return dict(sorted(
+        documents.items(), key=lambda item: (int(item[0]) if item[0].isdigit() else 0, item[0])
+    ))
+
+
 def _published_sids(workspaces_root: Path, provider: str, creator_id: str) -> Dict[str, Path]:
-    """已发布 sid → 所属 workspace 根(从 ref 文件位置反推:<ws>/store/refs/<provider>/<creator>/<sid>.json)。
-    同时兼容 per-work(`pixiv-<sid>/`)与 per-creator(`pixiv-<creator>/`)两种布局——
-    rendered 都在各自 workspace 的 `rendered/` 下。"""
-    refs = glob.glob(str(workspaces_root / "*" / "store" / "refs" / provider / creator_id / "*.json"))
-    sid2ws = {Path(r).stem: Path(r).parents[4] for r in refs}
-    return dict(sorted(sid2ws.items(), key=lambda kv: (int(kv[0]) if kv[0].isdigit() else 0, kv[0])))
+    """兼容旧调用：返回已发布 sid → workspace 根。"""
+    return {
+        sid: document["workspace"]
+        for sid, document in _published_documents(workspaces_root, provider, creator_id).items()
+    }
+
+
+def verify_collection(
+    creator_id: str, *, workspaces_root: Path, out_dir: Path, provider: str = "pixiv"
+) -> Dict[str, Any]:
+    """核对合集 manifest 与当前 refs、per-document rendered 和整本输出是否仍一致。"""
+    workspaces_root = Path(workspaces_root)
+    out_dir = Path(out_dir)
+    manifest_path = out_dir / _MANIFEST_NAME
+    if not manifest_path.is_file():
+        return {"ok": False, "documents": 0, "errors": [f"缺合集 manifest: {manifest_path}"]}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "documents": 0, "errors": [f"合集 manifest 无法读取: {exc}"]}
+    errors: List[str] = []
+    if manifest.get("schema_version") != 1:
+        errors.append(f"不支持的 collection manifest schema_version: {manifest.get('schema_version')}")
+    if manifest.get("provider") != provider or manifest.get("creator_id") != creator_id:
+        errors.append("合集 manifest 的 provider/creator_id 与请求不一致")
+    author_name = manifest.get("author_name")
+    if not isinstance(author_name, str) or not author_name:
+        errors.append("合集 manifest 缺 author_name")
+    expected_documents = {
+        document.get("source_id"): document
+        for document in manifest.get("documents", [])
+        if isinstance(document, dict) and isinstance(document.get("source_id"), str)
+    }
+    try:
+        current_documents = _published_documents(workspaces_root, provider, creator_id)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        errors.append(f"current refs 无法核对: {exc}")
+        current_documents = {}
+    expected_sids = set(expected_documents)
+    current_sids = set(current_documents)
+    if expected_sids != current_sids:
+        added = sorted(current_sids - expected_sids)
+        removed = sorted(expected_sids - current_sids)
+        errors.append(f"published refs 已变化: added={added[:10]}, removed={removed[:10]}")
+    for sid in sorted(expected_sids & current_sids):
+        expected = expected_documents[sid]
+        current = current_documents[sid]
+        if expected.get("version_id") != current["version_id"]:
+            errors.append(
+                f"{sid} current version 已变化: {expected.get('version_id')} -> {current['version_id']}"
+            )
+        expected_hashes = expected.get("rendered_sha256", {})
+        for variant in VARIANTS:
+            source = current["workspace"] / "rendered" / f"{sid}.{variant}.txt"
+            if not source.is_file():
+                errors.append(f"{sid} 缺 {variant} rendered: {source}")
+            elif expected_hashes.get(variant) != _sha256_file(source):
+                errors.append(f"{sid}.{variant}.txt 已变化，合集需要重建")
+    outputs = manifest.get("outputs", {})
+    required_outputs = {
+        f"{author_name}_{variant}.{suffix}"
+        for variant in VARIANTS
+        for suffix in ("txt", "epub")
+    } if isinstance(author_name, str) and author_name else set()
+    if not isinstance(outputs, dict):
+        errors.append("合集 manifest.outputs 必须是 object")
+        outputs = {}
+    elif set(outputs) != required_outputs:
+        errors.append(
+            f"合集 manifest.outputs 不完整: missing={sorted(required_outputs - set(outputs))}, "
+            f"extra={sorted(set(outputs) - required_outputs)}"
+        )
+    for name, expected_hash in outputs.items():
+        output = out_dir / name
+        if not output.is_file():
+            errors.append(f"合集输出缺失: {output}")
+        elif expected_hash != _sha256_file(output):
+            errors.append(f"合集输出被修改: {output}")
+    expected_count = len(expected_documents)
+    for field in ("chapters", "epub_chapters"):
+        counts = manifest.get(field, {})
+        for variant in VARIANTS:
+            if counts.get(variant) != expected_count:
+                errors.append(
+                    f"manifest {field}.{variant}={counts.get(variant)}，应为 {expected_count}"
+                )
+    return {"ok": not errors, "documents": expected_count, "errors": errors}
 
 
 def build_collection(
     author_name: str, creator_id: str, *, workspaces_root: Path, out_dir: Path,
     provider: str = "pixiv", gdrive_dir: Optional[Path] = None, furigana: bool = True,
 ) -> Dict[str, Any]:
-    """收集 creator 已发布篇 → 合并成作者名整本。返回 {sids, missing, chapters, files, gdrive}。"""
+    """收集 creator 已发布篇 → 完整合并成整本；缺任一 variant 时不替换旧合集。"""
     if not author_name.strip():
         raise ValueError("author_name 不能为空")
     workspaces_root = Path(workspaces_root)
     out_dir = Path(out_dir)
-    sid2ws = _published_sids(workspaces_root, provider, creator_id)
-    sids = list(sid2ws)
+    documents = _published_documents(workspaces_root, provider, creator_id)
+    sids = list(documents)
     if not sids:
         raise ValueError(f"{provider}:{creator_id} 没有已发布篇(workspaces 下无 refs)")
     _guard_out_dir(out_dir, workspaces_root)
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
     missing: List[str] = []
-    for sid, ws in sid2ws.items():
-        found = False
+    for sid, document in documents.items():
+        ws = document["workspace"]
         for var in VARIANTS:
             src = ws / "rendered" / f"{sid}.{var}.txt"
-            if src.is_file():
-                shutil.copy(src, out_dir / f"{sid}.{var}.txt")
-                found = True
-        if not found:
-            missing.append(sid)
-    if furigana:
-        # 合集副本(非 workspace 原件)注音后再合并/出 epub:读者读到带假名的日文,QA 工件不受影响。
-        for sid in sids:
-            fp = out_dir / f"{sid}.bilingual.txt"
-            if fp.is_file():
-                _annotate_furigana_file(fp)
-    merged = merge_author(out_dir, author_name, sids)
-    epubs = _build_epubs(out_dir, author_name, sids)
-    files: List[str] = []
+            if not src.is_file():
+                missing.append(f"{sid}.{var}")
+    if missing:
+        raise ValueError(f"{len(missing)} 个已发布 rendered 缺失，拒绝生成部分合集: {missing[:10]}")
+
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f".{out_dir.name}-build-", dir=out_dir.parent) as tmp:
+        staging = Path(tmp) / "collection"
+        staging.mkdir()
+        manifest_documents: List[Dict[str, Any]] = []
+        for sid, document in documents.items():
+            ws = document["workspace"]
+            rendered_hashes: Dict[str, str] = {}
+            for var in VARIANTS:
+                src = ws / "rendered" / f"{sid}.{var}.txt"
+                rendered_hashes[var] = _sha256_file(src)
+                shutil.copy(src, staging / f"{sid}.{var}.txt")
+            manifest_documents.append({
+                "source_id": sid,
+                "version_id": document["version_id"],
+                "rendered_sha256": rendered_hashes,
+            })
+        if furigana:
+            for sid in sids:
+                _annotate_furigana_file(staging / f"{sid}.bilingual.txt")
+        merged = merge_author(staging, author_name, sids)
+        epubs = _build_epubs(staging, author_name, sids)
+        output_names = [
+            f"{author_name}_{var}.{suffix}"
+            for var in VARIANTS
+            for suffix in ("txt", "epub")
+        ]
+        output_hashes = {
+            name: _sha256_file(staging / name)
+            for name in output_names
+            if (staging / name).is_file()
+        }
+        manifest = {
+            "schema_version": 1,
+            "provider": provider,
+            "creator_id": creator_id,
+            "author_name": author_name,
+            "documents": manifest_documents,
+            "chapters": {key: value.get("chapters") for key, value in merged.items()},
+            "epub_chapters": epubs,
+            "outputs": output_hashes,
+        }
+        (staging / _MANIFEST_NAME).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        verification = verify_collection(
+            creator_id, workspaces_root=workspaces_root, out_dir=staging, provider=provider
+        )
+        if not verification["ok"]:
+            raise RuntimeError(f"合集自校验失败: {verification['errors'][:5]}")
+        if out_dir.exists():
+            shutil.rmtree(out_dir)
+        shutil.move(str(staging), str(out_dir))
+
+    files = [str(out_dir / name) for name in output_names]
     gdrive_files: List[str] = []
-    for var in VARIANTS:
-        for name in (f"{author_name}_{var}.txt", f"{author_name}_{var}.epub"):
-            fp = out_dir / name
-            if fp.is_file():
-                files.append(str(fp))
-                if gdrive_dir is not None:
-                    gdrive_dir = Path(gdrive_dir)
-                    gdrive_dir.mkdir(parents=True, exist_ok=True)
-                    dst = gdrive_dir / name
-                    shutil.copy(fp, dst)
-                    gdrive_files.append(str(dst))
+    if gdrive_dir is not None:
+        gdrive_dir = Path(gdrive_dir)
+        gdrive_dir.mkdir(parents=True, exist_ok=True)
+        for name in output_names:
+            dst = gdrive_dir / name
+            shutil.copy(out_dir / name, dst)
+            gdrive_files.append(str(dst))
     return {
         "sids": sids,
-        "missing": missing,
+        "missing": [],
         "chapters": {k: v.get("chapters") for k, v in merged.items()},
         "epub_chapters": epubs,
         "files": files,
+        "manifest": str(out_dir / _MANIFEST_NAME),
+        "verification": verification,
         "gdrive": gdrive_files,
     }
 
 
 def _build_epubs(out_dir: Path, author_name: str, sids: List[str]) -> Dict[str, int]:
-    """每个 variant 产 `<author>.<var>.epub`(显式 TOC,阅读器不再从 txt 猜章节)。
+    """每个 variant 产 `<author>_<var>.epub`(显式 TOC,阅读器不再从 txt 猜章节)。
     章节与 merge_author 同源:按 source_id 升序,标题取渲染文件的中文 title。"""
     out: Dict[str, int] = {}
     for var in VARIANTS:
@@ -172,7 +340,7 @@ def _build_epubs(out_dir: Path, author_name: str, sids: List[str]) -> Dict[str, 
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--author", required=True, help="作者名(用作合集文件名,如 錆流浪)")
+    p.add_argument("--author", default=None, help="作者名(用作合集文件名,如 錆流浪)")
     p.add_argument("--creator", required=True, help="creator id(如 104039620)")
     p.add_argument("--provider", default="pixiv")
     p.add_argument("--workspaces-root", type=Path, default=Path("tasks/translation/data/workspaces"))
@@ -180,17 +348,20 @@ def main() -> int:
     p.add_argument("--gdrive", type=Path, default=None, help="可选:同时复制整本到此目录")
     p.add_argument("--no-furigana", dest="furigana", action="store_false",
                    help="不给 bilingual 合集的日文源文加汉字注音(默认加)")
+    p.add_argument("--verify-only", action="store_true", help="只核对现有合集是否与 current refs/rendered 一致")
     args = p.parse_args()
-    if not args.author.strip() or not args.creator.strip():
-        p.error("--author 与 --creator 不能为空")
     out = args.out or (args.workspaces_root / f"_collection-{args.creator}")
+    if args.verify_only:
+        res = verify_collection(args.creator, workspaces_root=args.workspaces_root,
+                                out_dir=out, provider=args.provider)
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0 if res["ok"] else 1
+    if not args.author or not args.author.strip() or not args.creator.strip():
+        p.error("构建模式需要非空 --author 与 --creator")
     res = build_collection(args.author, args.creator, workspaces_root=args.workspaces_root,
                            out_dir=out, provider=args.provider, gdrive_dir=args.gdrive,
                            furigana=args.furigana)
-    import json
     print(json.dumps(res, ensure_ascii=False, indent=2))
-    if res["missing"]:
-        print(f"⚠️ {len(res['missing'])} 篇缺 rendered: {res['missing'][:10]}")
     return 0
 
 
