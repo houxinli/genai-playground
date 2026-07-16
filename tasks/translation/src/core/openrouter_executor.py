@@ -3,8 +3,9 @@
 """OpenRouter Grok 翻译执行器:消费自包含 job bundle,逐段翻译产 schema 合法的 result.json。
 
 新架构 harness 路径的一个具体 API 执行器(producer=api/openrouter)。system prompt 注入
-bundle.context_pack 的人名/术语硬约束(#83 P1a/P1b);逐段一 candidate。translate_bundle 是
-纯函数(注入 call_fn),CI 用 mock 测;真实 OpenRouter 调用走 CLI(grok-4/grok-4-fast 已弃用,
+bundle.context_pack 的人名/术语硬约束(#83 P1a/P1b);逐段一 candidate，并用简单 T/E 响应在
+同一次调用里锁定本文首次译名。translate_bundle 是纯函数(注入 call_fn),CI 用 mock 测;
+真实 OpenRouter 调用走 CLI(grok-4/grok-4-fast 已弃用,
 默认 x-ai/grok-4.3)。
 """
 
@@ -22,18 +23,24 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 try:
+    from . import entity_harvest
     from .document_qa import translation_shape_errors
 except ImportError:
+    import entity_harvest
     from document_qa import translation_shape_errors
 
 DEFAULT_MODEL = "x-ai/grok-4.3"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 _SYSTEM_BASE = (
-    "你是一名专业的日译中网络小说译者。逐段翻译,只输出该段的中文译文,不要解释、不要注释、"
-    "不要 Markdown、不要输出原文或上下文标记。沿用原文的方引号「」『』。中文用恰当中文标点。"
+    "你是一名专业的日译中网络小说译者。逐段翻译,不要解释、不要注释、不要 Markdown、"
+    "不要输出原文或上下文标记。沿用原文的方引号「」『』。中文用恰当中文标点。"
     "译文必须只有一个物理行,禁止换行。译文不得残留日文假名。"
     "tags 段译成 `原词 / 中文` 并保留 `[]` 与逗号。"
+    "严格使用简单行协议:第一行是 `T<TAB>中文译文`;之后把本段实际使用的每个人名或专名"
+    "各写一行"
+    " `E<TAB>日文原写法<TAB>本段实际中文译名`;没有人名就只写 T 行。不要报告普通名词,"
+    "也不要报告本段源文或译文中没有实际出现的名字。"
 )
 
 
@@ -52,12 +59,26 @@ def _constraints_block(context_pack: Dict[str, Any]) -> str:
     return "【人名/术语硬约束,必须遵守】\n" + "\n".join(lines) if lines else ""
 
 
-def build_messages(segment: Dict[str, Any], context_pack: Dict[str, Any]) -> List[Dict[str, str]]:
+def _document_targets_block(document_targets: Dict[str, str]) -> str:
+    lines = [f"- {source} => {target}" for source, target in document_targets.items()]
+    if not lines:
+        return ""
+    return "【本篇此前首次译名,只能使用以下唯一译法】\n" + "\n".join(lines)
+
+
+def build_messages(
+    segment: Dict[str, Any],
+    context_pack: Dict[str, Any],
+    document_targets: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, str]]:
     """单段 → chat messages。注入硬约束 + 邻句上下文(邻句只供参考,不翻译/不输出)。"""
     system = _SYSTEM_BASE
     constraints = _constraints_block(context_pack)
     if constraints:
         system += "\n\n" + constraints
+    document_constraints = _document_targets_block(document_targets or {})
+    if document_constraints:
+        system += "\n\n" + document_constraints
     neighbors = context_pack.get("neighbors", {}).get(segment["segment_id"], {})
     parts: List[str] = []
     if neighbors.get("prev"):
@@ -76,13 +97,28 @@ def translate_bundle(
     candidate_key: str = "grok",
     completed_at: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """逐段调 call_fn 翻译,组装 schema 合法 result。call_fn(messages)->译文文本。"""
+    """逐段调 call_fn 翻译；本篇首次译名锁定并只把 canonical target 传给下一段。"""
     task = bundle["task"]
     context_pack = bundle.get("context_pack", {})
     source_hashes = task["source_hashes"]
     candidates = []
-    for seg in bundle["segments"]:
-        text = call_fn(build_messages(seg, context_pack)).strip()
+    findings = []
+    locked_targets = entity_harvest.context_targets(context_pack)
+    document_targets: Dict[str, str] = {}
+    for index, seg in enumerate(bundle["segments"]):
+        response = call_fn(build_messages(seg, context_pack, document_targets))
+        try:
+            text, observations = entity_harvest.parse_executor_response(response)
+        except ValueError as exc:
+            raise ValueError(f"segment {seg['segment_id']} 返回结构污染: {exc}") from exc
+        text, first_uses, _ = entity_harvest.apply_observations(
+            seg["source_text"], text, observations, locked_targets
+        )
+        for entity in first_uses:
+            document_targets[entity["source"]] = entity["target"]
+            findings.append(entity_harvest.entity_finding(
+                entity["source"], entity["target"], seg["segment_id"], index + 1
+            ))
         shape_errors = translation_shape_errors(text)
         if shape_errors:
             raise ValueError(
@@ -101,7 +137,7 @@ def translate_bundle(
         "task_digest": bundle["task_digest"],
         "producer": {"type": "api", "name": "openrouter", "model": model},
         "candidates": candidates,
-        "findings": [],
+        "findings": findings,
         "recommended_candidate_keys": [candidate_key],
         "completed_at": completed_at or datetime.now(timezone.utc).isoformat(),
     }

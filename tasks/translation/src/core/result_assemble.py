@@ -3,9 +3,10 @@
 """紧凑译文 → result.json 组装(#134):让 agent 只产译文,机械的身份回填交给 harness。
 
 agent 翻大文档时若逐段写完整 result.json(每段抄 segment_id + 64 位 source_hash + candidate_key),
-工具调用与输出量都会爆(Cursor 每轮 25/200 上限)。紧凑路径:agent 只写一个 `<id>.zh.tsv`——
+工具调用与输出量都会爆(Cursor 每轮 25/200 上限)。紧凑路径:agent 写一个 `<id>.zh.tsv`——
 每行 `段号<TAB>中文译文`(段号 = bundle.segments 的 0 基序号);本模块从 bundle 回填
-segment_id/source_hash/task_digest/producer,产出 schema 合法 result.json。
+segment_id/source_hash/task_digest/producer,产出 schema 合法 result.json。可选两列 `<id>.names.tsv`
+保存本篇 first-wins 译名，由 harness 组装为 Result info findings。
 """
 
 from __future__ import annotations
@@ -14,7 +15,12 @@ import argparse
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+try:
+    from . import entity_harvest
+except ImportError:
+    import entity_harvest
 
 
 def _source_echoes(bundle: Dict[str, Any]) -> Dict[int, str]:
@@ -67,6 +73,7 @@ def parse_translations_tsv(content: str, bundle: Optional[Dict[str, Any]] = None
 def assemble_result(
     bundle: Dict[str, Any], translations: Dict[int, str], *,
     producer_name: str = "agent", model: Optional[str] = None, completed_at: Optional[str] = None,
+    findings: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """从 bundle + {段号:译文} 组装 schema 合法 result。逐段回填 segment_id/source_hash,agent 不碰这些。"""
     task = bundle["task"]
@@ -93,7 +100,7 @@ def assemble_result(
         "task_digest": bundle["task_digest"],
         "producer": {"type": "harness", "name": producer_name, "model": model},
         "candidates": candidates,
-        "findings": [],
+        "findings": list(findings or []),
         "recommended_candidate_keys": [producer_name],
         "completed_at": completed_at or datetime.now(timezone.utc).isoformat(),
     }
@@ -104,15 +111,28 @@ def main() -> int:
     parser.add_argument("--job", required=True, type=Path, help="prepare 产的 <id>.job.json")
     parser.add_argument("--translations", required=True, type=Path, help="<id>.zh.tsv(段号<TAB>译文)")
     parser.add_argument("--out", required=True, type=Path, help="输出 <id>.result.json")
+    parser.add_argument("--names", type=Path, default=None, help="可选 <id>.names.tsv(日文名<TAB>篇内首次译名)")
     parser.add_argument("--producer", default="agent", help="执行器标识(claude-code/cursor-grok/...)")
     parser.add_argument("--model", default=None)
     args = parser.parse_args()
     for name, val in (("--job", args.job), ("--translations", args.translations), ("--out", args.out)):
         if not str(val).strip():
             parser.error(f"{name} 不能为空")
+    if args.names is not None and not args.names.is_file():
+        parser.error(f"--names 不存在: {args.names}")
     bundle = json.loads(args.job.read_text(encoding="utf-8"))
     translations = parse_translations_tsv(args.translations.read_text(encoding="utf-8"), bundle)
-    result = assemble_result(bundle, translations, producer_name=args.producer, model=args.model)
+    findings: List[Dict[str, Any]] = []
+    if args.names is not None and args.names.is_file():
+        local_targets = entity_harvest.parse_locked_names_tsv(args.names.read_text(encoding="utf-8"))
+        translations, findings = entity_harvest.apply_locked_names(bundle, translations, local_targets)
+    result = assemble_result(
+        bundle,
+        translations,
+        producer_name=args.producer,
+        model=args.model,
+        findings=findings,
+    )
     args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"candidates": len(result["candidates"]), "out": str(args.out)}, ensure_ascii=False))
     return 0

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""翻译后 LLM 专名收割：归一本篇候选，并把跨篇提案送入既有 entity-review 闸门。"""
+"""篇内实体记忆：首次译名锁定，后续批次只携带 canonical target。"""
 
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Dict, List, Tuple
 
 try:
     from . import entity_review
@@ -20,150 +19,170 @@ except ImportError:
     from core.entity_store import EntityStore
 
 
-_ENTITY_TYPES = {"person", "org", "place", "term"}
-_EXTRACT_SYS = (
-    "你是日中翻译的专名校对。下面给你一篇小说的若干「日文源 / 中文译」对照行。"
-    "请找出其中的人名、角色名和专有名词；不要收普通名词、拟声词、身体部位、服饰或道具。"
-    "每项输出 source(日文原写法)、target(全篇统一的中文译名)、type(person/org/place/term)、"
-    "confidence(0到1)，以及 variants(译文中出现过、需要替换成 target 的其它中文写法)。"
-    "只输出 JSON 数组，例如 "
-    '[{"source":"カルア","target":"卡尔亚","type":"person","confidence":0.9,'
-    '"variants":["卡露亚"]}]。没有专名就输出 []，不要解释。'
-)
+ENTITY_FINDING_CODE = "entity_first_use"
 
 
-def build_extract_messages(
-    revision: Dict[str, Any],
-    translations_by_segment: Dict[str, str],
-    max_pairs: int = 120,
-) -> List[Dict[str, str]]:
-    """组装抽取请求，只携带有译文的正文源/译对照。"""
-    pairs = []
-    for segment in revision["segments"]:
-        translation = translations_by_segment.get(segment["segment_id"], "")
-        if translation and segment.get("kind") == "body":
-            pairs.append(f"{segment['source_text']}  /  {translation}")
-    return [
-        {"role": "system", "content": _EXTRACT_SYS},
-        {"role": "user", "content": "\n".join(pairs[:max_pairs])},
-    ]
+def parse_executor_response(response: str) -> Tuple[str, List[Dict[str, str]]]:
+    """解析 API 的简单行协议：首行 ``T<TAB>译文``，随后零到多行 ``E<TAB>源名<TAB>译名``。
 
-
-def parse_llm_entities(response: str) -> List[Dict[str, Any]]:
-    """解析 LLM JSON 数组；同一 source 给出冲突 target 时整项丢弃。"""
-    if not response:
-        return []
-    match = re.search(r"\[.*\]", response, re.S)
-    if not match:
-        return []
-    try:
-        payload = json.loads(match.group(0))
-    except (TypeError, ValueError):
-        return []
-    if not isinstance(payload, list):
-        return []
-
-    parsed: Dict[str, Dict[str, Any]] = {}
-    order: List[str] = []
-    conflicts = set()
-    for item in payload:
-        if not isinstance(item, dict):
-            continue
-        source = str(item.get("source", "")).strip()
-        target = str(item.get("target", "")).strip()
+    所有响应都必须使用 T/E 协议，避免 API 路线静默跳过篇内名字记忆。
+    """
+    content = response.strip("\r\n")
+    lines = content.splitlines()
+    if not lines or not lines[0].startswith("T\t"):
+        raise ValueError("响应首行必须是 `T<TAB>译文`")
+    translation = lines[0].split("\t", 1)[1].strip()
+    observations: List[Dict[str, str]] = []
+    for line_number, line in enumerate(lines[1:], 2):
+        parts = line.split("\t")
+        if len(parts) != 3 or parts[0] != "E":
+            raise ValueError(f"响应第 {line_number} 行必须是 `E<TAB>日文名<TAB>中文名`")
+        source, target = parts[1].strip(), parts[2].strip()
         if not source or not target:
+            raise ValueError(f"响应第 {line_number} 行实体 source/target 不得为空")
+        observations.append({"source": source, "target": target})
+    return translation, observations
+
+
+def context_targets(context_pack: Dict[str, Any]) -> Dict[str, str]:
+    """取已批准 Context Pack 实体；调用方可在其上追加本文首次译名。"""
+    return {entity["source"]: entity["target"] for entity in context_pack.get("entities", [])}
+
+
+def apply_observations(
+    source_text: str,
+    translation: str,
+    observations: List[Dict[str, str]],
+    locked_targets: Dict[str, str],
+) -> Tuple[str, List[Dict[str, str]], List[Dict[str, str]]]:
+    """按出现顺序合并本段观察；已锁定 target 永不改变，冲突只纠正当前译文。
+
+    ``locked_targets`` 原地追加首次观察。只接受 source 确实在本段源文、target 确实在本段译文中的
+    记录，防止模型把提示里的其它名字重新报告进本文记忆。
+    """
+    first_uses: List[Dict[str, str]] = []
+    conflicts: List[Dict[str, str]] = []
+    for observation in observations:
+        source = observation["source"].strip()
+        observed_target = observation["target"].strip()
+        if not source or not observed_target or source not in source_text or observed_target not in translation:
             continue
-        variants = item.get("variants") or []
-        if not isinstance(variants, list):
-            variants = []
-        clean_variants = []
-        for variant in variants:
-            if isinstance(variant, str):
-                variant = variant.strip()
-                if variant and variant != target and variant not in clean_variants:
-                    clean_variants.append(variant)
-        entity_type = item.get("type", "person")
-        if entity_type not in _ENTITY_TYPES:
-            entity_type = "person"
-        confidence = item.get("confidence", 0.5)
-        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
-            confidence = 0.5
-        entity = {
+        canonical = locked_targets.get(source)
+        if canonical is None:
+            locked_targets[source] = observed_target
+            first_uses.append({"source": source, "target": observed_target})
+            continue
+        if observed_target == canonical:
+            continue
+        if canonical not in translation or observed_target not in canonical:
+            translation = translation.replace(observed_target, canonical)
+        conflicts.append({"source": source, "target": canonical, "observed_target": observed_target})
+    return translation, first_uses, conflicts
+
+
+def entity_finding(source: str, target: str, segment_id: str, line: int) -> Dict[str, Any]:
+    """把本文首次译名装进 Result 既有 findings，避免扩展 Result schema。"""
+    evidence = json.dumps(
+        {"source": source, "target": target, "segment_id": segment_id},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return {
+        "code": ENTITY_FINDING_CODE,
+        "severity": "info",
+        "message": f"本篇首次译名锁定：{source} => {target}",
+        "evidence": evidence,
+        "line": line,
+    }
+
+
+def entities_from_result(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """从 Result findings 恢复可送 entity-review 的最小提案。"""
+    entities: List[Dict[str, Any]] = []
+    seen = set()
+    for finding in result.get("findings", []):
+        if finding.get("code") != ENTITY_FINDING_CODE or not finding.get("evidence"):
+            continue
+        try:
+            evidence = json.loads(finding["evidence"])
+        except (TypeError, ValueError):
+            continue
+        source = str(evidence.get("source", "")).strip()
+        target = str(evidence.get("target", "")).strip()
+        if not source or not target or source in seen:
+            continue
+        seen.add(source)
+        entities.append({
             "source": source,
             "target": target,
-            "type": entity_type,
-            "confidence": float(confidence),
-            "variants": clean_variants,
-        }
-        if source not in parsed:
-            parsed[source] = entity
-            order.append(source)
-        elif parsed[source]["target"] != target:
-            conflicts.add(source)
-        else:
-            for variant in clean_variants:
-                if variant not in parsed[source]["variants"]:
-                    parsed[source]["variants"].append(variant)
-            parsed[source]["confidence"] = max(parsed[source]["confidence"], float(confidence))
-    return [parsed[source] for source in order if source not in conflicts]
+            "type": "person",
+            "confidence": 1.0,
+            "variants": [],
+        })
+    return entities
 
 
-def extract_entities_via_llm(
-    revision: Dict[str, Any],
-    translations_by_segment: Dict[str, str],
-    call_fn: Callable[[List[Dict[str, str]]], str],
-) -> List[Dict[str, Any]]:
-    """用注入的 LLM call_fn 抽取专名；非关键抽取失败时返回空列表。"""
-    try:
-        response = call_fn(build_extract_messages(revision, translations_by_segment))
-    except Exception:
-        return []
-    return parse_llm_entities(response)
-
-
-def enforce_context_targets(
-    entities: List[Dict[str, Any]],
-    context_entities: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    """既有 approved/locked Context Pack 译名优先于本轮 LLM 建议。"""
-    known_targets = {entity["source"]: entity["target"] for entity in context_entities}
-    out = []
-    for entity in entities:
-        normalized = dict(entity)
-        normalized["variants"] = list(entity.get("variants", []))
-        known_target = known_targets.get(entity["source"])
-        if known_target is not None and known_target != entity["target"]:
-            normalized["variants"] = [entity["target"], *normalized["variants"]]
-            normalized["variants"] = list(dict.fromkeys(
-                variant for variant in normalized["variants"] if variant != known_target
-            ))
-            normalized["target"] = known_target
-        out.append(normalized)
-    return out
-
-
-def apply_entity_variants(
-    segments: List[Dict[str, Any]],
-    translations_by_segment: Dict[str, str],
-    entities: List[Dict[str, Any]],
-) -> int:
-    """仅在源文含该实体的段内，把 LLM 明示的中文 variants 替换成 canonical target。"""
-    normalized_segments = 0
-    for segment in segments:
-        segment_id = segment["segment_id"]
-        translation = translations_by_segment.get(segment_id)
-        if not translation:
+def parse_locked_names_tsv(content: str) -> Dict[str, str]:
+    """解析 Agent 的两列篇内锁定表；同 source 出现不同 target 时拒绝。"""
+    locked: Dict[str, str] = {}
+    for line_number, line in enumerate(content.splitlines(), 1):
+        if not line.strip():
             continue
-        original = translation
-        for entity in entities:
-            if entity["source"] not in segment["source_text"]:
+        parts = line.split("\t")
+        if len(parts) != 2:
+            raise ValueError(f"names.tsv 第 {line_number} 行应为 `日文名<TAB>中文名`")
+        source, target = parts[0].strip(), parts[1].strip()
+        if not source or not target:
+            raise ValueError(f"names.tsv 第 {line_number} 行 source/target 不得为空")
+        previous = locked.get(source)
+        if previous is not None and previous != target:
+            raise ValueError(
+                f"names.tsv 第 {line_number} 行违反 first-wins：{source!r} 已锁定为 {previous!r}，"
+                f"不得再写 {target!r}"
+            )
+        locked[source] = target
+    return locked
+
+
+def apply_locked_names(
+    bundle: Dict[str, Any],
+    translations: Dict[int, str],
+    local_targets: Dict[str, str],
+) -> Tuple[Dict[int, str], List[Dict[str, Any]]]:
+    """Agent finish 时让 approved target 覆盖冲突本地记录，并为真实首次用法生成 findings。"""
+    normalized = dict(translations)
+    approved = context_targets(bundle.get("context_pack", {}))
+    findings: List[Dict[str, Any]] = []
+    for source, observed_target in local_targets.items():
+        canonical = approved.get(source, observed_target)
+        first_index = None
+        source_seen = False
+        for index, segment in enumerate(bundle["segments"]):
+            if source not in segment["source_text"]:
                 continue
-            for variant in entity.get("variants", []):
-                translation = translation.replace(variant, entity["target"])
-        if translation != original:
-            translations_by_segment[segment_id] = translation
-            normalized_segments += 1
-    return normalized_segments
+            source_seen = True
+            text = normalized.get(index, "")
+            if observed_target not in text:
+                continue
+            if first_index is None:
+                first_index = index
+            if observed_target != canonical and observed_target in text:
+                if canonical not in text or observed_target not in canonical:
+                    normalized[index] = text.replace(observed_target, canonical)
+        if source in approved:
+            continue
+        if not source_seen:
+            raise ValueError(f"names.tsv 的 source {source!r} 未出现在本文源文")
+        if first_index is None:
+            raise ValueError(f"names.tsv 的 target {observed_target!r} 未出现在该 source 对应译文")
+        findings.append(entity_finding(
+            source,
+            canonical,
+            bundle["segments"][first_index]["segment_id"],
+            first_index + 1,
+        ))
+    return normalized, findings
 
 
 def enqueue_entity_reviews(
@@ -172,7 +191,7 @@ def enqueue_entity_reviews(
     entity_store_root: Path,
     review_queue_root: Path,
 ) -> List[Dict[str, Any]]:
-    """把源文中确实出现的 LLM 提案交给 entity-review；不自动 approve。"""
+    """把本篇首次译名交给 entity-review；不自动 approve。"""
     parts = revision["document_id"].split(":")
     if len(parts) != 3:
         raise ValueError(f"document_id 形如 provider:creator:source，实得 {revision['document_id']!r}")

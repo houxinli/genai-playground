@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""翻译后 LLM 专名收割的解析、篇内归一与 review 接线测试。"""
+"""篇内实体 first-wins 记忆、Agent names.tsv 与 review 接线测试。"""
 
 from __future__ import annotations
 
@@ -31,101 +31,113 @@ def _segment(index, source):
     }
 
 
-class EntityHarvestTest(unittest.TestCase):
-    def _revision_and_translations(self):
-        segments = [
+def _revision():
+    return {
+        "document_id": DOC,
+        "segments": [
             _segment(0, "カルアが笑った。"),
             _segment(1, "カルアの胸。"),
             _segment(2, "普通の一文。"),
-        ]
-        revision = {"document_id": DOC, "segments": segments}
-        translations = {seg["segment_id"]: text for seg, text in zip(
-            segments,
-            ("卡尔亚笑了。", "卡露亚的胸。", "普通的一句。"),
-        )}
-        return revision, translations
+        ],
+    }
 
-    def test_parse_llm_entities_tolerates_noise_and_defaults(self):
-        response = '好的:\n```json\n[{"source":"カルア","target":"卡尔亚","type":"person"},{"bad":1}]\n```'
+
+class EntityMemoryTest(unittest.TestCase):
+    def test_parse_simple_te_protocol(self):
+        translation, entities = eh.parse_executor_response(
+            "T\t卡尔亚笑了。\nE\tカルア\t卡尔亚\nE\t王都\t王都"
+        )
+        self.assertEqual("卡尔亚笑了。", translation)
         self.assertEqual(
-            [{"source": "カルア", "target": "卡尔亚", "type": "person", "confidence": 0.5, "variants": []}],
-            eh.parse_llm_entities(response),
-        )
-
-    def test_parse_drops_conflicting_targets_for_same_source(self):
-        response = (
-            '[{"source":"カルア","target":"卡尔亚","confidence":0.9},'
-            '{"source":"カルア","target":"卡露拉","confidence":0.8}]'
-        )
-        self.assertEqual([], eh.parse_llm_entities(response))
-
-    def test_parse_empty(self):
-        self.assertEqual([], eh.parse_llm_entities("没有专名 []"))
-        self.assertEqual([], eh.parse_llm_entities("乱七八糟没有数组"))
-
-    def test_extract_via_llm_uses_bilingual_pairs(self):
-        revision, translations = self._revision_and_translations()
-        captured = {}
-
-        def call_fn(messages):
-            captured["messages"] = messages
-            return '[{"source":"カルア","target":"卡尔亚","type":"person"}]'
-
-        entities = eh.extract_entities_via_llm(revision, translations, call_fn)
-        self.assertEqual("卡尔亚", entities[0]["target"])
-        self.assertIn("カルア", captured["messages"][1]["content"])
-        self.assertIn("卡露亚", captured["messages"][1]["content"])
-
-    def test_extract_swallows_call_error(self):
-        revision, translations = self._revision_and_translations()
-
-        def fail(_messages):
-            raise RuntimeError("api down")
-
-        self.assertEqual([], eh.extract_entities_via_llm(revision, translations, fail))
-
-    def test_context_target_overrides_conflicting_llm_target(self):
-        entities = [{
-            "source": "カルア",
-            "target": "卡尔亚",
-            "type": "person",
-            "confidence": 0.9,
-            "variants": ["卡露亚"],
-        }]
-        normalized = eh.enforce_context_targets(
+            [{"source": "カルア", "target": "卡尔亚"}, {"source": "王都", "target": "王都"}],
             entities,
-            [{"source": "カルア", "target": "卡露拉"}],
         )
-        self.assertEqual("卡露拉", normalized[0]["target"])
-        self.assertEqual(["卡尔亚", "卡露亚"], normalized[0]["variants"])
-        self.assertEqual("卡尔亚", entities[0]["target"])
 
-    def test_apply_entity_variants_only_changes_matching_source_segments(self):
-        revision, translations = self._revision_and_translations()
-        entities = [{
-            "source": "カルア",
-            "target": "卡尔亚",
-            "type": "person",
-            "confidence": 0.9,
-            "variants": ["卡露亚"],
-        }]
-        self.assertEqual(1, eh.apply_entity_variants(revision["segments"], translations, entities))
-        self.assertEqual("卡尔亚的胸。", translations[revision["segments"][1]["segment_id"]])
-        self.assertEqual("普通的一句。", translations[revision["segments"][2]["segment_id"]])
+    def test_plain_single_line_response_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "首行"):
+            eh.parse_executor_response("普通译文。")
+
+    def test_multiline_response_requires_te_protocol(self):
+        with self.assertRaisesRegex(ValueError, "首行"):
+            eh.parse_executor_response("译文\n额外解释")
+        with self.assertRaisesRegex(ValueError, "第 2 行"):
+            eh.parse_executor_response("T\t译文\n多余说明")
+
+    def test_first_use_locks_and_later_variant_only_rewrites_current_text(self):
+        locked = {}
+        text, first, conflicts = eh.apply_observations(
+            "カルアが笑った。", "卡尔亚笑了。", [{"source": "カルア", "target": "卡尔亚"}], locked
+        )
+        self.assertEqual("卡尔亚笑了。", text)
+        self.assertEqual({"カルア": "卡尔亚"}, locked)
+        self.assertEqual([{"source": "カルア", "target": "卡尔亚"}], first)
+        self.assertEqual([], conflicts)
+
+        text, first, conflicts = eh.apply_observations(
+            "カルアの胸。", "卡露亚的胸。", [{"source": "カルア", "target": "卡露亚"}], locked
+        )
+        self.assertEqual("卡尔亚的胸。", text)
+        self.assertEqual({"カルア": "卡尔亚"}, locked)
+        self.assertEqual([], first)
+        self.assertEqual("卡露亚", conflicts[0]["observed_target"])
+
+    def test_context_target_wins_before_first_observation(self):
+        locked = eh.context_targets({"entities": [{"source": "カルア", "target": "卡尔亚"}]})
+        text, first, _ = eh.apply_observations(
+            "カルアが来た。", "卡露亚来了。", [{"source": "カルア", "target": "卡露亚"}], locked
+        )
+        self.assertEqual("卡尔亚来了。", text)
+        self.assertEqual([], first)
+
+    def test_hallucinated_or_unused_observation_is_ignored(self):
+        locked = {}
+        text, first, conflicts = eh.apply_observations(
+            "普通の一文。", "普通的一句。", [{"source": "カルア", "target": "卡尔亚"}], locked
+        )
+        self.assertEqual("普通的一句。", text)
+        self.assertEqual(([], [], {}), (first, conflicts, locked))
+
+    def test_finding_round_trip(self):
+        finding = eh.entity_finding("カルア", "卡尔亚", _segment(0, "x")["segment_id"], 1)
+        entities = eh.entities_from_result({"findings": [finding]})
+        self.assertEqual(("カルア", "卡尔亚", 1.0), (
+            entities[0]["source"], entities[0]["target"], entities[0]["confidence"]
+        ))
+
+    def test_names_tsv_rejects_non_first_translation(self):
+        self.assertEqual({"カルア": "卡尔亚"}, eh.parse_locked_names_tsv("カルア\t卡尔亚\n"))
+        with self.assertRaisesRegex(ValueError, "first-wins"):
+            eh.parse_locked_names_tsv("カルア\t卡尔亚\nカルア\t卡露亚\n")
+
+    def test_agent_names_require_actual_use_and_do_not_repropose_context(self):
+        revision = _revision()
+        bundle = {
+            "segments": revision["segments"],
+            "context_pack": {"entities": [{"source": "カルア", "target": "卡尔亚"}]},
+        }
+        translations = {0: "卡露亚笑了。", 1: "卡露亚的胸。", 2: "普通的一句。"}
+        normalized, findings = eh.apply_locked_names(bundle, translations, {"カルア": "卡露亚"})
+        self.assertEqual("卡尔亚笑了。", normalized[0])
+        self.assertEqual("卡尔亚的胸。", normalized[1])
+        self.assertEqual([], findings)
+
+        bundle["context_pack"] = {"entities": []}
+        normalized, findings = eh.apply_locked_names(bundle, translations, {"カルア": "卡露亚"})
+        self.assertEqual("卡露亚笑了。", normalized[0])
+        self.assertEqual("卡露亚", eh.entities_from_result({"findings": findings})[0]["target"])
+        with self.assertRaisesRegex(ValueError, "target"):
+            eh.apply_locked_names(bundle, translations, {"カルア": "不存在的译名"})
+
+
+class EntityReviewTest(unittest.TestCase):
+    def _entity(self, source="カルア", target="卡尔亚"):
+        return {"source": source, "target": target, "type": "person", "confidence": 1.0, "variants": []}
 
     def test_enqueue_creates_pending_candidate_not_active_constraint(self):
-        revision, _ = self._revision_and_translations()
-        entities = [{
-            "source": "カルア",
-            "target": "卡尔亚",
-            "type": "person",
-            "confidence": 0.9,
-            "variants": ["卡露亚"],
-        }]
         with tempfile.TemporaryDirectory() as temp:
             entity_root = Path(temp) / "entities"
             queue_root = Path(temp) / "reviews"
-            reviews = eh.enqueue_entity_reviews(revision, entities, entity_root, queue_root)
+            reviews = eh.enqueue_entity_reviews(_revision(), [self._entity()], entity_root, queue_root)
             self.assertEqual("new_candidate", reviews[0]["reason"])
             self.assertEqual("pending", ReviewQueue(queue_root).list_all()[0]["status"])
             candidate = EntityStore(entity_root).list_scope(SCOPE)[0]
@@ -135,34 +147,23 @@ class EntityHarvestTest(unittest.TestCase):
             self.assertEqual([], resolve_entities(SCOPE_CONTEXT, "カルア", EntityStore(entity_root)))
 
     def test_enqueue_does_not_overwrite_existing_approved_entity(self):
-        revision, _ = self._revision_and_translations()
-        entities = [{
-            "source": "カルア",
-            "target": "卡尔亚",
-            "type": "person",
-            "confidence": 0.9,
-            "variants": [],
-        }]
         with tempfile.TemporaryDirectory() as temp:
             entity_root = Path(temp) / "entities"
             store = EntityStore(entity_root)
             store.put(build_entity(SCOPE, "カルア", "卡露拉", status="approved"))
-            reviews = eh.enqueue_entity_reviews(revision, entities, entity_root, Path(temp) / "reviews")
+            reviews = eh.enqueue_entity_reviews(
+                _revision(), [self._entity()], entity_root, Path(temp) / "reviews"
+            )
             self.assertEqual("target_conflict", reviews[0]["reason"])
             self.assertEqual("卡露拉", store.list_scope(SCOPE)[0]["target"])
 
     def test_enqueue_ignores_hallucinated_source_not_in_revision(self):
-        revision, _ = self._revision_and_translations()
-        entities = [{
-            "source": "不存在",
-            "target": "幻觉",
-            "type": "person",
-            "confidence": 0.9,
-            "variants": [],
-        }]
         with tempfile.TemporaryDirectory() as temp:
             reviews = eh.enqueue_entity_reviews(
-                revision, entities, Path(temp) / "entities", Path(temp) / "reviews"
+                _revision(),
+                [self._entity("不存在", "幻觉")],
+                Path(temp) / "entities",
+                Path(temp) / "reviews",
             )
             self.assertEqual([], reviews)
 
