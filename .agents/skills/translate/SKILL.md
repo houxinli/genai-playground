@@ -19,12 +19,13 @@ argument-hint: "<provider> <creator_id> [work_id] [executor=cursor-grok|claude-c
 
 翻译规则以 [`tasks/translation/docs/executor-instructions.md`](../../tasks/translation/docs/executor-instructions.md) 为准——先读它,本文件不重复。
 
-## 单一中间产物:扁平 TSV
+## 单一译文产物:扁平 TSV
 
 你**只写 TSV,不手写 `result.json`**——result 由 harness 从 `job.json + zh.tsv` 机械组装(回填 segment_id/source_hash/task_digest)。
+篇内首次出现的新名字另记在同目录 `<source_id>.names.tsv`,每行只写 `日文原名<TAB>中文译名`;没有新名字就不建。
 
 ```text
-job.json → results/<source_id>.zh.tsv → (harness 组装) result.json → 发布 → 渲染 → verify
+job.json → results/<source_id>.zh.tsv (+ 可选 names.tsv) → (harness 组装) result.json → 发布 → 渲染 → verify
 ```
 
 TSV 每行优先写 v2:`<0 基段序号><TAB><源文前缀 src_echo><TAB><中文译文>`；二列旧格式仍兼容但缺少对齐保护。译文可空(表示无法翻译,但该行必须在)。不要 Markdown 包裹、不要解释、不要额外列。
@@ -40,10 +41,12 @@ TSV 每行优先写 v2:`<0 基段序号><TAB><源文前缀 src_echo><TAB><中文
    ```
    `make` 默认 `ENTITY_STORE=tasks/translation/data/entities`,prepare 会把该 creator 适用的人名/术语
    **自动解析进 `job.context_pack.entities`**(openrouter 执行器拼成硬约束、agent 执行器读约束)——
-   **跨段/跨篇人名一致靠这个**,别再往 prompt 手写译名。库里没有的名,翻完用 `make extract-entities`
-   回填(见下)。要临时关闭传 `ENTITY_STORE=`(空)。
+   已批准的跨篇译名以此为准,别再往 prompt 手写译名。未批准的新名字只在当前篇的 `names.tsv` 内保持一致,
+   finish 后自动作为待审候选,不会直接污染跨篇实体库。要临时关闭传 `ENTITY_STORE=`(空)。
 2. **翻译**:读 `$WS/jobs/<work_id>.job.json` 的 `segments[]`,逐段译,写/追加 `$WS/results/<work_id>.zh.tsv`。
    - tags 段译成 `原词 / 中文`,保留 `[]` 和逗号;人名/术语遵 `job.context_pack`。
+   - 同时维护 `$WS/results/<work_id>.names.tsv`:每批只读取 `job.context_pack.entities` 和这份表。仅当新名字及其译名实际出现在本批源译时追加一行;Context Pack 已有的名字不重复写。已出现的名字只复用表中首次译名,不得追加不同译名。后来批次出现变体时只修正本批译文,下一批仍只携带首次译名表。
+   - `names.tsv` 只属于当前篇。finish 会把首次用法送审;只有批准后的实体才会进入以后作品的 `context_pack`。
    - **译文不得残留任何假名——人名(みのり→实里 这类)与拟声词/语气词(むにゅ♡→软绵♡ 这类)同样必须译成中文**,不是"可留"项;唯一例外是 tags 段的「原词 / 中文」左半。
    - **批量自适应**:每批按源文长度控制在约 3000–5000 字符(段落长则少翻几段,短对话可多翻),不要固定死段数——顶到输出上限正是漏译半句/截断的高发原因。
    - **逐批自检(append 前)**:扫一遍本批产出——①有没有行译文==源文(没翻);②有没有假名残留(tags 行除外);③段号是否连续无重复。有问题先修再写入。自检只针对刚写的批,不重读全篇。
@@ -61,7 +64,7 @@ TSV 每行优先写 v2:`<0 基段序号><TAB><源文前缀 src_echo><TAB><中文
 
 ## 断点续跑
 
-tsv 不全时 finish 会报缺段。续法:对照 `job.segments` 数量找出 tsv 里缺的段序号,**补译那些行追加到同一个 `<work_id>.zh.tsv`**,再重跑 finish。tsv 已有的行不重译。(无 run_id / 分片目录——就一个扁平 tsv。)
+tsv 不全时 finish 会报缺段。续法:先读同篇 `names.tsv`,再对照 `job.segments` 数量找出 tsv 里缺的段序号,**补译那些行追加到同一个 `<work_id>.zh.tsv`**,再重跑 finish。续译只带 `context_pack` 与表内首次译名;tsv 已有的行不重译。(无 run_id / 分片目录——就一个扁平 tsv。)
 
 ## 并行
 
@@ -76,7 +79,7 @@ tsv 不全时 finish 会报缺段。续法:对照 `job.segments` 数量找出 ts
 
 1. 遍历 `$WS/results/<id>.zh.tsv`(三列 v2),找出:①译文列为空的行;②译文列含日文假名的行(tags 行除外)。
 2. 对这些行,读 `$WS/jobs/<id>.job.json` 同段号 `source_text` 重新翻译,填/覆盖译文列;**其余行保持原样**。
-3. 人名/术语自动走 `job.context_pack.entities`(库里已有,含 forbidden 坏译黑名单),用它保持一致。
+3. 人名/术语走 `job.context_pack.entities` 加同篇 `names.tsv` 的首次译名,用它保持一致。
 4. 内容策略见下「边界」;涉及不可译内容时该行留空,最后汇报留空段号。
 5. 一个作者全部 tsv 补完 → finish + verify(整作者:`SOURCE=data/<provider>/<creator>`),回贴两段 JSON。
 

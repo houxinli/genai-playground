@@ -50,6 +50,15 @@ class BuildMessagesTest(unittest.TestCase):
         msgs = ex.build_messages({"segment_id": "x", "source_text": "犬がいた。"}, {})
         self.assertNotIn("硬约束", msgs[0]["content"])
 
+    def test_only_canonical_document_target_is_injected(self):
+        msgs = ex.build_messages(
+            {"segment_id": "x", "source_text": "みのりが笑った。"},
+            {},
+            {"みのり": "实里"},
+        )
+        self.assertIn("みのり => 实里", msgs[0]["content"])
+        self.assertNotIn("美乃里", msgs[0]["content"])
+
 
 class TranslateBundleTest(unittest.TestCase):
     def test_multiline_or_context_marker_response_is_rejected(self):
@@ -68,7 +77,7 @@ class TranslateBundleTest(unittest.TestCase):
             # 从 user 消息里取要翻译的段,查表返回中文
             line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
             src = line.split("] ", 1)[1]
-            return TR[src]
+            return f"T\t{TR[src]}"
 
         result = ex.translate_bundle(bundle, fake_call, completed_at="2026-06-13T00:00:00Z")
         self.assertEqual([], validate_artifact("result", result))
@@ -79,6 +88,42 @@ class TranslateBundleTest(unittest.TestCase):
         # 逐段覆盖,译文为中文
         self.assertEqual(len(bundle["segments"]), len(result["candidates"]))
         self.assertIn("早上好", "".join(c["text"] for c in result["candidates"]))
+
+    def test_first_name_translation_is_carried_and_later_variant_is_normalized(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        bundle["segments"][0]["source_text"] = "みのりが来た。"
+        bundle["segments"][1]["source_text"] = "みのりが笑った。"
+        systems = []
+
+        def fake_call(messages):
+            systems.append(messages[0]["content"])
+            if len(systems) == 1:
+                return "T\t实里来了。\nE\tみのり\t实里"
+            return "T\t美乃里笑了。\nE\tみのり\t美乃里"
+
+        result = ex.translate_bundle(bundle, fake_call, completed_at="2026-06-13T00:00:00Z")
+        self.assertEqual("实里来了。", result["candidates"][0]["text"])
+        self.assertEqual("实里笑了。", result["candidates"][1]["text"])
+        self.assertNotIn("みのり =>", systems[0])
+        self.assertIn("みのり => 实里", systems[1])
+        self.assertNotIn("美乃里", systems[1])
+        self.assertEqual(1, len(result["findings"]))
+        self.assertEqual("entity_first_use", result["findings"][0]["code"])
+
+    def test_approved_context_target_wins_without_becoming_document_variant(self):
+        rev = _rev()
+        body_ids = _body_ids(rev)
+        bundle = te.export_job(rev, body_ids, entities=[{"source": "みのり", "target": "实里"}])
+        bundle["segments"][0]["source_text"] = "みのりが来た。"
+
+        result = ex.translate_bundle(
+            bundle,
+            lambda _messages: "T\t美乃里来了。\nE\tみのり\t美乃里",
+            completed_at="2026-06-13T00:00:00Z",
+        )
+        self.assertEqual("实里来了。", result["candidates"][0]["text"])
+        self.assertEqual([], result["findings"])
 
 
 class OpenRouterCallRetryTest(unittest.TestCase):

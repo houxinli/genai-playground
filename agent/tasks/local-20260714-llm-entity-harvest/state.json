@@ -1,26 +1,25 @@
 {
   "schema_version": 1,
   "task_id": "local-20260714-llm-entity-harvest",
-  "title": "LLM 翻译后实体收割与 review 接线",
+  "title": "篇内首次译名记忆与 review 接线",
   "status": "complete",
   "branch": "main",
-  "objective": "恢复并完成 Claude 中断的翻译后 LLM 专名收割：统一本篇候选译名，并把跨篇实体提案接入既有 review 闸门。",
+  "objective": "让 API/Agent 在一次翻译过程中按篇 first-wins 锁定新名字，下一批只携带 canonical target，并把首次译名接入既有 review 闸门。",
   "github": {
     "issue": null,
     "pull_request": null
   },
   "scope": {
     "in": [
-      "tasks/translation/src/core/entity_harvest.py：LLM 响应解析、本篇变体归一、review 提案适配",
-      "tasks/translation/src/core/translate_user.py：OpenRouter auto 路线接线与参数透传",
-      "tasks/translation/src/core/entity_store.py：candidate 实体不进入 Context Pack",
-      "相关单元/集成测试、Makefile、AGENTS.md 与 system-design.md"
+      "tasks/translation/src/core/entity_harvest.py：T/E 响应解析、篇内 first-wins、names.tsv 与 review 证据",
+      "tasks/translation/src/core/openrouter_executor.py：API 同次调用输出译文与实际名字，下一段只注入 canonical target",
+      "tasks/translation/src/core/result_assemble.py 与 translate_user.py：Agent names.tsv 组装、发布后送审",
+      "相关单元/集成测试、Makefile、translate skill、执行器契约与系统设计"
     ],
     "out": [
       "真实 OpenRouter 调用与私有翻译数据修改",
       "agent prepare/finish 路线自动二次调用模型",
-      "自动 approve/locked 实体或绕过 entity-review 队列",
-      "提交、push 或 PR（当前沙箱 .git 只读）"
+      "自动 approve/locked 实体或绕过 entity-review 队列"
     ]
   },
   "context_files": [
@@ -52,6 +51,18 @@
       "id": "D3",
       "summary": "保留本篇显式 variants 归一，但归一后的文本仍走 Result→Candidate→QA→selection，不直接覆盖发布物。",
       "reason": "保留 Claude 草稿的篇内一致性目标，同时遵守 candidate/version 发布边界。",
+      "status": "superseded"
+    },
+    {
+      "id": "D4",
+      "summary": "不再翻译后第二次调用 LLM；Context Pack 优先，否则本文首次 source→target 锁定，冲突只修当前批。",
+      "reason": "用户接受跨篇差异，目标收缩为低成本模型也容易遵守的篇内一致性；单遍 T/E 或 names.tsv 足够。",
+      "status": "active"
+    },
+    {
+      "id": "D5",
+      "summary": "API 用临时 T/E 行协议，Agent 用两列 names.tsv；两者都把首次译名保存为 Result info finding。",
+      "reason": "保持 zh.tsv 纯净与 Result schema 不变，同时让 finish/review 能复用同一证据链。",
       "status": "active"
     }
   ],
@@ -79,6 +90,20 @@
       "acceptance": [
         "pytest tasks/translation/src -q 全绿",
         "make docs-drift 与 make agent-validate 通过"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "以单遍 first-wins 记忆取代翻译后 LLM 收割",
+      "status": "completed",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "OpenRouter 下一调用只接收本文 canonical target",
+        "Agent names.tsv 拒绝同 source 的第二个 target",
+        "不再发生翻译后的额外 LLM 调用",
+        "首次译名仍只进 pending review，不自动跨篇生效"
       ]
     }
   ],
@@ -119,16 +144,34 @@
         "status": "passed",
         "summary": "Agent task validation passed",
         "timestamp": "2026-07-15T06:21:42Z"
+      },
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "451 passed, 2 warnings",
+        "timestamp": "2026-07-16T05:50:36Z"
+      },
+      {
+        "command": "make docs-drift && make agent-validate && git diff --check",
+        "status": "passed",
+        "summary": "文档漂移、任务状态与 whitespace 检查通过",
+        "timestamp": "2026-07-16T05:50:36Z"
+      },
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q && make docs-drift && git diff --check",
+        "status": "passed",
+        "summary": "451 passed, 2 warnings；文档漂移与 whitespace 检查通过",
+        "timestamp": "2026-07-16T06:13:45Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260715T062142Z-codex",
-    "timestamp": "2026-07-15T06:21:42Z",
+    "checkpoint_id": "cp-20260716T061345Z-codex",
+    "timestamp": "2026-07-16T06:13:45Z",
     "agent": "codex",
-    "summary": "恢复并完成翻译后 LLM 实体收割：篇内归一走 Candidate 链，跨篇提案进 review，439 项测试全绿。",
-    "observed_head": "97cceed"
+    "summary": "已在最新主干的隔离分支同步 translate skill；API 严格 T/E，Agent names.tsv 只接受真实首次用法，451 项测试全绿。",
+    "observed_head": "e39e5dc"
   },
   "next_task": null
 }

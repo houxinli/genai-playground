@@ -750,15 +750,17 @@ entity linking 证据应保存：
 document_id;LLM 给的 readings 透传进新建候选 → 喂读音匹配)。这是 `extract_name_glossary`(#61) 的正确版:
 产物进**实体库**(有作用域/经 review/可锁定),而非塞进每次 prompt。`make extract-job` / `make import-extraction`。
 
-**已落地(2026-07-14,翻译后 LLM 收割)**:`entity_harvest.py` 接入 `translate-user` 的 OpenRouter auto 路线：
-- 每篇翻译完成后额外一次 LLM 调用读取正文源/译对照，产 `{source,target,type,confidence,variants}`；抽取失败
-  不阻断翻译。若同一 source 返回冲突 target，则整项丢弃；源文不存在的幻觉提案不入队。
-- 明确 `variants` 只归一本篇 Result 文本，归一后的文本仍按 Result → Candidate → QA → selection 建版，
-  不直接改历史版本；已有 Context Pack target 永远优先，本轮 LLM 冲突建议只作为待替换 variant。
-- 仅在文档成功发布后把提案交给 `entity_review.import_proposals`；新实体为 creator-scope
-  `automatic/candidate + pending review`，不会进入后续 Context Pack，须人工 approve/locked 才生效。
-- `make translate-user` 默认 review 根目录为 `tasks/translation/data/entity-reviews`；传空
-  `ENTITY_REVIEW_QUEUE=` 可关闭这次额外调用。agent prepare/finish 路线继续使用既有独立抽取 skill，不自动二次调用。
+**已落地(2026-07-15,篇内首次译名记忆)**:`entity_harvest.py` 与 `translate-user` 统一 API/Agent 路线：
+- 不再在翻译完成后额外调用一次 LLM。每篇从 approved Context Pack 开始，按源文顺序执行
+  `first wins`：首次观察的 `{source,target}` 在本文锁定，下一批只携带这个 canonical target。
+- API adapter 使用简单临时行协议 `T<TAB>译文` + 零到多行 `E<TAB>日文名<TAB>本段实际译名`；
+  后续观察若与锁定 target 冲突，只归一当前段，不把 variant 传给下一批。只接受 source/target 确实出现在
+  本段源/译文的观察，避免把提示里的其它名字抄入记忆。
+- Agent 保持纯 `<source_id>.zh.tsv`，另用可选两列 `<source_id>.names.tsv` 保存本文首次译名以便断点续跑；
+  `finish` 组装时校验同 source 不得出现第二个 target，且 source/target 必须在同段源译中有证据；approved
+  Context Pack 仍优先，其已有名字不重复生成首次用法 finding。
+- 首次译名复用 Result 既有 info finding 保存证据；成功发布后才送 `entity_review.import_proposals`。
+  未审核名字不跨篇共享；新实体仍是 creator-scope `automatic/candidate + pending review`。
 
 **已落地(2026-06-26,#83 §8.3 规则影响分析)**:`rule_impact.py` / `make rule-impact` 扫每个文档的
 current ref → DocumentVersion → 选中候选译文,**只读**地找出含旧译名(stale_text)的已发布 segment
@@ -1590,9 +1592,11 @@ prepare 把该 creator 适用人名/术语解析进 `context_pack.entities`;`ope
 拼成「人名/术语硬约束」注入 system prompt(agent 执行器读约束)。**跨段/跨篇人名一致靠此**——此前 skill 命令
 未传 ENTITY_STORE 导致 context_pack.entities 空、API 批处理各段独立音译(同名多写法);现默认开,传空串可关。
 
-**OpenRouter 翻译后实体收割(2026-07-14)**:`make translate-user MODE=auto` 同时默认
-`ENTITY_REVIEW_QUEUE=tasks/translation/data/entity-reviews`，每篇发布后额外一次 LLM 调用；本篇 variants 归一
-仍生成正常 Candidate，跨篇实体只进 pending review。传 `ENTITY_REVIEW_QUEUE=` 可禁用额外调用和费用。
+**篇内首次译名记忆(2026-07-15)**:`make translate-user MODE=auto` 的每次 API 调用同时返回简单 T/E 行，
+本文 `first wins` 锁定表随顺序调用累积，下一次只注入 canonical target；不再有翻译后的额外 LLM 调用。
+Agent 以同篇两列 `names.tsv` 断点续跑，finish 只为源译中有真实证据、且 Context Pack 尚无的名字组装
+findings。`ENTITY_REVIEW_QUEUE` 只控制首次译名是否进入 pending review，不影响篇内锁定，也不会让未审核
+名字跨篇生效。
 
 **空候选不可选(2026-07-13)**:reviewable 放宽(无 incumbent 的唯一候选先发布供 review)**不适用于
 空译文候选**——选空文本=发布带洞版本。空行(拒译/待填)→ 该段无 selection → 整篇 unresolved 阻断建版,

@@ -32,7 +32,7 @@ def _mk(tr):
     def executor(bundle):
         def call(messages):
             line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
-            return tr[line.split("] ", 1)[1]]
+            return f"T\t{tr[line.split('] ', 1)[1]]}"
         try:
             from .openrouter_executor import translate_bundle
         except ImportError:
@@ -229,7 +229,7 @@ class TranslateUserTest(unittest.TestCase):
             tu.translate_user("pixiv", src_dir, tmp / "s", tmp / "out", spy, entity_store=es_root)
             self.assertEqual(["おはよう"], [e["source"] for e in seen["entities"]])
 
-    def test_auto_mode_normalizes_harvested_variant_and_enqueues_review(self):
+    def test_auto_mode_enqueues_first_use_without_second_llm_call(self):
         try:
             from .entity_review import ReviewQueue
             from .entity_store import EntityStore, resolve_entities
@@ -237,13 +237,21 @@ class TranslateUserTest(unittest.TestCase):
             from entity_review import ReviewQueue
             from entity_store import EntityStore, resolve_entities
 
-        translated = {**TR, "「おはよう」": "「早安」"}
+        def executor(bundle):
+            try:
+                from .openrouter_executor import translate_bundle
+            except ImportError:
+                from openrouter_executor import translate_bundle
 
-        def extract(_messages):
-            return (
-                '[{"source":"おはよう","target":"早上好","type":"person",'
-                '"confidence":0.9,"variants":["早安"]}]'
-            )
+            def call(messages):
+                line = [item for item in messages[1]["content"].splitlines()
+                        if item.startswith("[翻译这一段]")][0]
+                source = line.split("] ", 1)[1]
+                if source == "「おはよう」":
+                    return "T\t「早上好」\nE\tおはよう\t早上好"
+                return f"T\t{TR[source]}"
+
+            return translate_bundle(bundle, call, model="mock", completed_at="2026-06-13T00:00:00Z")
 
         with tempfile.TemporaryDirectory() as t:
             tmp = Path(t)
@@ -257,18 +265,16 @@ class TranslateUserTest(unittest.TestCase):
                 src_dir,
                 tmp / "store",
                 tmp / "out",
-                _mk(translated),
+                executor,
                 entity_store=entity_root,
                 entity_review_queue=queue_root,
-                extract_fn=extract,
             )
             document = manifest["documents"][0]
             self.assertTrue(document["published"], document)
-            self.assertEqual(1, document["entity_harvest_normalized_segments"])
+            self.assertEqual({"おはよう": "早上好"}, document["entity_harvest"])
             self.assertEqual(1, document["entity_reviews_enqueued"])
             rendered = (tmp / "out" / "700001.zh.txt").read_text(encoding="utf-8")
             self.assertIn("早上好", rendered)
-            self.assertNotIn("早安", rendered)
             self.assertEqual(1, len(ReviewQueue(queue_root).list_pending()))
             store = EntityStore(entity_root)
             candidate = store.list_scope({"level": "creator", "key": "pixiv:700000"})[0]
@@ -279,6 +285,68 @@ class TranslateUserTest(unittest.TestCase):
                 "document_id": "pixiv:700000:700001",
             }
             self.assertEqual([], resolve_entities(scope_context, "おはよう", store))
+
+    def test_agent_names_tsv_is_assembled_and_approved_target_wins(self):
+        import json as _json
+        try:
+            from .entity_store import EntityStore, entity_id_for
+        except ImportError:
+            from entity_store import EntityStore, entity_id_for
+
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = tmp / "53230930"
+            src_dir.mkdir()
+            shutil.copy(SRC, src_dir / "700001.txt")
+            store = tmp / "store"
+            jobs = tmp / "jobs"
+            results = tmp / "results"
+            render = tmp / "out"
+            results.mkdir()
+            entity_root = tmp / "entities"
+            scope = {"level": "creator", "key": "pixiv:700000"}
+            EntityStore(entity_root).put({
+                "schema_version": 1,
+                "entity_id": entity_id_for(scope, "おはよう"),
+                "scope": scope,
+                "source": "おはよう",
+                "target": "早上好",
+                "type": "person",
+                "authority": "manual",
+                "status": "approved",
+                "updated_at": "2026-07-15T00:00:00Z",
+            })
+            prep = tu.prepare_user("pixiv", src_dir, store, jobs, entity_store=entity_root)
+            job = prep["jobs"][0]
+            sid = job["source_id"]
+            bundle = _json.loads(Path(job["job"]).read_text(encoding="utf-8"))
+            rows = []
+            for index, segment in enumerate(bundle["segments"]):
+                translation = (
+                    "「早安」" if segment["source_text"] == "「おはよう」" else TR[segment["source_text"]]
+                )
+                rows.append(f"{index}\t{segment['source_text'][:8]}\t{translation}")
+            (results / f"{sid}.zh.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+            (results / f"{sid}.names.tsv").write_text("おはよう\t早安\n", encoding="utf-8")
+
+            manifest = tu.finish_user(
+                "pixiv",
+                src_dir,
+                store,
+                render,
+                results,
+                jobs_dir=jobs,
+                entity_store=entity_root,
+                entity_review_queue=tmp / "reviews",
+                producer_name="codex",
+            )
+            self.assertTrue(manifest["documents"][0]["published"], manifest["documents"][0])
+            rendered = (render / f"{sid}.zh.txt").read_text(encoding="utf-8")
+            self.assertIn("早上好", rendered)
+            self.assertNotIn("早安", rendered)
+            result = _json.loads((results / f"{sid}.result.json").read_text(encoding="utf-8"))
+            entities = tu.entity_harvest.entities_from_result(result)
+            self.assertEqual([], entities)
 
     def test_entity_store_wired_into_prepare_and_finish(self):
         # gh-149/#83:实体库 → prepare 的 context_pack.entities;finish 必须同库(约束入 task 身份),
