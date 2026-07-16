@@ -189,11 +189,14 @@ def verify_collection(
                 errors.append(f"{sid} 缺 {variant} rendered: {source}")
             elif expected_hashes.get(variant) != _sha256_file(source):
                 errors.append(f"{sid}.{variant}.txt 已变化，合集需要重建")
+    # 旧 manifest 无 formats 字段 → 默认双格式(向后兼容)。
+    manifest_formats = manifest.get("formats") or ["txt", "epub"]
+    manifest_formats = [f for f in ("txt", "epub") if f in set(manifest_formats)]
     outputs = manifest.get("outputs", {})
     required_outputs = {
         f"{author_name}_{variant}.{suffix}"
         for variant in VARIANTS
-        for suffix in ("txt", "epub")
+        for suffix in manifest_formats
     } if isinstance(author_name, str) and author_name else set()
     if not isinstance(outputs, dict):
         errors.append("合集 manifest.outputs 必须是 object")
@@ -210,7 +213,10 @@ def verify_collection(
         elif expected_hash != _sha256_file(output):
             errors.append(f"合集输出被修改: {output}")
     expected_count = len(expected_documents)
-    for field in ("chapters", "epub_chapters"):
+    # 只核对本合集实际产出的格式对应的章节计数(txt→chapters，epub→epub_chapters)。
+    for field, fmt in (("chapters", "txt"), ("epub_chapters", "epub")):
+        if fmt not in manifest_formats:
+            continue
         counts = manifest.get(field, {})
         for variant in VARIANTS:
             if counts.get(variant) != expected_count:
@@ -220,13 +226,28 @@ def verify_collection(
     return {"ok": not errors, "documents": expected_count, "errors": errors}
 
 
+DEFAULT_FORMATS = ("epub",)  # 默认只发 epub(用户 2026-07-16:整本 txt 不再默认发布/同步 GDrive)
+
+
+def _normalize_formats(formats) -> tuple:
+    picked = tuple(f for f in ("txt", "epub") if f in set(formats or ()))
+    if not picked:
+        raise ValueError("formats 至少需含 'txt' 或 'epub'")
+    return picked
+
+
 def build_collection(
     author_name: str, creator_id: str, *, workspaces_root: Path, out_dir: Path,
     provider: str = "pixiv", gdrive_dir: Optional[Path] = None, furigana: bool = True,
+    formats=DEFAULT_FORMATS,
 ) -> Dict[str, Any]:
-    """收集 creator 已发布篇 → 完整合并成整本；缺任一 variant 时不替换旧合集。"""
+    """收集 creator 已发布篇 → 完整合并成整本；缺任一 variant 时不替换旧合集。
+
+    formats:发布哪些整本格式(('epub',) / ('txt',) / ('txt','epub')),默认只 epub。
+    只影响作者级整本产物与 GDrive 同步;逐篇 rendered 不受影响。"""
     if not author_name.strip():
         raise ValueError("author_name 不能为空")
+    formats = _normalize_formats(formats)
     workspaces_root = Path(workspaces_root)
     out_dir = Path(out_dir)
     documents = _published_documents(workspaces_root, provider, creator_id)
@@ -264,12 +285,12 @@ def build_collection(
         if furigana:
             for sid in sids:
                 _annotate_furigana_file(staging / f"{sid}.bilingual.txt")
-        merged = merge_author(staging, author_name, sids)
-        epubs = _build_epubs(staging, author_name, sids)
+        merged = merge_author(staging, author_name, sids) if "txt" in formats else {}
+        epubs = _build_epubs(staging, author_name, sids) if "epub" in formats else {}
         output_names = [
             f"{author_name}_{var}.{suffix}"
             for var in VARIANTS
-            for suffix in ("txt", "epub")
+            for suffix in formats
         ]
         output_hashes = {
             name: _sha256_file(staging / name)
@@ -281,6 +302,7 @@ def build_collection(
             "provider": provider,
             "creator_id": creator_id,
             "author_name": author_name,
+            "formats": list(formats),
             "documents": manifest_documents,
             "chapters": {key: value.get("chapters") for key, value in merged.items()},
             "epub_chapters": epubs,
@@ -304,7 +326,10 @@ def build_collection(
         gdrive_dir = Path(gdrive_dir)
         gdrive_dir.mkdir(parents=True, exist_ok=True)
         for name in output_names:
-            dst = gdrive_dir / name
+            # GDrive 上用**人类可读且可区分**的文件名(`<author>·中文.epub` / `<author>·日中对照.epub`):
+            # 微信读书等对本地导入 epub 按**文件名**显示、不读 dc:title,统一 `_zh/_bilingual` 会显示成
+            # "作者_zh" 或区分不开(用户 2026-07-16)。本地合集目录仍保留 `_var` 规范名不动。
+            dst = gdrive_dir / _gdrive_display_name(author_name, name)
             shutil.copy(out_dir / name, dst)
             gdrive_files.append(str(dst))
     return {
@@ -319,9 +344,24 @@ def build_collection(
     }
 
 
+# variant → 书名/文件名后缀:让 zh 与 bilingual 两本 epub 书名不同,阅读器(微信读书等)才能区分。
+_VARIANT_TITLE = {"zh": "中文", "bilingual": "日中对照"}
+
+
+def _gdrive_display_name(author_name: str, output_name: str) -> str:
+    """本地规范名 `<author>_<var>.<ext>` → GDrive 人类可读名 `<author>·<中文标签>.<ext>`。
+    未识别 variant 时原样返回。用于阅读器按文件名显示的场景(微信读书本地导入)。"""
+    for var, label in _VARIANT_TITLE.items():
+        prefix = f"{author_name}_{var}."
+        if output_name.startswith(prefix):
+            return f"{author_name}·{label}.{output_name[len(prefix):]}"
+    return output_name
+
+
 def _build_epubs(out_dir: Path, author_name: str, sids: List[str]) -> Dict[str, int]:
     """每个 variant 产 `<author>_<var>.epub`(显式 TOC,阅读器不再从 txt 猜章节)。
-    章节与 merge_author 同源:按 source_id 升序,标题取渲染文件的中文 title。"""
+    章节与 merge_author 同源:按 source_id 升序,标题取渲染文件的中文 title。
+    **书名含 variant**(`<author>·中文` / `<author>·日中对照`):否则两本同名、阅读器区分不开。"""
     out: Dict[str, int] = {}
     for var in VARIANTS:
         chapters = []
@@ -333,7 +373,8 @@ def _build_epubs(out_dir: Path, author_name: str, sids: List[str]) -> Dict[str, 
             title = _chapter_title(content) or sid
             chapters.append((f"第{len(chapters) + 1}章 {title}", content))
         if chapters:
-            build_epub(out_dir / f"{author_name}_{var}.epub", author_name, author_name, chapters)
+            book_title = f"{author_name}·{_VARIANT_TITLE.get(var, var)}"
+            build_epub(out_dir / f"{author_name}_{var}.epub", book_title, author_name, chapters)
             out[var] = len(chapters)
     return out
 
@@ -349,7 +390,9 @@ def main() -> int:
     p.add_argument("--no-furigana", dest="furigana", action="store_false",
                    help="不给 bilingual 合集的日文源文加汉字注音(默认加)")
     p.add_argument("--verify-only", action="store_true", help="只核对现有合集是否与 current refs/rendered 一致")
+    p.add_argument("--formats", default="epub", help="发布哪些整本格式,逗号分隔(epub/txt/txt,epub);默认 epub")
     args = p.parse_args()
+    formats = tuple(f.strip() for f in args.formats.split(",") if f.strip())
     out = args.out or (args.workspaces_root / f"_collection-{args.creator}")
     if args.verify_only:
         res = verify_collection(args.creator, workspaces_root=args.workspaces_root,
@@ -360,7 +403,7 @@ def main() -> int:
         p.error("构建模式需要非空 --author 与 --creator")
     res = build_collection(args.author, args.creator, workspaces_root=args.workspaces_root,
                            out_dir=out, provider=args.provider, gdrive_dir=args.gdrive,
-                           furigana=args.furigana)
+                           furigana=args.furigana, formats=formats)
     print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0
 
