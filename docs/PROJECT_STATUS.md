@@ -71,9 +71,9 @@ job(#83 P1b-c)。完整顺序以 system-design §20.2 为准。
 | 输出状态持久化 | 新增完成 | 运行状态记录在配置的 `log_dir` 下的 `translation_state.json` | `tasks/translation/src/core/run_state.py` |
 | 修复流程 | 可用 | 标准 repair 已支持经由 `src/translate.py --repair-existing` 进入主流水线；可注入人名规则，也可读取 QA 报告优先修复问题行 | `tasks/translation/src/translate.py` |
 | 打包/提取中文 | 可用 | 已补 `.meta.json` / `index.json` 元数据回退 | `tasks/translation/src/scripts/extract_chinese.py` |
-| 质量检测 | 可用 | 逐段规则 QC/QA gate(双语配对、假名残留、拒绝模板、失败标记、人名坏别名)；document-level QA(block-paste 对齐审计,`block_paste_run` error 阻断发布)；TSV v2 `src_echo` 逐行源文校验；空译文候选一律阻断建版(不产带缺口版本,#153) | `qa_gate.py`, `document_qa.py`, `result_assemble.py` |
+| 质量检测 | 可用 | 逐段规则 QC/QA gate(双语配对、假名残留、拒绝模板、失败标记、人名坏别名)；document-level QA 会阻断 block-paste、多行单段译文与 context marker 泄漏；OpenRouter 在 Result 前提前拒绝同类结构污染；TSV v2 `src_echo` 逐行源文校验；空译文候选一律阻断建版(不产带缺口版本,#153) | `qa_gate.py`, `document_qa.py`, `result_assemble.py` |
 | 人名一致性 | 通道已通,库待审核/填充 | 实体库已接入 prepare/finish 与 OpenRouter auto 路线；auto 每篇发布后用 LLM 收割专名、按明确 variants 归一本篇 candidate，并把跨篇提案送入 review。`candidate` 不进入 Context Pack，人工 approve/locked 后才约束后续篇；已定人名仍待播种 | `translate_user.py`, `entity_harvest.py`, `entity_store.py` |
-| 成品发布(publish) | 可用 | finish 从 TSV 组装候选→评估→择优→版本→发布→渲染 zh/bilingual;遇已有 ref 带血缘 republish 推进(#145);author-collection 按作者名合并整本 + 生成显式 TOC 的 EPUB(stdlib,解决阅读器猜章节),可选复制 GDrive | `translate_user.py`, `author_collection.py`, `epub_build.py` |
+| 成品发布(publish) | 可用 | finish 从 TSV 组装候选→评估→择优→版本→发布→渲染 zh/bilingual;遇已有 ref 带血缘 republish 推进(#145);author-collection 预检全部 current refs 的双 variant，原子替换整本并生成带 ref/render/output digest 的 manifest；`author-collection-verify` 可查新增 ref、重渲染和输出漂移 | `translate_user.py`, `author_collection.py`, `epub_build.py` |
 | 旧流水线迁移 | 进行中 | 6 作者 311/371 篇迁入 per-creator workspace(源文锚点对齐);剩余按小缺口补译/警告复核/乱档重译/缺源重下四类处理 | `pipeline_ingest.py`, `legacy_import.py` |
 | Preset 体系 | 基本可用 | 已新增 OpenRouter 正文翻译 + 本地人名预读 preset；来源拆分仍需继续完善 | `tasks/translation/config/presets.json` |
 | candidate QA 评估 | 已完成 | 对 candidate 跑硬规则产出绑定 Evaluation；用于 gate/证据，不单独裁决语义优劣 | `tasks/translation/src/core/candidate_eval.py` |

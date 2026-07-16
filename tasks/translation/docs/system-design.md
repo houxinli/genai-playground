@@ -1551,7 +1551,12 @@ full run 必须覆盖全篇；patch run 只覆盖用户/QA 指定的少量 segme
 收敛到 `qa_gate.hard_rule_hits(source, translation)`;`candidate_eval`(新架构)与 `TranslationQAGate`(离线 gate)
 都调它,只各自包装成 finding/issue。消除两份实现改一处漏一处的隐患(#125 教训)。
 
-**Document-level 对齐 QA(2026-07-04)**:`document_qa.audit_document_translations` 负责跨段关系检查,不塞进逐段 `qa_gate`。`duplicate_translation_distinct_source` 是 warning,用于召回和人工审计;`block_paste_run` 要求连续块、恒定 offset、源文显著不同,是 error,`MODE=finish` 阻断发布,legacy bilingual 导入则返回 `document_qa error` issues 并不写入候选/attestation。
+**Document-level 对齐 QA(2026-07-04;结构污染闸门 2026-07-14)**:`document_qa.audit_document_translations`
+负责跨段关系和执行器输出形状检查,不塞进逐段 `qa_gate`。`duplicate_translation_distinct_source` 是 warning,
+用于召回和人工审计;`block_paste_run` 要求连续块、恒定 offset、源文显著不同,是 error。扁平 TSV 约定每个
+segment 只有一个物理行,因此 `multiline_translation` 和上/下文、`[tags]` 等
+`context_marker_leak` 也属于 error；`MODE=finish` 在发布前阻断。OpenRouter 执行器在 Result 生成前复用同一
+形状检查,避免把明显邻段污染写入 store；legacy bilingual 导入遇 document QA error 则不写候选/attestation。
 
 **实体库接入 prepare/finish(2026-07-11)**:`translate-user` 增 `ENTITY_STORE=`——prepare 时按文档 scope
 用 `resolve_entities_for_revision` 把本篇适用实体解析进 `context_pack.entities`(折入 task 身份);
@@ -1573,6 +1578,12 @@ full run 必须覆盖全篇；patch run 只覆盖用户/QA 指定的少量 segme
 **作者级整本命名(2026-07-14 用户约定)**:`merge_author`/`author_collection` 输出用 `<author>_zh.txt`、
 `<author>_bilingual.txt`、`<author>_zh.epub`、`<author>_bilingual.epub`(下划线,非 `.zh.`),与逐篇
 `{sid}.{var}.txt` 区分、避免"双点扩展名"歧义。
+
+**作者合集完整性/新鲜度闸门(2026-07-14)**:`author_collection` 构建前必须确认每个 current ref 同时有
+zh/bilingual 两种 rendered；缺任一输入即失败并保留旧合集,不再输出“少几章但命令成功”的部分成品。新整本先在
+临时目录构建并自校验,成功后才替换目标目录；`collection_manifest.json` 记录 schema version、完整 source-id/
+version-id 集合、逐篇 rendered digest、章节数和整本输出 digest。`make author-collection-verify` 只读比较 manifest
+与当前 refs/rendered/output：新增/删除 ref、current version 变化、重渲染或成品被修改都会返回非零,要求重建后再交付。
 
 **实体库默认接线(2026-07-14)**:`make translate-user` 默认 `ENTITY_STORE=tasks/translation/data/entities`,
 prepare 把该 creator 适用人名/术语解析进 `context_pack.entities`;`openrouter_executor._constraints_block`

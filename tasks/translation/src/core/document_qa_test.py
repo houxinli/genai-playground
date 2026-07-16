@@ -16,6 +16,22 @@ def _segments(texts):
 
 
 class DocumentQATest(unittest.TestCase):
+    def test_multiline_and_context_markers_are_document_errors(self):
+        segs = _segments(["源0", "源1", "源2"])
+        translations = {
+            "s0": "译文0\n\n混入的邻段",
+            "s1": "译文1 [tags] 术语",
+            "s2": "译文2",
+        }
+        findings = document_qa.audit_document_translations(segs, translations)
+        by_code = {finding["code"]: finding for finding in findings}
+        self.assertEqual([0], by_code["multiline_translation"]["indices"])
+        self.assertEqual([1], by_code["context_marker_leak"]["indices"])
+        self.assertEqual("error", by_code["multiline_translation"]["severity"])
+
+    def test_single_line_translation_shape_is_clean(self):
+        self.assertEqual([], document_qa.translation_shape_errors("只有当前段的译文。"))
+
     def test_block_paste_run_is_error(self):
         segs = _segments(["源0", "源1", "源2", "源3", "新0", "新1", "新2"])
         translations = {f"s{i}": text for i, text in enumerate(["译0", "译1", "译2", "译3", "译1", "译2", "译3"])}

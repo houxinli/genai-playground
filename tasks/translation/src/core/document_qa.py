@@ -8,6 +8,7 @@ import re
 from typing import Any, Dict, List, Sequence
 
 _NORMALIZE_RE = re.compile(r"\s+")
+_CONTEXT_MARKER_RE = re.compile(r"\[(?:上文|下文|翻译这一段|tags|原词\s*/\s*中文)\]", re.IGNORECASE)
 
 
 def _norm(text: str) -> str:
@@ -26,9 +27,46 @@ def audit_document_translations(
 ) -> List[Dict[str, Any]]:
     """Audit an entire segment→translation mapping and return warning/error findings."""
     ordered = [s for s in segments if s["segment_id"] in translations_by_segment]
+    shape_findings = _translation_shape_findings(ordered, translations_by_segment)
     duplicate_findings = _duplicate_translation_findings(ordered, translations_by_segment)
     block_findings = _block_paste_findings(ordered, translations_by_segment, min_run=min_run)
-    return duplicate_findings + block_findings
+    return shape_findings + duplicate_findings + block_findings
+
+
+def translation_shape_errors(text: str) -> List[str]:
+    """返回违反单 segment/扁平 TSV 输出契约的结构错误码。"""
+    errors: List[str] = []
+    if "\n" in text or "\r" in text:
+        errors.append("multiline_translation")
+    if _CONTEXT_MARKER_RE.search(text):
+        errors.append("context_marker_leak")
+    return errors
+
+
+def _translation_shape_findings(
+    segments: Sequence[Dict[str, Any]], translations_by_segment: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    grouped: Dict[str, Dict[str, List[Any]]] = {}
+    for idx, seg in enumerate(segments):
+        for code in translation_shape_errors(translations_by_segment[seg["segment_id"]]):
+            bucket = grouped.setdefault(code, {"segments": [], "indices": []})
+            bucket["segments"].append(seg["segment_id"])
+            bucket["indices"].append(idx)
+    messages = {
+        "multiline_translation": "单段译文含物理换行，无法进入扁平 TSV，疑似混入邻段",
+        "context_marker_leak": "译文泄漏上/下文或 tags 等执行器上下文标记",
+    }
+    return [
+        {
+            "code": code,
+            "severity": "error",
+            "message": messages[code],
+            "segments": grouped[code]["segments"],
+            "indices": grouped[code]["indices"],
+        }
+        for code in ("multiline_translation", "context_marker_leak")
+        if code in grouped
+    ]
 
 
 def _duplicate_translation_findings(

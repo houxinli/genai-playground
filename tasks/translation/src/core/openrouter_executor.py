@@ -21,13 +21,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+try:
+    from .document_qa import translation_shape_errors
+except ImportError:
+    from document_qa import translation_shape_errors
+
 DEFAULT_MODEL = "x-ai/grok-4.3"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 _SYSTEM_BASE = (
     "你是一名专业的日译中网络小说译者。逐段翻译,只输出该段的中文译文,不要解释、不要注释、"
     "不要 Markdown、不要输出原文或上下文标记。沿用原文的方引号「」『』。中文用恰当中文标点。"
-    "译文不得残留日文假名。tags 段译成 `原词 / 中文` 并保留 `[]` 与逗号。"
+    "译文必须只有一个物理行,禁止换行。译文不得残留日文假名。"
+    "tags 段译成 `原词 / 中文` 并保留 `[]` 与逗号。"
 )
 
 
@@ -77,6 +83,12 @@ def translate_bundle(
     candidates = []
     for seg in bundle["segments"]:
         text = call_fn(build_messages(seg, context_pack)).strip()
+        shape_errors = translation_shape_errors(text)
+        if shape_errors:
+            raise ValueError(
+                f"segment {seg['segment_id']} 返回结构污染: {shape_errors};"
+                "执行器必须只输出当前段的一行译文"
+            )
         candidates.append({
             "result_candidate_key": candidate_key,
             "segment_id": seg["segment_id"],

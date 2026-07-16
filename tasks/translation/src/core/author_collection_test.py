@@ -36,6 +36,8 @@ class AuthorCollectionTest(unittest.TestCase):
             res = ac.build_collection("作者X", "700000", workspaces_root=ws, out_dir=Path(t) / "coll")
             self.assertEqual(["700001", "700002"], res["sids"])  # 按 source_id 升序
             self.assertEqual([], res["missing"])
+            self.assertTrue(res["verification"]["ok"])
+            self.assertTrue((Path(t) / "coll" / "collection_manifest.json").is_file())
             self.assertEqual(2, res["chapters"]["zh"])
             self.assertEqual(2, res["chapters"]["bilingual"])
             zh = Path(t) / "coll" / "作者X_zh.txt"
@@ -56,14 +58,56 @@ class AuthorCollectionTest(unittest.TestCase):
             self.assertTrue((gd / "作者Y_bilingual.txt").is_file())
             self.assertEqual(4, len(res["gdrive"]))  # txt + epub × 2 variant
 
-    def test_missing_rendered_reported(self):
+    def test_missing_rendered_refuses_partial_collection_and_keeps_previous(self):
         with tempfile.TemporaryDirectory() as t:
             ws = Path(t) / "workspaces"
             _make_work(ws, "700001", title="有渲染")
             _make_work(ws, "700002", title="无渲染", rendered=False)  # 发布了但没 rendered
-            res = ac.build_collection("作者Z", "700000", workspaces_root=ws, out_dir=Path(t) / "coll")
-            self.assertEqual(["700002"], res["missing"])
-            self.assertEqual(1, res["chapters"]["zh"])
+            out = Path(t) / "coll"
+            out.mkdir()
+            previous = out / "作者Z_zh.txt"
+            previous.write_text("旧合集", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "拒绝生成部分合集"):
+                ac.build_collection("作者Z", "700000", workspaces_root=ws, out_dir=out)
+            self.assertEqual("旧合集", previous.read_text(encoding="utf-8"))
+
+    def test_verify_detects_new_ref_after_build(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            out = Path(t) / "coll"
+            _make_work(ws, "700001", title="第一篇")
+            ac.build_collection("作者V", "700000", workspaces_root=ws, out_dir=out)
+            self.assertTrue(ac.verify_collection(
+                "700000", workspaces_root=ws, out_dir=out
+            )["ok"])
+            _make_work(ws, "700002", title="后来发布")
+            verification = ac.verify_collection("700000", workspaces_root=ws, out_dir=out)
+            self.assertFalse(verification["ok"])
+            self.assertIn("published refs 已变化", "\n".join(verification["errors"]))
+
+    def test_verify_detects_changed_rendered_without_ref_change(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            out = Path(t) / "coll"
+            _make_work(ws, "700001", title="第一篇")
+            ac.build_collection("作者W", "700000", workspaces_root=ws, out_dir=out)
+            rendered = ws / "pixiv-700001" / "rendered" / "700001.zh.txt"
+            rendered.write_text(rendered.read_text(encoding="utf-8") + "已重渲染\n", encoding="utf-8")
+            verification = ac.verify_collection("700000", workspaces_root=ws, out_dir=out)
+            self.assertFalse(verification["ok"])
+            self.assertIn("合集需要重建", "\n".join(verification["errors"]))
+
+    def test_verify_detects_modified_collection_output(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            out = Path(t) / "coll"
+            _make_work(ws, "700001", title="第一篇")
+            ac.build_collection("作者Q", "700000", workspaces_root=ws, out_dir=out)
+            merged = out / "作者Q_zh.txt"
+            merged.write_text(merged.read_text(encoding="utf-8") + "意外修改\n", encoding="utf-8")
+            verification = ac.verify_collection("700000", workspaces_root=ws, out_dir=out)
+            self.assertFalse(verification["ok"])
+            self.assertIn("合集输出被修改", "\n".join(verification["errors"]))
 
     def test_no_published_raises(self):
         with tempfile.TemporaryDirectory() as t:

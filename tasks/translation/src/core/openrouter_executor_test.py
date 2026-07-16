@@ -52,6 +52,14 @@ class BuildMessagesTest(unittest.TestCase):
 
 
 class TranslateBundleTest(unittest.TestCase):
+    def test_multiline_or_context_marker_response_is_rejected(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        for bad in ("当前段\n混入邻段", "当前段 [tags] 多余内容"):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValueError, "结构污染"):
+                    ex.translate_bundle(bundle, lambda _messages, text=bad: text)
+
     def test_result_is_schema_valid_and_matches_task(self):
         rev = _rev()
         bundle = te.export_job(rev, _body_ids(rev))
