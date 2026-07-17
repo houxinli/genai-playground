@@ -90,3 +90,7 @@ oauth.json
 
 # Claude Code 本地设置(不入库)
 .claude/settings.local.json
+
+# 个人数据 / 凭据(public 仓库不入库;见 issue #172)
+tasks/fitness/data/workout_log.md
+tasks/sunday-movies/config/fandango_cookies.json
