@@ -1,0 +1,5 @@
+{
+  "session_id": "<your-fandango-session-id>",
+  "user_id": "<your-fandango-user-id>",
+  "csrf_token": "<your-fandango-csrf-token>"
+}
