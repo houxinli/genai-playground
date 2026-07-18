@@ -145,9 +145,9 @@
   ],
   "next_action": {
     "step_id": "S2",
-    "instruction": "Run the complete annotate skill loop for pixiv 26594168 and review it before selecting another work.",
+    "instruction": "Run the complete annotate skill loop for pixiv 26112431 and review it before selecting another work.",
     "acceptance": [
-      "26594168 publishes with zero unresolved segments and a current annotation ref plus study output.",
+      "26112431 publishes with zero unresolved segments and a current annotation ref plus study output.",
       "Repeated finish adds no attestation/version and leaves the ref unchanged.",
       "A beginning/middle/end review and any generalizable finding are recorded on #185."
     ]
@@ -285,16 +285,28 @@
         "status": "passed",
         "summary": "Corrected reversed burden and kneeling semantics, standardized the relationship title without merging its distinct employer sense, republished version_39352f4b5915acfad82e5e73d790ceec7a592a43, and opened #192.",
         "timestamp": "2026-07-18T11:03:05Z"
+      },
+      {
+        "command": "make annotate MODE=finish/status PROVIDER=pixiv WS=...pixiv-26594168",
+        "status": "passed",
+        "summary": "26594168 published 453/453 body annotations with zero unresolved; replay kept 5013 attestations, 8 versions, and translation ref, annotation ref, and study digests stable.",
+        "timestamp": "2026-07-18T11:22:56Z"
+      },
+      {
+        "command": "translation alignment repair + finish + verify for pixiv-26594168",
+        "status": "passed",
+        "summary": "Repaired a ten-row semantic shift and canonicalized the Chinese surname to 白河, republished version_3b12fd6e8bca2b8e5fcf34588475f70855e6c972, rerendered study, and verified current ref/render consistency.",
+        "timestamp": "2026-07-18T11:22:56Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T110305Z-codex",
-    "timestamp": "2026-07-18T11:03:05Z",
+    "checkpoint_id": "cp-20260718T112256Z-codex",
+    "timestamp": "2026-07-18T11:22:56Z",
     "agent": "codex",
-    "summary": "Completed 27104161 as work 10/25 with 353 validated annotation rows, semantic and relationship-title translation repair, #192, and replay-stable artifact evidence.",
-    "observed_head": "6065035367928f740c369a91fb2c45f8919c7273"
+    "summary": "Completed 26594168 as work 11/25 with 453 validated annotation rows, a repaired ten-row translation shift, canonical surname consistency, and replay-stable artifact evidence.",
+    "observed_head": "1069cc43c4e1d99fe4cc606d48863f6f23bc6645"
   },
   "next_task": null
 }
