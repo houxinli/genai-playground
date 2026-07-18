@@ -183,8 +183,10 @@ def export_job(
     仍只支持无外部引用的 translate task:knowledge_snapshot / existing_candidate / annotation 是对
     外部工件的引用,需把被引内容打进 bundle 才自包含,留待 #83 P1b——否则隔离执行器拿不到内容。
     """
-    if kwargs.get("task_type", "translate") != "translate":
-        raise ValueError("export_job 目前只支持 translate task(其它类型需 #83 P1b context builder)")
+    # annotate(陪读注解,#174)与 translate 同构:输入同为 revision 源文段、自包含无外部引用,
+    # 差别只在执行器产出(译文 vs 注解后的源文行),bundle 结构一致。
+    if kwargs.get("task_type", "translate") not in ("translate", "annotate"):
+        raise ValueError("export_job 只支持 translate/annotate task(其它类型需 #83 P1b context builder)")
     for ref in ("knowledge_snapshot_id", "existing_candidate_ids", "annotation_ids"):
         if kwargs.get(ref):
             raise ValueError(f"export_job 暂不支持带 {ref} 的 job(对外部工件的引用需 #83 P1b 打包)")

@@ -30,6 +30,7 @@
     "task_type": {
       "enum": [
         "translate",
+        "annotate",
         "review",
         "compare",
         "repair",
