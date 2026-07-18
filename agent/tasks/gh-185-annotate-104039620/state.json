@@ -145,9 +145,9 @@
   ],
   "next_action": {
     "step_id": "S2",
-    "instruction": "Run the complete annotate skill loop for pixiv 27356468 and review it before selecting another work.",
+    "instruction": "Run the complete annotate skill loop for pixiv 26851649 and review it before selecting another work.",
     "acceptance": [
-      "27356468 publishes with zero unresolved segments and a current annotation ref plus study output.",
+      "26851649 publishes with zero unresolved segments and a current annotation ref plus study output.",
       "Repeated finish adds no attestation/version and leaves the ref unchanged.",
       "A beginning/middle/end review and any generalizable finding are recorded on #185."
     ]
@@ -309,16 +309,28 @@
         "status": "passed",
         "summary": "Corrected three legacy semantic or fluency errors, republished version_fdd9a0a7d80d3188a4da08f5c94057d1528a1f2f, rerendered study, and verified current ref/render consistency.",
         "timestamp": "2026-07-18T11:41:34Z"
+      },
+      {
+        "command": "make annotate MODE=finish/status PROVIDER=pixiv WS=...pixiv-27356468",
+        "status": "passed",
+        "summary": "27356468 published 494/494 body annotations with zero unresolved; replay kept 4967 attestations, 9 versions, and translation ref, annotation ref, and study digests stable.",
+        "timestamp": "2026-07-18T12:07:04Z"
+      },
+      {
+        "command": "translation alignment and name repair + finish + verify for pixiv-27356468",
+        "status": "passed",
+        "summary": "Repaired several independent legacy one-row shifts, normalized the first name mapping to 理音, republished version_d0fe5ba60728d588b7941bf048798e0b773b5adf, rerendered study without changing the annotation version, and verified current ref/render consistency.",
+        "timestamp": "2026-07-18T12:07:04Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T114134Z-codex",
-    "timestamp": "2026-07-18T11:41:34Z",
+    "checkpoint_id": "cp-20260718T120704Z-codex",
+    "timestamp": "2026-07-18T12:07:04Z",
     "agent": "codex",
-    "summary": "Completed 26112431 as work 12/25 with 413 validated annotation rows, three repaired legacy translations, and replay-stable artifact evidence.",
-    "observed_head": "3f08d923e7785faf124b174d7ff2d5c6206e0c90"
+    "summary": "Completed 27356468 as work 13/25 with 494 validated annotation rows, repaired legacy translation alignment and name drift, and replay-stable artifact evidence.",
+    "observed_head": "3d90d052b33e01a6617cf5cb7eefb1631dd61fc9"
   },
   "next_task": null
 }
