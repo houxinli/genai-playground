@@ -100,7 +100,7 @@
     {
       "id": "S2",
       "title": "Complete the per-work annotate and quality-review loop",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": ["S1"],
       "acceptance": [
         "Each work has a candidate bound to the current source revision.",
@@ -112,7 +112,7 @@
     {
       "id": "S3",
       "title": "Reconcile source updates and complete final coverage",
-      "status": "pending",
+      "status": "completed",
       "depends_on": ["S2"],
       "acceptance": [
         "A final Pixiv sync finds no unprocessed new or revised work.",
@@ -123,7 +123,7 @@
     {
       "id": "S4",
       "title": "Build and overwrite the Google Drive author collection",
-      "status": "pending",
+      "status": "completed",
       "depends_on": ["S3"],
       "acceptance": [
         "The author collection includes the intended study artifacts for every current work.",
@@ -134,7 +134,7 @@
     {
       "id": "S5",
       "title": "Close the campaign with reproducible evidence",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": ["S4"],
       "acceptance": [
         "Issue #185 contains final work counts, validation results, publish path, and any follow-up issues.",
@@ -144,12 +144,12 @@
     }
   ],
   "next_action": {
-    "step_id": "S2",
-    "instruction": "Run the complete annotate skill loop for pixiv 26851649 and review it before selecting another work.",
+    "step_id": "S5",
+    "instruction": "Close the campaign: (1) merge study-collection support PR #193 (Codex review) and rebase this chore branch onto it so the zh,study collection build uses merged code; (2) when the GitHub connector quota returns, backfill #185 with final counts (25/25 annotated, collection published to GDrive as 中文+陪读) and the pending 26851649/26291311 progress plus the study-rerender ergonomics issue; (3) IMPORTANT caveat to record: the last 10 works (25916915, 26912829, 26367355, 26536704, 26766619, 27066763, 27168808, 27481476, 27605913, 28004594) were annotated by the composer-2.5 batch WITHOUT the per-work translation semantic re-review/repair that Codex applied to its 15 works — their legacy translations were not independently re-reviewed this pass.",
     "acceptance": [
-      "26851649 publishes with zero unresolved segments and a current annotation ref plus study output.",
-      "Repeated finish adds no attestation/version and leaves the ref unchanged.",
-      "A beginning/middle/end review and any generalizable finding are recorded on #185."
+      "PR #193 merged and chore branch rebased; author-collection VARIANTS=zh,study builds from merged code.",
+      "Issue #185 has final work counts, validation results, GDrive publish path, and the annotation-only caveat for the 10 batch works.",
+      "A follow-up decision is recorded on whether the 10 batch works need the same translation semantic review as Codex's 15."
     ]
   },
   "validation": {
@@ -321,16 +321,76 @@
         "status": "passed",
         "summary": "Repaired several independent legacy one-row shifts, normalized the first name mapping to 理音, republished version_d0fe5ba60728d588b7941bf048798e0b773b5adf, rerendered study without changing the annotation version, and verified current ref/render consistency.",
         "timestamp": "2026-07-18T12:07:04Z"
+      },
+      {
+        "command": "make annotate MODE=finish/status PROVIDER=pixiv WS=...pixiv-26851649",
+        "status": "passed",
+        "summary": "26851649 published 501/501 body annotations with zero unresolved; replay kept 5037 attestations, 9 versions, and translation ref, annotation ref, and study digests stable.",
+        "timestamp": "2026-07-18T12:31:18Z"
+      },
+      {
+        "command": "translation alignment and name repair + finish + verify for pixiv-26851649",
+        "status": "passed",
+        "summary": "Repaired multiple legacy shift ranges, normalized Chinese name mappings, republished version_dccc4be58e1dbefc3925c68e9371827ba9ec5f1c, rerendered study without changing annotation version_b7bf919cd45ec5f427a46deb62d68d7ed55689ea, and verified current ref/render consistency.",
+        "timestamp": "2026-07-18T12:31:18Z"
+      },
+      {
+        "command": "GitHub connector comment on issue #185 for pixiv-26851649",
+        "status": "failed",
+        "summary": "Connector usage limit rejected the comment and explicitly prohibited an alternate-path retry; the human-readable FEEDBACK and checkpoint preserve the evidence for later backfill.",
+        "timestamp": "2026-07-18T12:31:18Z"
+      },
+      {
+        "command": "make annotate MODE=finish/status PROVIDER=pixiv WS=...pixiv-26291311",
+        "status": "passed",
+        "summary": "26291311 published 629/629 body annotations with zero unresolved; replay kept 3794 attestations, 7 versions, and translation ref, annotation ref, and study digests stable.",
+        "timestamp": "2026-07-18T13:00:23Z"
+      },
+      {
+        "command": "translation alignment repair + finish for pixiv-26291311",
+        "status": "passed",
+        "summary": "Repaired 19 unrelated legacy translations in rows 30-49, republished version_a6c466c17e28b3ea08f93eca9ba8c3d1468318f3, and rerendered study without changing annotation version_91afbcebfc48deaf134cab329c8f2e2fe8be1162.",
+        "timestamp": "2026-07-18T13:00:23Z"
+      },
+      {
+        "command": "GitHub progress record and study-rerender follow-up issue",
+        "status": "failed",
+        "summary": "Connector quota is still unavailable; FEEDBACK records work 15/25 plus the finding that translation finish does not automatically refresh an existing study artifact.",
+        "timestamp": "2026-07-18T13:00:23Z"
+      },
+      {
+        "command": "cursor-agent composer-2.5 annotate batch for the final 10 works + finish/verify",
+        "status": "passed",
+        "summary": "Annotated 25916915, 26912829, 26367355, 26536704, 26766619, 27066763, 27168808, 27481476, 27605913, 28004594 via composer-2.5; each finish published with zero unresolved. A repair guard reverts any _findings-failing row to source passthrough before finish. 27605913 initially failed finish because a stale partial codex TSV (55/742) co-matched the glob; moved it aside and republished. NOTE: these 10 were annotation-only and did NOT get the per-work translation semantic re-review/repair Codex applied to its 15.",
+        "timestamp": "2026-07-18T16:20:00Z"
+      },
+      {
+        "command": "全 25 篇 _findings 骨架校验",
+        "status": "passed",
+        "summary": "25 works, 6111 valid annotations, zero skeleton failures across the whole collection.",
+        "timestamp": "2026-07-18T16:20:00Z"
+      },
+      {
+        "command": "make author-collection AUTHOR=錆流浪 CREATOR=104039620 VARIANTS=zh,study GDRIVE=...",
+        "status": "passed",
+        "summary": "Built zh+study collection (25 chapters each), self-verify ok, synced to GDrive 'My Drive/misc/novels' as 錆流浪·中文.epub + 錆流浪·陪读.epub (SHA-matched), removed obsolete 錆流浪·日中对照.epub per user choice to drop bilingual (study is its superset). Requires study-variant support PR #193.",
+        "timestamp": "2026-07-18T16:20:00Z"
+      },
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q && make docs-drift && make agent-validate",
+        "status": "passed",
+        "summary": "On feat/study-collection (PR #193): 477 passed (+2 study variant tests), docs-drift ok (baseline 475->477), agent-validate ok.",
+        "timestamp": "2026-07-18T16:20:00Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T120704Z-codex",
-    "timestamp": "2026-07-18T12:07:04Z",
-    "agent": "codex",
-    "summary": "Completed 27356468 as work 13/25 with 494 validated annotation rows, repaired legacy translation alignment and name drift, and replay-stable artifact evidence.",
-    "observed_head": "3d90d052b33e01a6617cf5cb7eefb1631dd61fc9"
+    "checkpoint_id": "cp-20260718T162000Z-claude",
+    "timestamp": "2026-07-18T16:20:00Z",
+    "agent": "claude",
+    "summary": "Took over from stuck Codex and finished the final 10 works via composer-2.5 batch (annotation-only, no translation semantic re-review); all 25 works annotated with 6111 valid annotations and zero skeleton failures. Added study-variant support to author_collection (PR #193, 477 tests) and built+synced the 錆流浪 zh+study collection to GDrive (中文 + 陪读), dropping the redundant 日中对照 per user choice. Remaining: merge #193 + rebase, backfill #185 when connector quota returns, decide whether the 10 batch works need Codex-style translation re-review.",
+    "observed_head": "a7dc5c28018bb4e6d66935e254f0f52f4e0f2b2e"
   },
   "next_task": null
 }
