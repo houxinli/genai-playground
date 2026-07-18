@@ -54,6 +54,9 @@ TSV 每行优先写 v2:`<0 基段序号><TAB><源文前缀 src_echo><TAB><中文
    ```
    make translate-user MODE=finish PROVIDER=<p> SOURCE=$WS/src STORE=$WS/store JOBS_DIR=$WS/jobs RENDER=$WS/rendered RESULTS_DIR=$WS/results PRODUCER=<执行器名>
    ```
+   finish 必须使用 prepare 时相同的 `SOURCE` 与 `ENTITY_STORE`;旧 job 的 `context_pack.entities` 为空且
+   当时显式关闭过实体库时,修复重跑也传 `ENTITY_STORE=`。上下文不一致会 quarantine 并非零退出;
+   按终端 `next_action` 修正参数,不要手改 result/ref 绕过 stale 防护。
 4. **verify**(独立核对,**回贴真实 JSON**;不准凭记忆声称完成):
    ```
    make translate-user MODE=verify PROVIDER=<p> SOURCE=$WS/src STORE=$WS/store RENDER=$WS/rendered RESULTS_DIR=$WS/results
