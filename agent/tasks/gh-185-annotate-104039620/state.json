@@ -133,9 +133,9 @@
   ],
   "next_action": {
     "step_id": "S2",
-    "instruction": "Run the complete annotate skill loop for the next shortest unannotated work, pixiv 27659699, then review and record its quality before selecting another work.",
+    "instruction": "Run the complete annotate skill loop for the next shortest unannotated work, pixiv 28166382, then review and record its quality before selecting another work.",
     "acceptance": [
-      "27659699 publishes with zero unresolved segments and a current annotation ref plus study output.",
+      "28166382 publishes with zero unresolved segments and a current annotation ref plus study output.",
       "Repeated finish adds no attestation/version and leaves the ref unchanged.",
       "A beginning/middle/end sample review and any generalizable finding are recorded on #185."
     ]
@@ -171,16 +171,22 @@
         "status": "passed",
         "summary": "25977608 published 265/265 segments with zero unresolved; replay added zero attestations and versions and kept the ref digest stable.",
         "timestamp": "2026-07-18T08:16:02Z"
+      },
+      {
+        "command": "make annotate MODE=finish/status PROVIDER=pixiv WS=...pixiv-27659699",
+        "status": "passed",
+        "summary": "27659699 published 228/228 segments with zero unresolved; semantic sample fixes were republished and final replay kept attestation/version counts and ref digest stable.",
+        "timestamp": "2026-07-18T08:31:09Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T081602Z-codex",
-    "timestamp": "2026-07-18T08:16:02Z",
+    "checkpoint_id": "cp-20260718T083109Z-codex",
+    "timestamp": "2026-07-18T08:31:09Z",
     "agent": "codex",
-    "summary": "Completed the current-author inventory and the 25977608 annotate, quality-review, and idempotence loop.",
-    "observed_head": "f973ee3ce0a36a74e878e82a971e93ea78bde551"
+    "summary": "Completed the 27659699 annotate, semantic sample revision, publication, and idempotence loop.",
+    "observed_head": "6494b6ce9eeeabc2a6ec96d4c409c155ccd03cbe"
   },
   "next_task": null
 }
