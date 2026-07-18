@@ -556,19 +556,23 @@ def finish_annotate_document(
     # 注解 version 只覆盖 body 段——构造一个 body-only 的 revision 视图喂 build_document_version
     # (它要求 recommendations 覆盖 revision 全部段;metadata 段不属于注解任务)。
     body_rev = {**rev, "segments": [s for s in rev["segments"] if s["kind"] == "body"]}
-    created_at = datetime_now_iso()
-    version = version_select.build_document_version(body_rev, recs, "workflow", created_at)
     current = store.current_ref(doc, channel="annotate")
-    if current is None:
+    selections = {rec["segment_id"]: rec["selected_candidate_id"] for rec in recs}
+    version = store.get("document-version", doc, current["version_id"]) if current else None
+    if version is not None and (
+        version["revision_id"] != body_rev["revision_id"] or version["selections"] != selections
+    ):
+        version = None
+    if version is not None:
+        report["published"] = True
+    elif current is None:
+        version = version_select.build_document_version(body_rev, recs, "workflow", datetime_now_iso())
         store.put_many(doc, [version])
         store.publish(doc, version["version_id"], expected_version_id=None, channel="annotate")
         report["published"] = True
-    elif current["version_id"] == version["version_id"]:
-        store.put_many(doc, [version])
-        report["published"] = True
     else:
         version = version_select.build_document_version(
-            body_rev, recs, "workflow", created_at, parent_version_id=current["version_id"])
+            body_rev, recs, "workflow", datetime_now_iso(), parent_version_id=current["version_id"])
         store.put_many(doc, [version])
         store.publish(doc, version["version_id"], expected_version_id=current["version_id"], channel="annotate")
         report["status"] = "republished"
@@ -632,8 +636,13 @@ def finish_annotate_user(
             continue
         results = []
         for tsv in tsvs:
-            parts = tsv.name.split(".")
-            producer = parts[2] if len(parts) >= 4 else (producer_name or "agent")
+            prefix = f"{sid}.annotate."
+            parsed_producer = (
+                tsv.name[len(prefix):-len(".tsv")]
+                if tsv.name.startswith(prefix) and tsv.name.endswith(".tsv")
+                else ""
+            )
+            producer = parsed_producer or producer_name or "agent"
             translations = result_assemble.parse_translations_tsv(tsv.read_text(encoding="utf-8"), bundle)
             results.append(result_assemble.assemble_result(bundle, translations, producer_name=producer))
         try:

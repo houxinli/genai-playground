@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 try:
     from .artifact_schemas import evaluation_id_for, validate_artifact, validate_candidate_identity
@@ -25,8 +25,9 @@ EVALUATOR_NAME = "annotate-rule-eval"
 EVALUATOR_VERSION = "1"
 
 # 注解括号:全角/半角圆括号都接受(执行器可能混用)。
-_OPEN = {"(", "("}
-_CLOSE = {")", ")"}
+_PAIRS = {"(": ")", "（": "）"}
+_OPEN = set(_PAIRS)
+_CLOSE = set(_PAIRS.values())
 
 _FINDING_MESSAGES = {
     "skeleton_mismatch": "剥掉注解括号后与源文不一致(注解只能插入括号,不得增删改原文)",
@@ -39,19 +40,58 @@ _FINDING_MESSAGES = {
 def strip_annotations(text: str) -> str:
     """剥掉顶层括号段(含嵌套),返回骨架。括号不配对时返回 None。"""
     out: List[str] = []
-    depth = 0
+    stack: List[str] = []
     for ch in text:
         if ch in _OPEN:
-            depth += 1
+            stack.append(_PAIRS[ch])
         elif ch in _CLOSE:
-            if depth == 0:
-                return None  # 多余的闭括号
-            depth -= 1
-        elif depth == 0:
+            if not stack or ch != stack[-1]:
+                return None
+            stack.pop()
+        elif not stack:
             out.append(ch)
-    if depth != 0:
-        return None  # 未闭合
-    return "".join(out)
+    return None if stack else "".join(out)
+
+
+def _group_end(text: str, start: int) -> Optional[int]:
+    """返回 start 处完整括号组之后的位置；括号不配对时返回 None。"""
+    stack = [_PAIRS[text[start]]]
+    for index in range(start + 1, len(text)):
+        ch = text[index]
+        if ch in _OPEN:
+            stack.append(_PAIRS[ch])
+        elif ch in _CLOSE:
+            if ch != stack[-1]:
+                return None
+            stack.pop()
+            if not stack:
+                return index + 1
+    return None
+
+
+def _preserves_source(source_text: str, annotated_text: str) -> bool:
+    """只允许在原文字符之间插入完整括号组，原文自身括号也必须逐字保留。"""
+    pending = [(0, 0)]
+    seen = set()
+    while pending:
+        source_index, annotated_index = pending.pop()
+        if (source_index, annotated_index) in seen:
+            continue
+        seen.add((source_index, annotated_index))
+        if annotated_index == len(annotated_text):
+            if source_index == len(source_text):
+                return True
+            continue
+        if (
+            source_index < len(source_text)
+            and source_text[source_index] == annotated_text[annotated_index]
+        ):
+            pending.append((source_index + 1, annotated_index + 1))
+        if annotated_text[annotated_index] in _OPEN:
+            end = _group_end(annotated_text, annotated_index)
+            if end is not None:
+                pending.append((source_index, end))
+    return False
 
 
 def _findings(source_text: str, text: str) -> List[Dict[str, Any]]:
@@ -66,19 +106,10 @@ def _findings(source_text: str, text: str) -> List[Dict[str, Any]]:
     if "\n" in text or "\t" in text:
         err("multiline_annotation")
         return findings
-    skeleton = strip_annotations(text)
-    if skeleton is None:
+    if strip_annotations(text) is None:
         err("unbalanced_parens")
         return findings
-    # 源文自身可能含括号:剥源文括号后同口径比对(注解行剥完 = 源文剥完 才算骨架一致——
-    # 源文括号内的文字也在注解行里原样保留,两边同剥不影响判定)。
-    src_skeleton = strip_annotations(source_text)
-    if src_skeleton is None:
-        src_skeleton = source_text  # 源文括号不配对(罕见),退化为原文比对
-        skeleton_cmp = text
-    else:
-        skeleton_cmp = skeleton
-    if skeleton_cmp != src_skeleton:
+    if not _preserves_source(source_text, text):
         err("skeleton_mismatch")
     return findings
 

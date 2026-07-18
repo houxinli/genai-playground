@@ -1649,7 +1649,7 @@ findings。`ENTITY_REVIEW_QUEUE` 只控制首次译名是否进入 pending revie
 - **执行器产物**:TSV 三列(段号/src_echo/**注解后的源文行**),未注解段原样抄源文,全覆盖。
   多模型命名 `<sid>.annotate.<producer>.tsv`(若干)或单模型 `<sid>.annotate.tsv`。
 - **评估**(`annotate_eval`):核心不变量——**剥掉注解括号后必须逐字等于源文**
-  (注解只能插括号,不得增删改原文;全半角括号均认,源文自带括号两边同剥比对)+ 括号配对 + 单行。
+  (注解只能插括号,不得增删改原文;全半角括号均认;源文自带括号及其内容仍逐字保护)+ 括号配对 + 单行。
 - **择优**:每段取 verdict=pass 的候选,多 pass 按 `--producer-priority`(用户模型偏好)先到先选;
   任一段无 pass → unresolved 不建版。无 incumbent/保守替换语义(注解无旧版可保)。
 - **版本与发布**:注解 Version 绑**原文 revision**(body-only 视图),发布到独立 **channel**

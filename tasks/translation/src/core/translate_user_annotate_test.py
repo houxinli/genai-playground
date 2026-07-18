@@ -97,15 +97,34 @@ class AnnotatePipelineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             tmp = Path(t)
             src_dir, store_root, render_dir, jobs_dir, results_dir, bundle = self._setup(tmp)
-            ann_b = ["「おはよう(问候语)」", "今日(きょう)はいい天気だ。"]  # producer b 的不同注解
-            _write_tsv(results_dir / "700001.annotate.a.tsv", bundle, ANN_OK)
-            _write_tsv(results_dir / "700001.annotate.b.tsv", bundle, ann_b)
+            ann_a = ["「おはよう(问候语)」", "今日(きょう)はいい天気だ。"]
+            _write_tsv(results_dir / "700001.annotate.aaa.tsv", bundle, ann_a)
+            _write_tsv(results_dir / "700001.annotate.composer-2.5.tsv", bundle, ANN_OK)
             m = tu.finish_annotate_user("pixiv", src_dir, store_root, render_dir, results_dir,
-                                        jobs_dir=jobs_dir, producer_priority=["b", "a"])
+                                        jobs_dir=jobs_dir, producer_priority=["composer-2.5", "aaa"])
             self.assertEqual(1, m["summary"]["published"], m)
             study = (render_dir / "700001.study.txt").read_text(encoding="utf-8")
-            self.assertIn("「おはよう(问候语)」", study)  # b 优先
-            self.assertIn("今日(きょう)はいい天気だ。", study)
+            self.assertNotIn("「おはよう(问候语)」", study)
+            self.assertIn("今日(きょう)はいい天気(てんき・天气)だ。", study)
+
+    def test_repeated_finish_reuses_annotate_version(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir, store_root, render_dir, jobs_dir, results_dir, bundle = self._setup(tmp)
+            _write_tsv(results_dir / "700001.annotate.tsv", bundle, ANN_OK)
+            first = tu.finish_annotate_user("pixiv", src_dir, store_root, render_dir, results_dir,
+                                            jobs_dir=jobs_dir, producer_name="tester")
+            store = ArtifactStore(store_root)
+            doc = first["documents"][0]["document_id"]
+            ref_before = store.current_ref(doc, channel="annotate")
+            versions_before = len(store.list_shard("document-version", doc))
+
+            second = tu.finish_annotate_user("pixiv", src_dir, store_root, render_dir, results_dir,
+                                             jobs_dir=jobs_dir, producer_name="tester")
+
+            self.assertEqual(ref_before, store.current_ref(doc, channel="annotate"))
+            self.assertEqual(versions_before, len(store.list_shard("document-version", doc)))
+            self.assertEqual(first["documents"][0]["version_id"], second["documents"][0]["version_id"])
 
     def test_translate_republish_does_not_touch_annotate_ref(self):
         with tempfile.TemporaryDirectory() as t:

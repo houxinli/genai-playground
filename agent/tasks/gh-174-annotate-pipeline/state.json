@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-174-annotate-pipeline",
+  "title": "Address PR 179 annotate review feedback",
+  "status": "active",
+  "branch": "feat/annotate-pipeline",
+  "objective": "Fix all four unresolved P2 review threads on PR #179 without expanding annotation quality selection scope.",
+  "github": {
+    "issue": 174,
+    "pull_request": 179
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/annotate_eval.py and its tests",
+      "tasks/translation/src/core/translate_user.py annotate finish path and tests",
+      "PR #179 review follow-up state and validation evidence"
+    ],
+    "out": [
+      "semantic annotation quality comparison between models",
+      "bilingual versus study publication naming",
+      "unrelated translation pipeline refactors"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "Annotate task, version, and render contract",
+      "required": true
+    },
+    {
+      "path": ".agents/skills/annotate/SKILL.md",
+      "purpose": "Annotate executor contract",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "Keep study.txt as an additional rendered artifact.",
+      "reason": "The user confirmed a separate study output is acceptable.",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "Keep producer-priority selection; semantic quality comparison is deferred.",
+      "reason": "Quality comparison is a real gap but does not block the current PR.",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "Address exactly the four unresolved P2 threads on PR #179.",
+      "reason": "The user explicitly limited this follow-up to the existing P2 findings.",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "Fix the four unresolved PR #179 P2 findings",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "Full producer names containing dots are preserved and tested.",
+        "Repeated finish with identical selections keeps the annotate ref stable and is tested.",
+        "Full-width annotation parentheses are accepted and tested.",
+        "Source-owned parenthesized text cannot be changed or removed and is tested.",
+        "The full 470+ translation test baseline and repository validation pass."
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Publish the review fixes to PR #179",
+      "status": "in_progress",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "The fix commit is pushed to feat/annotate-pipeline.",
+        "PR #179 reports the updated head and CI is green.",
+        "The four addressed review threads are summarized for handoff."
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S2",
+    "instruction": "Commit the validated P2 fixes, push feat/annotate-pipeline, and verify PR #179 CI and thread state.",
+    "acceptance": [
+      "The remote PR head contains the fix commit.",
+      "CI succeeds on the updated PR head.",
+      "No semantic quality-selection or output-naming redesign is included."
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "make agent-validate",
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "make docs-drift",
+      "git diff --check"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "472 passed, 2 warnings",
+        "timestamp": "2026-07-18T06:59:27Z"
+      },
+      {
+        "command": "make docs-drift",
+        "status": "passed",
+        "summary": "文档漂移检查通过",
+        "timestamp": "2026-07-18T06:59:27Z"
+      },
+      {
+        "command": "make agent-validate",
+        "status": "passed",
+        "summary": "Agent task validation passed",
+        "timestamp": "2026-07-18T06:59:27Z"
+      },
+      {
+        "command": "git diff --check",
+        "status": "passed",
+        "summary": "No whitespace errors",
+        "timestamp": "2026-07-18T06:59:27Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260718T065927Z-codex",
+    "timestamp": "2026-07-18T06:59:27Z",
+    "agent": "codex",
+    "summary": "Implemented and validated all four PR #179 P2 fixes; next action is commit and push.",
+    "observed_head": "f21b00abc06792eda9fabe3e3bf7f79b1a2c20ae"
+  },
+  "next_task": null
+}

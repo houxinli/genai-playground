@@ -16,8 +16,9 @@ class StripAnnotationsTest(unittest.TestCase):
     def test_strips_annotation_parens(self):
         self.assertEqual("映るのは、姿だ", ae.strip_annotations("映(うつ・映照)るのは、姿(すがた)だ"))
 
-    def test_halfwidth_parens_also_stripped(self):
+    def test_halfwidth_and_fullwidth_parens_stripped(self):
         self.assertEqual("映る", ae.strip_annotations("映(うつ)る"))
+        self.assertEqual("映る", ae.strip_annotations("映（うつ）る"))
 
     def test_nested_parens(self):
         self.assertEqual("AB", ae.strip_annotations("A(x(y)z)B"))
@@ -30,15 +31,22 @@ class StripAnnotationsTest(unittest.TestCase):
 class FindingsTest(unittest.TestCase):
     def test_valid_annotation_passes(self):
         self.assertEqual([], ae._findings("映るのは、姿だ", "映(うつ・映照)るのは、姿(すがた・身姿)だ"))
+        self.assertEqual([], ae._findings("今日は", "今日（きょう）は"))
 
     def test_unannotated_passthrough_passes(self):
         self.assertEqual([], ae._findings("こんにちは", "こんにちは"))
 
     def test_source_with_own_parens_passes(self):
-        # 源文自带括号:注解行原样保留源括号内容,两边同剥后一致。
         src = "彼は(小声で)言った"
         annotated = "彼は(小声で)言(い)った"
         self.assertEqual([], ae._findings(src, annotated))
+
+    def test_source_with_own_parens_cannot_be_changed(self):
+        src = "彼は(小声で)言った"
+        codes = [f["code"] for f in ae._findings(src, "彼は(大声で)言(い)った")]
+        self.assertIn("skeleton_mismatch", codes)
+        deleted_codes = [f["code"] for f in ae._findings(src, "彼は言(い)った")]
+        self.assertIn("skeleton_mismatch", deleted_codes)
 
     def test_altered_source_char_fails(self):
         codes = [f["code"] for f in ae._findings("映るのは", "映が(うつ)")]
