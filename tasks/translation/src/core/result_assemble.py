@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -21,6 +20,9 @@ try:
     from . import entity_harvest
 except ImportError:
     import entity_harvest
+
+
+DETERMINISTIC_COMPLETED_AT = "1970-01-01T00:00:00Z"
 
 
 def _source_echoes(bundle: Dict[str, Any]) -> Dict[int, str]:
@@ -102,7 +104,8 @@ def assemble_result(
         "candidates": candidates,
         "findings": list(findings or []),
         "recommended_candidate_keys": [producer_name],
-        "completed_at": completed_at or datetime.now(timezone.utc).isoformat(),
+        # TSV 没有可信执行时间；自动组装不可每次发明一个新时间，否则同一输入重放会产生新 Attestation。
+        "completed_at": completed_at or DETERMINISTIC_COMPLETED_AT,
     }
 
 

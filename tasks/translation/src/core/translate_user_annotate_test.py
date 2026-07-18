@@ -4,11 +4,14 @@
 
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from . import translate_user as tu
@@ -90,8 +93,32 @@ class AnnotatePipelineTest(unittest.TestCase):
                                         jobs_dir=jobs_dir, producer_name="tester")
             self.assertEqual(0, m["summary"]["published"])
             self.assertEqual(1, m["summary"]["unresolved"])
+            detail = m["documents"][0]["unresolved_details"][0]
+            self.assertEqual(1, detail["segment_index"])
+            self.assertEqual(BODY[1], detail["source_text"])
+            self.assertEqual(ANN_BAD[1], detail["candidates"][0]["candidate_text"])
+            self.assertEqual("unbalanced_parens", detail["candidates"][0]["findings"][0]["code"])
             self.assertIsNone(ArtifactStore(store_root).current_ref(
                 m["documents"][0]["document_id"], channel="annotate"))
+
+    def test_cli_finish_returns_nonzero_with_failure_details(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir, store_root, render_dir, jobs_dir, results_dir, bundle = self._setup(tmp)
+            _write_tsv(results_dir / "700001.annotate.tsv", bundle, ANN_BAD)
+            argv = [
+                "translate_user.py", "--provider", "pixiv", "--source-dir", str(src_dir),
+                "--store", str(store_root), "--mode", "finish", "--render-dir", str(render_dir),
+                "--jobs-dir", str(jobs_dir), "--results-dir", str(results_dir),
+                "--task-type", "annotate", "--producer", "tester",
+            ]
+            output = io.StringIO()
+            with patch("sys.argv", argv), redirect_stdout(output):
+                exit_code = tu.main()
+            payload = json.loads(output.getvalue())
+            self.assertEqual(1, exit_code)
+            self.assertEqual("unresolved", payload["documents"][0]["status"])
+            self.assertEqual(1, payload["documents"][0]["unresolved_details"][0]["segment_index"])
 
     def test_multi_producer_priority_selects_preferred(self):
         with tempfile.TemporaryDirectory() as t:
@@ -118,13 +145,36 @@ class AnnotatePipelineTest(unittest.TestCase):
             doc = first["documents"][0]["document_id"]
             ref_before = store.current_ref(doc, channel="annotate")
             versions_before = len(store.list_shard("document-version", doc))
+            attestations_before = len(store.list_shard("attestation", doc))
 
             second = tu.finish_annotate_user("pixiv", src_dir, store_root, render_dir, results_dir,
                                              jobs_dir=jobs_dir, producer_name="tester")
 
             self.assertEqual(ref_before, store.current_ref(doc, channel="annotate"))
             self.assertEqual(versions_before, len(store.list_shard("document-version", doc)))
+            self.assertEqual(attestations_before, len(store.list_shard("attestation", doc)))
             self.assertEqual(first["documents"][0]["version_id"], second["documents"][0]["version_id"])
+
+    def test_status_reports_workspace_progress(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir, store_root, render_dir, jobs_dir, results_dir, bundle = self._setup(tmp)
+            prepared = tu.status_annotate_user(
+                "pixiv", src_dir, store_root, render_dir, results_dir, jobs_dir=jobs_dir)
+            self.assertEqual("awaiting_result", prepared["documents"][0]["status"])
+
+            _write_tsv(results_dir / "700001.annotate.composer-2.5.tsv", bundle, ANN_OK)
+            ready = tu.status_annotate_user(
+                "pixiv", src_dir, store_root, render_dir, results_dir, jobs_dir=jobs_dir)
+            self.assertEqual("ready_to_finish", ready["documents"][0]["status"])
+
+            tu.finish_annotate_user(
+                "pixiv", src_dir, store_root, render_dir, results_dir,
+                jobs_dir=jobs_dir, producer_priority=["composer-2.5"])
+            published = tu.status_annotate_user(
+                "pixiv", src_dir, store_root, render_dir, results_dir, jobs_dir=jobs_dir)
+            self.assertEqual("published", published["documents"][0]["status"])
+            self.assertTrue(published["documents"][0]["study"].endswith("700001.study.txt"))
 
     def test_translate_republish_does_not_touch_annotate_ref(self):
         with tempfile.TemporaryDirectory() as t:

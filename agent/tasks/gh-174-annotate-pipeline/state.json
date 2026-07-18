@@ -4,7 +4,7 @@
   "title": "Address PR 179 annotate review feedback",
   "status": "complete",
   "branch": "feat/annotate-pipeline",
-  "objective": "Fix all four unresolved P2 review threads on PR #179 without expanding annotation quality selection scope.",
+  "objective": "Finish PR #179 with a dogfood-proven annotate workflow that is easy for inexpensive agents to execute and diagnose.",
   "github": {
     "issue": 174,
     "pull_request": 179
@@ -13,6 +13,8 @@
     "in": [
       "tasks/translation/src/core/annotate_eval.py and its tests",
       "tasks/translation/src/core/translate_user.py annotate finish path and tests",
+      "tasks/translation/src/core/result_assemble.py deterministic harness replay and tests",
+      ".agents/skills/annotate executor contract and thin Make entrypoint",
       "PR #179 review follow-up state and validation evidence"
     ],
     "out": [
@@ -56,6 +58,12 @@
       "summary": "Address exactly the four unresolved P2 threads on PR #179.",
       "reason": "The user explicitly limited this follow-up to the existing P2 findings.",
       "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "Dogfood 27417304 on the current branch before declaring the annotate slice complete.",
+      "reason": "The real Composer 2.5 TSV exposed a source-owned-parentheses violation that unit tests alone did not reveal.",
+      "status": "active"
     }
   ],
   "open_questions": [],
@@ -85,6 +93,21 @@
         "The fix commit is pushed to feat/annotate-pipeline.",
         "PR #179 reports the updated head and CI is green.",
         "The four addressed review threads are summarized for handoff."
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Make annotate replay deterministic and failures self-diagnosing",
+      "status": "completed",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "The skill explicitly protects source-owned parentheses with a concrete example.",
+        "Annotate finish returns failed segment details and exits nonzero when unresolved.",
+        "Replaying the same job, TSV, and producer creates no new attestation or version.",
+        "A thin Make entrypoint reduces repeated workspace path arguments.",
+        "The full translation test baseline and 27417304 dogfood pass."
       ]
     }
   ],
@@ -126,16 +149,34 @@
         "status": "passed",
         "summary": "Both GitHub Actions unittest jobs passed on commit 36ed02d",
         "timestamp": "2026-07-18T07:03:56Z"
+      },
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "475 passed, 2 warnings",
+        "timestamp": "2026-07-18T07:43:29Z"
+      },
+      {
+        "command": "make annotate MODE=finish PROVIDER=pixiv WS=tasks/translation/data/workspaces/pixiv-27417304 PRODUCER_PRIORITY=composer-2.5",
+        "status": "passed",
+        "summary": "published=1; second identical finish added zero attestations and zero versions",
+        "timestamp": "2026-07-18T07:43:29Z"
+      },
+      {
+        "command": "skill quick_validate + make docs-drift + make agent-validate + git diff --check",
+        "status": "passed",
+        "summary": "Skill, docs, task state, and diff validation passed",
+        "timestamp": "2026-07-18T07:43:29Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T070356Z-codex",
-    "timestamp": "2026-07-18T07:03:56Z",
+    "checkpoint_id": "cp-20260718T074329Z-codex",
+    "timestamp": "2026-07-18T07:43:29Z",
     "agent": "codex",
-    "summary": "Published all four PR #179 P2 fixes; CI passed and the addressed review threads are outdated.",
-    "observed_head": "36ed02d7f18846c9545e502ffa1315b04c061608"
+    "summary": "Completed the dogfood-driven annotate usability and replay-idempotence follow-up.",
+    "observed_head": "0d4e9d067d6a0981b93f77ad81f5246fc1dbe6f6"
   },
   "next_task": null
 }

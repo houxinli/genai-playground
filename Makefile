@@ -240,7 +240,7 @@ agent-complete:
 
 
 # ============ 候选导入(新架构) ============
-.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user rebuild-index translate-assemble rule-impact author-collection author-collection-verify extract-entities extract-job import-extraction entity-review-import entity-review-list entity-review-approve entity-review-dismiss
+.PHONY: legacy-import import-result export-job translate-bundle seed-entities ingest-user translate-exec translate-user annotate rebuild-index translate-assemble rule-impact author-collection author-collection-verify extract-entities extract-job import-extraction entity-review-import entity-review-list entity-review-approve entity-review-dismiss
 
 # Agent 人名抽取(Cursor 等):导出待抽取文本 → agent 抽 → 导回实体库。
 # 用法: make extract-job REVISION=rev.json OUT=job.json
@@ -309,6 +309,12 @@ ENTITY_REVIEW_QUEUE ?= tasks/translation/data/entity-reviews
 translate-user:
 	@test -n "$(PROVIDER)" && test -n "$(SOURCE)" && test -n "$(STORE)" || { echo "translate-user 需要 PROVIDER= SOURCE= STORE="; exit 2; }
 	$(PY) tasks/translation/src/core/translate_user.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --store "$(STORE)" $(if $(MODE),--mode "$(MODE)") $(if $(RENDER),--render-dir "$(RENDER)") $(if $(JOBS_DIR),--jobs-dir "$(JOBS_DIR)") $(if $(RESULTS_DIR),--results-dir "$(RESULTS_DIR)") $(if $(BILINGUAL),--bilingual-dir "$(BILINGUAL)") $(if $(ENTITY_STORE),--entity-store "$(ENTITY_STORE)") $(if $(ENTITY_REVIEW_QUEUE),--entity-review-queue "$(ENTITY_REVIEW_QUEUE)") $(if $(EXECUTOR),--executor "$(EXECUTOR)") $(if $(PRODUCER),--producer "$(PRODUCER)") $(if $(MODEL),--model "$(MODEL)") $(if $(LIMIT),--limit $(LIMIT)) $(if $(TASK_TYPE),--task-type "$(TASK_TYPE)") $(if $(PRODUCER_PRIORITY),--producer-priority "$(PRODUCER_PRIORITY)")
+
+# annotate 薄入口:同一 translate-user 流水线,只把 workspace 下的重复路径集中起来。
+# 用法: make annotate MODE=prepare|finish|status PROVIDER=pixiv WS=tasks/translation/data/workspaces/pixiv-27417304 [PRODUCER_PRIORITY=composer-2.5]
+annotate:
+	@test -n "$(PROVIDER)" && test -n "$(WS)" || { echo "annotate 需要 PROVIDER= WS="; exit 2; }
+	$(MAKE) translate-user MODE="$(if $(MODE),$(MODE),status)" TASK_TYPE=annotate PROVIDER="$(PROVIDER)" SOURCE="$(WS)/src" STORE="$(WS)/store" JOBS_DIR="$(WS)/jobs" RESULTS_DIR="$(WS)/results" RENDER="$(WS)/rendered" $(if $(PRODUCER),PRODUCER="$(PRODUCER)") $(if $(PRODUCER_PRIORITY),PRODUCER_PRIORITY="$(PRODUCER_PRIORITY)") $(if $(LIMIT),LIMIT="$(LIMIT)")
 
 # 紧凑译文 → result.json；可选 NAMES=<id>.names.tsv(日文名<TAB>篇内首次译名)。
 # 用法: make translate-assemble JOB=jobs/<id>.job.json TRANSLATIONS=results/<id>.zh.tsv OUT=results/<id>.result.json [NAMES=...] [PRODUCER=cursor-grok]
