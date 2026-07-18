@@ -75,6 +75,12 @@
       "summary": "Treat translate verify as artifact consistency, with independent semantic review for legacy workspaces.",
       "reason": "27543152 proved that a structurally valid candidate can contain a neighboring segment's fluent translation; #189 tracks deterministic detection while the campaign keeps the explicit review step.",
       "status": "active"
+    },
+    {
+      "id": "D5",
+      "summary": "Track recurring relationship-title drift as a small extension of the existing per-work glossary and review report.",
+      "reason": "27104161 used four Chinese forms for the same relationship title; #192 keeps the fix within the one-pass first-mapping design and forbids another QC or state layer.",
+      "status": "active"
     }
   ],
   "open_questions": [],
@@ -139,9 +145,9 @@
   ],
   "next_action": {
     "step_id": "S2",
-    "instruction": "Run the complete annotate skill loop for pixiv 27104161 and review it before selecting another work.",
+    "instruction": "Run the complete annotate skill loop for pixiv 26594168 and review it before selecting another work.",
     "acceptance": [
-      "27104161 publishes with zero unresolved segments and a current annotation ref plus study output.",
+      "26594168 publishes with zero unresolved segments and a current annotation ref plus study output.",
       "Repeated finish adds no attestation/version and leaves the ref unchanged.",
       "A beginning/middle/end review and any generalizable finding are recorded on #185."
     ]
@@ -267,16 +273,28 @@
         "status": "passed",
         "summary": "Corrected two legacy semantic translations, republished version_4a4eae1cff2f5f4ed7f80daa8a1e09dfc8692145, rerendered study, and verified current ref/render consistency.",
         "timestamp": "2026-07-18T10:43:12Z"
+      },
+      {
+        "command": "make annotate MODE=finish/status PROVIDER=pixiv WS=...pixiv-27104161",
+        "status": "passed",
+        "summary": "27104161 published 353/353 body annotations with zero unresolved; replay kept attestation/version counts plus translation ref, annotation ref, and study digest stable.",
+        "timestamp": "2026-07-18T11:03:05Z"
+      },
+      {
+        "command": "translation consistency repair + finish + verify for pixiv-27104161",
+        "status": "passed",
+        "summary": "Corrected reversed burden and kneeling semantics, standardized the relationship title without merging its distinct employer sense, republished version_39352f4b5915acfad82e5e73d790ceec7a592a43, and opened #192.",
+        "timestamp": "2026-07-18T11:03:05Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T104312Z-codex",
-    "timestamp": "2026-07-18T10:43:12Z",
+    "checkpoint_id": "cp-20260718T110305Z-codex",
+    "timestamp": "2026-07-18T11:03:05Z",
     "agent": "codex",
-    "summary": "Completed 26185169 as work 9/25 with 310 validated annotation rows, two semantic translation repairs, annotation cleanup, and replay-stable artifact evidence.",
-    "observed_head": "8e588bdba4a536d317e8c3670c22f82ca7ee2582"
+    "summary": "Completed 27104161 as work 10/25 with 353 validated annotation rows, semantic and relationship-title translation repair, #192, and replay-stable artifact evidence.",
+    "observed_head": "6065035367928f740c369a91fb2c45f8919c7273"
   },
   "next_task": null
 }
