@@ -139,9 +139,9 @@
   ],
   "next_action": {
     "step_id": "S2",
-    "instruction": "Run the complete annotate skill loop for pixiv 26185169 and review it before selecting another work.",
+    "instruction": "Run the complete annotate skill loop for pixiv 27104161 and review it before selecting another work.",
     "acceptance": [
-      "26185169 publishes with zero unresolved segments and a current annotation ref plus study output.",
+      "27104161 publishes with zero unresolved segments and a current annotation ref plus study output.",
       "Repeated finish adds no attestation/version and leaves the ref unchanged.",
       "A beginning/middle/end review and any generalizable finding are recorded on #185."
     ]
@@ -255,16 +255,28 @@
         "status": "passed",
         "summary": "Corrected one reversed legacy translation, republished version_750e181cddeff668f3c2c63dcb4b4b9716ddc344, and verified current ref/render consistency.",
         "timestamp": "2026-07-18T10:26:38Z"
+      },
+      {
+        "command": "make annotate MODE=finish/status PROVIDER=pixiv WS=...pixiv-26185169",
+        "status": "passed",
+        "summary": "26185169 published 310/310 body annotations with zero unresolved; replay kept attestation/version counts plus translation ref, annotation ref, and study digest stable.",
+        "timestamp": "2026-07-18T10:43:12Z"
+      },
+      {
+        "command": "translation repair + finish + verify for pixiv-26185169",
+        "status": "passed",
+        "summary": "Corrected two legacy semantic translations, republished version_4a4eae1cff2f5f4ed7f80daa8a1e09dfc8692145, rerendered study, and verified current ref/render consistency.",
+        "timestamp": "2026-07-18T10:43:12Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T102638Z-codex",
-    "timestamp": "2026-07-18T10:26:38Z",
+    "checkpoint_id": "cp-20260718T104312Z-codex",
+    "timestamp": "2026-07-18T10:43:12Z",
     "agent": "codex",
-    "summary": "Completed 27875616 as work 8/25 with 402 validated annotation rows, semantic translation repair, full-reading and first-occurrence cleanup, and replay-stable artifact evidence.",
-    "observed_head": "1d8a6a8de204dbf02ac5f9133e3557e4078e3d6d"
+    "summary": "Completed 26185169 as work 9/25 with 310 validated annotation rows, two semantic translation repairs, annotation cleanup, and replay-stable artifact evidence.",
+    "observed_head": "8e588bdba4a536d317e8c3670c22f82ca7ee2582"
   },
   "next_task": null
 }
