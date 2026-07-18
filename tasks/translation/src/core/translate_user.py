@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 try:
-    from . import candidate_eval, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
+    from . import annotate_eval, candidate_eval, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from .artifact_store import ArtifactStore
     from .pipeline_ingest import merge_author
     from .renderer import render_bilingual, render_zh
@@ -26,7 +26,7 @@ try:
     from .task_export import export_job, ingest_revision, resolve_entities_for_revision
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core import candidate_eval, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
+    from core import annotate_eval, candidate_eval, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from core.artifact_store import ArtifactStore
     from core.pipeline_ingest import merge_author
     from core.renderer import render_bilingual, render_zh
@@ -445,6 +445,305 @@ def verify_user(provider, source_dir, store_root, render_dir, results_dir=None, 
     return {"ok": ok, "verified": sum(1 for d in docs if d.get("ok")), "total": len(docs), "documents": docs}
 
 
+# ---------------- annotate(陪读注解,#174):与翻译同构的另一条 task_type 线 ----------------
+# 复用同一 revision/job/TSV/result/import/version/publish 机制,差别:
+# ①job 只含 body 段(front-matter 不是学习材料)②评估用 annotate_eval(骨架不变量,非翻译 QA)
+# ③版本发布到独立 channel("annotate",refs-annotate/)不与译文 current 打架
+# ④渲染 study = 选中注解 + **当前翻译版本**交织 → 注解绑原文,翻译更新只需重渲染。
+
+
+def _annotate_bundle(provider, source_path, store, entity_store=None):
+    """annotate 版 revision+bundle(无 legacy:注解没有旧译文 incumbent)。"""
+    source_path = Path(source_path)
+    rev = si.build_document_revision(provider, source_path)
+    ingest_revision(rev, store)
+    body_ids = [s["segment_id"] for s in rev["segments"] if s["kind"] == "body"]
+    entities = resolve_entities_for_revision(rev, entity_store) if entity_store else None
+    bundle = export_job(rev, body_ids, entities=entities, task_type="annotate")
+    return rev, bundle
+
+
+def prepare_annotate_user(provider, source_dir, store_root, jobs_dir, *, entity_store=None, limit=None) -> Dict[str, Any]:
+    """逐篇导出注解 bundle 到 jobs_dir/<sid>.annotate.job.json(供 agent 执行器写注解 TSV)。"""
+    source_dir, store_root, jobs_dir = Path(source_dir), Path(store_root), Path(jobs_dir)
+    store = ArtifactStore(store_root)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    sources = sorted(source_dir.glob("*.txt"))
+    if limit is not None:
+        sources = sources[:limit]
+    jobs = []
+    for src in sources:
+        try:
+            rev, bundle = _annotate_bundle(provider, src, store, entity_store=entity_store)
+            sid = rev["document_id"].rsplit(":", 1)[-1]
+            out = jobs_dir / f"{sid}.annotate.job.json"
+            out.write_text(json.dumps(bundle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            jobs.append({"source": src.name, "source_id": sid, "job": str(out),
+                         "segments": len(bundle["segments"])})
+        except Exception as exc:
+            jobs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
+    return {"jobs": jobs}
+
+
+def finish_annotate_document(
+    provider, source_path, store, results: List[Dict[str, Any]], render_dir=None, entity_store=None,
+    producer_priority: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """吃(多模型的)注解 result → import → annotate_eval → 逐段择优 → 注解 Version →
+    publish(channel=annotate)→ render study(选中注解 + 当前翻译)。
+
+    择优:每段取 verdict=pass 的候选;多个 pass 时按 producer_priority 先到先选(注解无 incumbent、
+    无保守替换语义,优先级列表即用户的模型偏好);任一段无 pass 候选 → unresolved 不建版。"""
+    source_path = Path(source_path)
+    rev, bundle = _annotate_bundle(provider, source_path, store, entity_store=entity_store)
+    doc = rev["document_id"]
+    report: Dict[str, Any] = {"document_id": doc, "task_type": "annotate",
+                              "segments": len(bundle["segments"]), "status": "ok"}
+    segs = {s["segment_id"]: s for s in rev["segments"]}
+    seg_ids = [s["segment_id"] for s in bundle["segments"]]
+
+    # import 全部 result(不同 producer 各一份);任何一份 stale 都隔离并整篇失败(与翻译同语义)。
+    cand_ids_by_producer: List[tuple] = []
+    for result in results:
+        rep = import_result(bundle["task"], result, store)
+        if rep["quarantined"]:
+            report["status"] = "annotate_quarantined"
+            report["reasons"] = rep["reasons"][:3]
+            return report
+        cand_ids_by_producer.append((result.get("producer", {}).get("name", "unknown"), rep["candidate_ids"]))
+
+    cands_in_store = {c["candidate_id"]: c for c in store.list_shard("candidate", doc)}
+    # producer → {segment_id: candidate};按 producer_priority 排序(未列出的按出现序排后)。
+    priority = producer_priority or [p for p, _ in cand_ids_by_producer]
+    ordered = sorted(cand_ids_by_producer,
+                     key=lambda pc: priority.index(pc[0]) if pc[0] in priority else len(priority))
+    by_producer: List[tuple[str, Dict[str, Dict[str, Any]]]] = []
+    for producer, cids in ordered:
+        m: Dict[str, Dict[str, Any]] = {}
+        for cid in cids:
+            c = cands_in_store.get(cid)
+            if c is not None:
+                m[c["segment_id"]] = c
+        by_producer.append((producer, m))
+
+    recs: List[Dict[str, Any]] = []
+    unresolved = 0
+    unresolved_details: List[Dict[str, Any]] = []
+    for segment_index, sid in enumerate(seg_ids):
+        selected = None
+        eval_ids: List[str] = []
+        failed_candidates: List[Dict[str, Any]] = []
+        for producer, pm in by_producer:
+            c = pm.get(sid)
+            if c is None:
+                continue
+            ev = annotate_eval.evaluate_annotation_candidate(c, segs[sid]["source_text"])
+            store.put_many(doc, [ev])
+            eval_ids.append(ev["evaluation_id"])
+            if ev["verdict"] == "pass" and selected is None:
+                selected = c["candidate_id"]
+            elif ev["verdict"] != "pass":
+                failed_candidates.append({
+                    "producer": producer,
+                    "candidate_id": c["candidate_id"],
+                    "evaluation_id": ev["evaluation_id"],
+                    "candidate_text": c["text"],
+                    "findings": ev["findings"],
+                })
+        if selected is None:
+            unresolved += 1
+            unresolved_details.append({
+                "segment_index": segment_index,
+                "segment_id": sid,
+                "source_text": segs[sid]["source_text"],
+                "candidates": failed_candidates,
+            })
+        recs.append({
+            "segment_id": sid, "selected_candidate_id": selected,
+            "selected_by": "policy", "outcome": "select_challenger" if selected else "review_required",
+            "reason_code": "annotate_priority_pass" if selected else "no_passing_annotation",
+            "incumbent_candidate_id": None, "evaluation_ids": eval_ids,
+        })
+    if unresolved:
+        report["status"] = "unresolved"
+        report["unresolved_segments"] = unresolved
+        report["unresolved_details"] = unresolved_details
+        return report
+
+    # 注解 version 只覆盖 body 段——构造一个 body-only 的 revision 视图喂 build_document_version
+    # (它要求 recommendations 覆盖 revision 全部段;metadata 段不属于注解任务)。
+    body_rev = {**rev, "segments": [s for s in rev["segments"] if s["kind"] == "body"]}
+    current = store.current_ref(doc, channel="annotate")
+    selections = {rec["segment_id"]: rec["selected_candidate_id"] for rec in recs}
+    version = store.get("document-version", doc, current["version_id"]) if current else None
+    if version is not None and (
+        version["revision_id"] != body_rev["revision_id"] or version["selections"] != selections
+    ):
+        version = None
+    if version is not None:
+        report["published"] = True
+    elif current is None:
+        version = version_select.build_document_version(body_rev, recs, "workflow", datetime_now_iso())
+        store.put_many(doc, [version])
+        store.publish(doc, version["version_id"], expected_version_id=None, channel="annotate")
+        report["published"] = True
+    else:
+        version = version_select.build_document_version(
+            body_rev, recs, "workflow", datetime_now_iso(), parent_version_id=current["version_id"])
+        store.put_many(doc, [version])
+        store.publish(doc, version["version_id"], expected_version_id=current["version_id"], channel="annotate")
+        report["status"] = "republished"
+        report["published"] = True
+    report["version_id"] = version["version_id"]
+
+    # render study:注解(本版 selections)+ 当前翻译版本(translate channel)。翻译未发布则跳过渲染。
+    if render_dir is not None:
+        trans_ref = store.current_ref(doc)
+        if trans_ref is None:
+            report["study_rendered"] = False
+            report["study_skip_reason"] = "translation_not_published"
+        else:
+            trans_version = store.get("document-version", doc, trans_ref["version_id"])
+            translations = {s: cands_in_store[c]["text"]
+                            for s, c in trans_version["selections"].items() if c in cands_in_store}
+            annotations = {s: cands_in_store[c]["text"]
+                           for s, c in version["selections"].items() if c in cands_in_store}
+            render_dir = Path(render_dir)
+            render_dir.mkdir(parents=True, exist_ok=True)
+            sid_short = doc.rsplit(":", 1)[-1]
+            source_text = source_path.read_text(encoding="utf-8")
+            (render_dir / f"{sid_short}.study.txt").write_text(
+                render_bilingual(rev, source_text, translations, annotations=annotations), encoding="utf-8")
+            report["study_rendered"] = True
+    return report
+
+
+def finish_annotate_user(
+    provider, source_dir, store_root, render_dir, results_dir, *,
+    jobs_dir, entity_store=None, limit=None, producer_name: Optional[str] = None,
+    producer_priority: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """agent 路线:对每篇找 results_dir 里的注解 TSV(单模型 <sid>.annotate.tsv 或
+    多模型 <sid>.annotate.<producer>.tsv 若干)→ 组装 result → finish_annotate_document。"""
+    source_dir, store_root = Path(source_dir), Path(store_root)
+    results_dir, jobs_dir = Path(results_dir), Path(jobs_dir)
+    store = ArtifactStore(store_root)
+    sources = sorted(source_dir.glob("*.txt"))
+    if limit is not None:
+        sources = sources[:limit]
+    docs = []
+    for src in sources:
+        try:
+            sid = si.build_document_revision(provider, src)["document_id"].rsplit(":", 1)[-1]
+        except Exception as exc:
+            docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        job_path = jobs_dir / f"{sid}.annotate.job.json"
+        if not job_path.is_file():
+            docs.append({"source": src.name, "status": "no_job"})
+            continue
+        bundle = json.loads(job_path.read_text(encoding="utf-8"))
+        # 收集 TSV:多模型命名 <sid>.annotate.<producer>.tsv 优先,否则单文件 <sid>.annotate.tsv
+        tsvs = sorted(results_dir.glob(f"{sid}.annotate.*.tsv"))
+        if not tsvs:
+            single = results_dir / f"{sid}.annotate.tsv"
+            tsvs = [single] if single.is_file() else []
+        if not tsvs:
+            docs.append({"source": src.name, "status": "no_result"})
+            continue
+        results = []
+        for tsv in tsvs:
+            prefix = f"{sid}.annotate."
+            parsed_producer = (
+                tsv.name[len(prefix):-len(".tsv")]
+                if tsv.name.startswith(prefix) and tsv.name.endswith(".tsv")
+                else ""
+            )
+            producer = parsed_producer or producer_name or "agent"
+            translations = result_assemble.parse_translations_tsv(tsv.read_text(encoding="utf-8"), bundle)
+            results.append(result_assemble.assemble_result(bundle, translations, producer_name=producer))
+        try:
+            docs.append(finish_annotate_document(provider, src, store, results, render_dir,
+                                                 entity_store=entity_store,
+                                                 producer_priority=producer_priority))
+        except Exception as exc:
+            docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
+    summary = {"total": len(docs),
+               "published": sum(1 for d in docs if d.get("published")),
+               "unresolved": sum(1 for d in docs if d.get("status") == "unresolved"),
+               "errors": sum(1 for d in docs if d.get("status") == "error")}
+    return {"summary": summary, "documents": docs}
+
+
+def status_annotate_user(
+    provider: str,
+    source_dir: Path,
+    store_root: Path,
+    render_dir: Optional[Path] = None,
+    results_dir: Optional[Path] = None,
+    *,
+    jobs_dir: Optional[Path] = None,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """只读汇总 annotate job、TSV、current ref 与 study 产物。"""
+    source_dir, store_root = Path(source_dir), Path(store_root)
+    jobs_dir = Path(jobs_dir) if jobs_dir is not None else None
+    results_dir = Path(results_dir) if results_dir is not None else None
+    render_dir = Path(render_dir) if render_dir is not None else None
+    store = ArtifactStore(store_root)
+    sources = sorted(source_dir.glob("*.txt"))
+    if limit is not None:
+        sources = sources[:limit]
+    docs: List[Dict[str, Any]] = []
+    for src in sources:
+        rev = si.build_document_revision(provider, src)
+        doc = rev["document_id"]
+        sid = doc.rsplit(":", 1)[-1]
+        job = jobs_dir / f"{sid}.annotate.job.json" if jobs_dir else None
+        tsvs = sorted(results_dir.glob(f"{sid}.annotate.*.tsv")) if results_dir else []
+        single = results_dir / f"{sid}.annotate.tsv" if results_dir else None
+        if single is not None and single.is_file() and not tsvs:
+            tsvs = [single]
+        ref = store.current_ref(doc, channel="annotate")
+        study = render_dir / f"{sid}.study.txt" if render_dir else None
+        result_newer_than_study = bool(
+            tsvs and study is not None and study.is_file()
+            and max(path.stat().st_mtime_ns for path in tsvs) > study.stat().st_mtime_ns
+        )
+        if tsvs and (study is None or not study.is_file() or result_newer_than_study):
+            status = "ready_to_finish"
+        elif ref and study is not None and study.is_file():
+            status = "published"
+        elif job is not None and job.is_file():
+            status = "awaiting_result"
+        else:
+            status = "unprepared"
+        docs.append({
+            "document_id": doc,
+            "status": status,
+            "job": str(job) if job is not None and job.is_file() else None,
+            "results": [str(path) for path in tsvs],
+            "result_newer_than_study": result_newer_than_study,
+            "version_id": ref["version_id"] if ref else None,
+            "study": str(study) if study is not None and study.is_file() else None,
+        })
+    return {
+        "summary": {
+            "total": len(docs),
+            "published": sum(1 for doc in docs if doc["status"] == "published"),
+            "ready_to_finish": sum(1 for doc in docs if doc["status"] == "ready_to_finish"),
+            "awaiting_result": sum(1 for doc in docs if doc["status"] == "awaiting_result"),
+            "unprepared": sum(1 for doc in docs if doc["status"] == "unprepared"),
+        },
+        "documents": docs,
+    }
+
+
+def datetime_now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
 def translate_user(
     provider: str,
     source_dir: Path,
@@ -492,8 +791,8 @@ def translate_user(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("auto", "prepare", "finish", "verify"), default="auto",
-                        help="auto=自动执行器全程;prepare=导出 bundle;finish=吃 result 发布渲染;verify=独立核对落盘产物(防造假)")
+    parser.add_argument("--mode", choices=("auto", "prepare", "finish", "verify", "status"), default="auto",
+                        help="auto=自动执行器全程;prepare=导出 bundle;finish=吃 result 发布渲染;verify=独立核对落盘产物;status=只读查看 annotate 进度")
     parser.add_argument("--provider", required=True, choices=("pixiv", "fanbox"))
     parser.add_argument("--source-dir", required=True, type=Path)
     parser.add_argument("--store", required=True, type=Path)
@@ -509,6 +808,10 @@ def main() -> int:
     parser.add_argument("--producer", default=None, help="mode=finish 从 TSV 组装 result 时记录的 producer 名")
     parser.add_argument("--model", default=None)
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 篇(控成本)")
+    parser.add_argument("--task-type", choices=("translate", "annotate"), default="translate",
+                        help="annotate=陪读注解线(#174):prepare 出注解 job,finish 吃注解 TSV 建注解版本+渲染 study")
+    parser.add_argument("--producer-priority", default=None,
+                        help="annotate 多模型择优的 producer 优先级,逗号分隔(如 composer-2.5,luna)")
     args = parser.parse_args()
     for name, val in (("--store", args.store), ("--source-dir", args.source_dir)):
         if not str(val).strip() or str(val) == ".":
@@ -517,9 +820,20 @@ def main() -> int:
     if args.mode == "prepare":
         if not (args.jobs_dir and str(args.jobs_dir).strip()):
             parser.error("mode=prepare 需要非空 --jobs-dir")
-        m = prepare_user(args.provider, args.source_dir, args.store, args.jobs_dir,
-                         bilingual_dir=args.bilingual_dir, entity_store=args.entity_store, limit=args.limit)
+        if args.task_type == "annotate":
+            m = prepare_annotate_user(args.provider, args.source_dir, args.store, args.jobs_dir,
+                                      entity_store=args.entity_store, limit=args.limit)
+        else:
+            m = prepare_user(args.provider, args.source_dir, args.store, args.jobs_dir,
+                             bilingual_dir=args.bilingual_dir, entity_store=args.entity_store, limit=args.limit)
         print(json.dumps({"jobs": len([j for j in m["jobs"] if j.get("job")]), "jobs_dir": str(args.jobs_dir)}, ensure_ascii=False))
+        return 0
+    if args.mode == "status":
+        if args.task_type != "annotate":
+            parser.error("mode=status 当前只支持 --task-type annotate")
+        m = status_annotate_user(args.provider, args.source_dir, args.store, args.render_dir,
+                                 args.results_dir, jobs_dir=args.jobs_dir, limit=args.limit)
+        print(json.dumps(m, ensure_ascii=False, indent=2))
         return 0
     if args.mode == "verify":
         if not (args.render_dir and str(args.render_dir).strip()):
@@ -532,6 +846,15 @@ def main() -> int:
     if args.mode == "finish":
         if not (args.results_dir and str(args.results_dir).strip()) or not (args.render_dir and str(args.render_dir).strip()):
             parser.error("mode=finish 需要非空 --results-dir 与 --render-dir")
+        if args.task_type == "annotate":
+            priority = [p.strip() for p in args.producer_priority.split(",")] if args.producer_priority else None
+            m = finish_annotate_user(args.provider, args.source_dir, args.store, args.render_dir,
+                                     args.results_dir, jobs_dir=args.jobs_dir,
+                                     entity_store=args.entity_store, limit=args.limit,
+                                     producer_name=args.producer, producer_priority=priority)
+            failed = bool(m["summary"]["unresolved"] or m["summary"]["errors"])
+            print(json.dumps(m if failed else m["summary"], ensure_ascii=False, indent=2 if failed else None))
+            return 1 if failed else 0
         producer_name = args.producer or (args.executor if args.executor != "openrouter" else None)
         m = finish_user(args.provider, args.source_dir, args.store, args.render_dir, args.results_dir,
                         jobs_dir=args.jobs_dir, bilingual_dir=args.bilingual_dir,

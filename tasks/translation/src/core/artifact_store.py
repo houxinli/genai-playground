@@ -374,12 +374,15 @@ class ArtifactStore:
         return lambda kind, artifact_id: self.get(kind, document_id, artifact_id)
 
     # ---- current ref / 发布(§4 atomic CAS;发布≠版本创建 §2.6)----------------------
-    def ref_path(self, document_id: str) -> Path:
+    # channel:同一文档可有多条独立发布线(translate=译文版本,annotate=注解版本,#174)。
+    # 默认 "translate" 走原 refs/ 路径(向后兼容);其它 channel 走 refs-<channel>/,互不覆盖。
+    def ref_path(self, document_id: str, channel: str = "translate") -> Path:
         provider, creator_id, source_id = _split_document_id(document_id)
-        return self.root / "refs" / provider / creator_id / f"{source_id}.json"
+        refs_dir = "refs" if channel == "translate" else f"refs-{channel}"
+        return self.root / refs_dir / provider / creator_id / f"{source_id}.json"
 
-    def current_ref(self, document_id: str) -> Optional[Dict[str, Any]]:
-        path = self.ref_path(document_id)
+    def current_ref(self, document_id: str, channel: str = "translate") -> Optional[Dict[str, Any]]:
+        path = self.ref_path(document_id, channel)
         if not path.is_file():
             return None
         return json.loads(path.read_text(encoding="utf-8"))
@@ -392,6 +395,7 @@ class ArtifactStore:
         *,
         decided_by: str = "workflow",
         published_at: Optional[str] = None,
+        channel: str = "translate",
     ) -> Dict[str, Any]:
         """把 DocumentVersion 设为 current(发布)。expected_version_id 给定则做 compare-and-swap。
 
@@ -407,7 +411,7 @@ class ArtifactStore:
             raise ValueError(
                 f"publish: version {version_id} 属于 {version.get('document_id')} != {document_id}"
             )
-        path = self.ref_path(document_id)
+        path = self.ref_path(document_id, channel)
         path.parent.mkdir(parents=True, exist_ok=True)
         lock_path = path.with_suffix(path.suffix + ".lock")
         with lock_path.open("w") as lock_fh:

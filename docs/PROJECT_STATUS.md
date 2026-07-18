@@ -3,7 +3,7 @@
 > 当前项目状态、组件健康度和开发计划的真相源。
 > 新的 agent / 新的对话优先读这份文档，再进入具体子系统文档。
 
-**最后更新**: 2026-07-15
+**最后更新**: 2026-07-18
 
 ## Start Here
 
@@ -87,9 +87,10 @@ job(#83 P1b-c)。完整顺序以 system-design §20.2 为准。
 | 目标系统设计 | 分阶段实施 | P0 基础与 translate job 最小闭环已落地；2026-06-13 已按真实实现重新校准 | `tasks/translation/docs/system-design.md` |
 | 开发 Agent 连续性 | 基础已落地 | 协议、Schema、validator、CI、GitHub 模板、`make agent-bootstrap`、`make docs-drift`(文档漂移闸门)与 PR 设计耦合检查已实现；GitHub 状态同步待实现 | `docs/AGENT_WORKFLOW.md` |
 | 存量内容盘点/QA 基线 | 已完成 | `inventory_content.py` 全库清单 + `qa_baseline.py` 硬规则基线（v2 含打包产物与截断检查）；1048 单元中 894 个含 error（v2.1 打包按章拆分），坏产物已隔离 | `tasks/translation/src/scripts/inventory_content.py` |
-| 多候选与版本 | 已完成保守择优(#50) | `version_select.py`:recommend_selection 判定表 + build_document_version v2 + render_version 渲染 bilingual;硬规则只做 gate,未证明严格改善则保留 incumbent。current ref 发布(原子 CAS,ArtifactStore.publish)+ 端到端 slice 已贯通;自动 repair/Annotation 仍未做 | `tasks/translation/src/core/version_select.py` / Issue #50 |
+| 多候选与版本 | 已完成保守择优(#50) | `version_select.py`:recommend_selection 判定表 + build_document_version v2 + render_version 渲染 bilingual;硬规则只做 gate,未证明严格改善则保留 incumbent。current ref 发布(原子 CAS,ArtifactStore.publish)+ 端到端 slice 已贯通;自动 repair 与用户反馈 annotation 尚未完成 | `tasks/translation/src/core/version_select.py` / Issue #50 |
 | 翻译 Agent harness | 执行器就绪 | 统一 `translate` skill + TSV 中间产物：译文保持 `<source_id>.zh.tsv`，Agent 可用同篇两列 `names.tsv` 维护 first-wins 译名；`result.json` 由 harness 从 job+TSV 组装。OpenRouter 用临时 T/E 行协议边译边锁同一规则；context adapter(review/repair)待实现 | `.agents/skills/translate/SKILL.md` / `tasks/translation/src/core/result_assemble.py` |
 | 端到端翻译(translate-user) | 可用(#106) | `translate_user.py`/`make translate-user`:一个作者 source → 逐篇翻译(executor 可插拔,openrouter=grok-4.3 全自动)→ import → 保守择优 → 发布/渲染/合并；API/Agent 均按篇 first-wins 锁定新名字，不再翻译后额外调用 LLM，首次译名发布后可进入 review queue。agent prepare/finish 支持 TSV 自动组装与 stale 校验，`MODE=verify` 独立核对 result/入库/发布/渲染 | `tasks/translation/src/core/translate_user.py` |
+| 陪读注解 | 可用(#174) | `task_type=annotate` 复用 job/TSV/candidate/evaluation/version/store；独立 annotate ref 绑定原文，渲染 `study.txt` 时交织当前译文。`make annotate` 提供 prepare/finish/status 薄入口；硬规则保护原文及原文自带括号，失败直接返回段级修复明细 | `.agents/skills/annotate`, `translate_user.py`, `annotate_eval.py` |
 | 端到端批量编排(新架构) | 可用(#96) | `pipeline_ingest.py`/`make ingest-user`:一个用户的 source+bilingual 端到端跑进持久 store(revision→legacy candidates→eval→保守择优→version→publish→render bilingual+zh),逐文档容错 + manifest;按作者合并整本(merge_author:第N章 标题,bilingual/zh 各一,#102)。实跑 pixiv 53230930:8 篇,2 已发布、6 因 legacy 译文不全 incomplete | `tasks/translation/src/core/pipeline_ingest.py` |
 | 用户句级反馈 | 未实现 | 尚不能持久化“某句话有问题”并触发定向修复 | 目标见系统设计 |
 | 跨文本知识库 | P1b 主链完成 | scoped 实体库 + resolver 接入 Context Pack；启发式/agent 抽取及翻译中的篇内首次译名均经 Entity Linking、模糊/读音匹配与 review 队列，规则影响分析可定位旧译名。instruction-pack/repair context 仍待做 | `entity_store.py` / `entity_review.py` / `entity_harvest.py` / §7–8 |
@@ -199,7 +200,7 @@ job(#83 P1b-c)。完整顺序以 system-design §20.2 为准。
   1048 个单元（逐篇文件 + 打包章节）中 894 个含 error 级问题（kana 8757、
   same_as_source 5596、refusal 738、failure 501、empty 112；missing_pair 为 0——无结构性截断）。
   逐条修复依赖 P1 的 candidate/repair 闭环；报告见 `logs/inventory/qa_baseline.json`。
-- 当前没有用户 annotation 生命周期和句级定向重译入口。
+- 当前没有用户反馈 annotation 生命周期和句级定向重译入口；陪读注解 `task_type=annotate` 已落地，但多模型仍只按 producer 偏好选择，没有语义质量排名。
 - 实体库已作用域化并接入翻译主路线(#151),但**库尚未填充**——已定人名待存入才能真正锁定;在此之前仍靠事后批量替换纠正跨篇不一致(2026-07 已批量修 モモ→桃、karura→卡露拉、假名残留 4603 行)。
 - **人名预读（name-glossary pre-reading）质量差**：本地模型自动抽取的人名候选词表错漏多
   （漏抽、错译、把普通词当人名、同名不统一），实测不可直接信任，仍需人工规则兜底。

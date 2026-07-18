@@ -76,6 +76,14 @@ class ParseTsvTest(unittest.TestCase):
 
 
 class AssembleTest(unittest.TestCase):
+    def test_default_completed_at_is_deterministic(self):
+        bundle = _bundle()
+        translations = {i: f"译文{i}" for i in range(len(bundle["segments"]))}
+        first = ra.assemble_result(bundle, translations, producer_name="composer-2.5")
+        second = ra.assemble_result(bundle, translations, producer_name="composer-2.5")
+        self.assertEqual(first, second)
+        self.assertEqual(ra.DETERMINISTIC_COMPLETED_AT, first["completed_at"])
+
     def test_assembles_schema_valid_result_and_backfills(self):
         bundle = _bundle()
         n = len(bundle["segments"])

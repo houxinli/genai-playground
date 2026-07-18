@@ -81,8 +81,14 @@ def _segments_index(revision: Dict[str, Any]):
     return segs_by_kind, body_segs
 
 
-def render_bilingual(revision: Dict[str, Any], source_text: str, translations: Dict[str, str], furigana: bool = False) -> str:
-    """返回 bilingual 文本。translations:segment_id -> 译文(metadata 与 body 段都需提供)。"""
+def render_bilingual(
+    revision: Dict[str, Any], source_text: str, translations: Dict[str, str],
+    furigana: bool = False, annotations: Dict[str, str] = None,
+) -> str:
+    """返回 bilingual 文本。translations:segment_id -> 译文(metadata 与 body 段都需提供)。
+
+    annotations(#174 陪读):segment_id -> 注解后的源文行(仅 body 段)。给定则 body 源行输出
+    注解版(保留原缩进),缺某段回退原源行;与 furigana 互斥使用(注解版自身含读音)。"""
     provider = revision["source"]["provider"]
     caption_key = _PROVIDER_SPEC[provider]["caption_key"]
 
@@ -134,7 +140,12 @@ def render_bilingual(revision: Dict[str, Any], source_text: str, translations: D
                 f"source line {body_idx} does not match revision segment "
                 f"{seg['segment_id']}: {line.strip()!r} != {seg['source_text']!r}"
             )
-        out.append(add_furigana(line) if furigana else line)
+        annotated = annotations.get(seg["segment_id"]) if annotations else None
+        if annotated is not None:
+            indent = line[: len(line) - len(line.lstrip())]
+            out.append(indent + annotated)
+        else:
+            out.append(add_furigana(line) if furigana else line)
         out.append(_tr(seg))
         body_idx += 1
     if body_idx != len(body_segs):

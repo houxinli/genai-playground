@@ -224,7 +224,21 @@ conda run -n llm python tasks/translation/scripts/convert_bilingual_to_simplifie
   --backend opencc
 ```
 
-## 4. 目标工作流（尚未实现）
+## 4. 陪读注解
+
+已发布译文可从同一 Artifact Store 生成独立陪读版。工作区准备好 `src/` 后：
+
+```bash
+WS=tasks/translation/data/workspaces/pixiv-27417304
+make annotate MODE=prepare PROVIDER=pixiv WS=$WS
+# 执行器按 .agents/skills/annotate/SKILL.md 写 results/<id>.annotate.<producer>.tsv
+make annotate MODE=finish PROVIDER=pixiv WS=$WS PRODUCER_PRIORITY=composer-2.5
+make annotate MODE=status PROVIDER=pixiv WS=$WS
+```
+
+成品写入 `$WS/rendered/<id>.study.txt`；注解版本使用独立 ref，更新译文后重跑 finish 即可重渲染，不需重新调用注解模型。
+
+## 5. 目标工作流（渐进实施）
 
 目标系统会在保持当前 Make 入口兼容的前提下，逐步增加：
 

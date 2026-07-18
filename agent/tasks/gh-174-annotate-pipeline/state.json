@@ -1,0 +1,182 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-174-annotate-pipeline",
+  "title": "Address PR 179 annotate review feedback",
+  "status": "complete",
+  "branch": "feat/annotate-pipeline",
+  "objective": "Finish PR #179 with a dogfood-proven annotate workflow that is easy for inexpensive agents to execute and diagnose.",
+  "github": {
+    "issue": 174,
+    "pull_request": 179
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/src/core/annotate_eval.py and its tests",
+      "tasks/translation/src/core/translate_user.py annotate finish path and tests",
+      "tasks/translation/src/core/result_assemble.py deterministic harness replay and tests",
+      ".agents/skills/annotate executor contract and thin Make entrypoint",
+      "PR #179 review follow-up state and validation evidence"
+    ],
+    "out": [
+      "semantic annotation quality comparison between models",
+      "bilingual versus study publication naming",
+      "unrelated translation pipeline refactors"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "Annotate task, version, and render contract",
+      "required": true
+    },
+    {
+      "path": ".agents/skills/annotate/SKILL.md",
+      "purpose": "Annotate executor contract",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "Keep study.txt as an additional rendered artifact.",
+      "reason": "The user confirmed a separate study output is acceptable.",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "Keep producer-priority selection; semantic quality comparison is deferred.",
+      "reason": "Quality comparison is a real gap but does not block the current PR.",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "Address exactly the four unresolved P2 threads on PR #179.",
+      "reason": "The user explicitly limited this follow-up to the existing P2 findings.",
+      "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "Dogfood 27417304 on the current branch before declaring the annotate slice complete.",
+      "reason": "The real Composer 2.5 TSV exposed a source-owned-parentheses violation that unit tests alone did not reveal.",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "Fix the four unresolved PR #179 P2 findings",
+      "status": "completed",
+      "depends_on": [],
+      "acceptance": [
+        "Full producer names containing dots are preserved and tested.",
+        "Repeated finish with identical selections keeps the annotate ref stable and is tested.",
+        "Full-width annotation parentheses are accepted and tested.",
+        "Source-owned parenthesized text cannot be changed or removed and is tested.",
+        "The full 470+ translation test baseline and repository validation pass."
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Publish the review fixes to PR #179",
+      "status": "completed",
+      "depends_on": [
+        "S1"
+      ],
+      "acceptance": [
+        "The fix commit is pushed to feat/annotate-pipeline.",
+        "PR #179 reports the updated head and CI is green.",
+        "The four addressed review threads are summarized for handoff."
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Make annotate replay deterministic and failures self-diagnosing",
+      "status": "completed",
+      "depends_on": [
+        "S2"
+      ],
+      "acceptance": [
+        "The skill explicitly protects source-owned parentheses with a concrete example.",
+        "Annotate finish returns failed segment details and exits nonzero when unresolved.",
+        "Replaying the same job, TSV, and producer creates no new attestation or version.",
+        "A thin Make entrypoint reduces repeated workspace path arguments.",
+        "The full translation test baseline and 27417304 dogfood pass."
+      ]
+    }
+  ],
+  "next_action": null,
+  "validation": {
+    "required_commands": [
+      "make agent-validate",
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "make docs-drift",
+      "git diff --check"
+    ],
+    "last_results": [
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "472 passed, 2 warnings",
+        "timestamp": "2026-07-18T06:59:27Z"
+      },
+      {
+        "command": "make docs-drift",
+        "status": "passed",
+        "summary": "文档漂移检查通过",
+        "timestamp": "2026-07-18T06:59:27Z"
+      },
+      {
+        "command": "make agent-validate",
+        "status": "passed",
+        "summary": "Agent task validation passed",
+        "timestamp": "2026-07-18T06:59:27Z"
+      },
+      {
+        "command": "git diff --check",
+        "status": "passed",
+        "summary": "No whitespace errors",
+        "timestamp": "2026-07-18T06:59:27Z"
+      },
+      {
+        "command": "gh pr checks 179 --watch --interval 10",
+        "status": "passed",
+        "summary": "Both GitHub Actions unittest jobs passed on commit 36ed02d",
+        "timestamp": "2026-07-18T07:03:56Z"
+      },
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q",
+        "status": "passed",
+        "summary": "475 passed, 2 warnings",
+        "timestamp": "2026-07-18T07:43:29Z"
+      },
+      {
+        "command": "make annotate MODE=finish PROVIDER=pixiv WS=tasks/translation/data/workspaces/pixiv-27417304 PRODUCER_PRIORITY=composer-2.5",
+        "status": "passed",
+        "summary": "published=1; second identical finish added zero attestations and zero versions",
+        "timestamp": "2026-07-18T07:43:29Z"
+      },
+      {
+        "command": "skill quick_validate + make docs-drift + make agent-validate + git diff --check",
+        "status": "passed",
+        "summary": "Skill, docs, task state, and diff validation passed",
+        "timestamp": "2026-07-18T07:43:29Z"
+      }
+    ]
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260718T074329Z-codex",
+    "timestamp": "2026-07-18T07:43:29Z",
+    "agent": "codex",
+    "summary": "Completed the dogfood-driven annotate usability and replay-idempotence follow-up.",
+    "observed_head": "0d4e9d067d6a0981b93f77ad81f5246fc1dbe6f6"
+  },
+  "next_task": null
+}
