@@ -69,6 +69,12 @@
       "summary": "Do not publish source excerpts in GitHub records.",
       "reason": "The repository is public and the source works can contain adult/private reading material; segment IDs and neutral minimal examples are sufficient.",
       "status": "active"
+    },
+    {
+      "id": "D4",
+      "summary": "Treat translate verify as artifact consistency, with independent semantic review for legacy workspaces.",
+      "reason": "27543152 proved that a structurally valid candidate can contain a neighboring segment's fluent translation; #189 tracks deterministic detection while the campaign keeps the explicit review step.",
+      "status": "active"
     }
   ],
   "open_questions": [],
@@ -133,11 +139,12 @@
   ],
   "next_action": {
     "step_id": "S2",
-    "instruction": "Run the complete annotate skill loop for pixiv 27543152 using the merged full-reading rule, then review and record its quality before selecting another work.",
+    "instruction": "Publish and merge the focused #190 finish-quarantine fix, then run the complete annotate skill loop for pixiv 28349232 and review it before selecting another work.",
     "acceptance": [
-      "27543152 publishes with zero unresolved segments and a current annotation ref plus study output.",
+      "The #190 PR passes CI, is merged, and the fix remains present on the campaign branch.",
+      "28349232 publishes with zero unresolved segments and a current annotation ref plus study output.",
       "Repeated finish adds no attestation/version and leaves the ref unchanged.",
-      "A beginning/middle/end review confirms complete compound readings and is recorded on #185."
+      "A beginning/middle/end review and any generalizable finding are recorded on #185."
     ]
   },
   "validation": {
@@ -189,16 +196,34 @@
         "status": "passed",
         "summary": "Issue #187 closed after both CI jobs passed; the merged skill and guide now require readings to cover the complete annotated compound, without adding a QC layer.",
         "timestamp": "2026-07-18T08:56:36Z"
+      },
+      {
+        "command": "make annotate MODE=finish/status PROVIDER=pixiv WS=...pixiv-27543152",
+        "status": "passed",
+        "summary": "27543152 published 344/344 body annotations with zero unresolved; replay kept translation/annotation refs and study digest stable.",
+        "timestamp": "2026-07-18T09:27:17Z"
+      },
+      {
+        "command": "translate review + finish + verify for pixiv-27543152",
+        "status": "passed",
+        "summary": "Repaired legacy semantic misalignment and entity spelling drift, republished translation version_1203fc7a50731bc0e8a939cd4bfeaa75ece57e43, rerendered study, and verified ref/render consistency.",
+        "timestamp": "2026-07-18T09:27:17Z"
+      },
+      {
+        "command": "conda run -n llm python -m pytest tasks/translation/src -q && make docs-drift",
+        "status": "passed",
+        "summary": "476 tests passed; documentation drift check passed for the #190 fix.",
+        "timestamp": "2026-07-18T09:27:17Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T085636Z-codex",
-    "timestamp": "2026-07-18T08:56:36Z",
+    "checkpoint_id": "cp-20260718T092717Z-codex",
+    "timestamp": "2026-07-18T09:27:17Z",
     "agent": "codex",
-    "summary": "Closed #187 through merged PR #188 and brought the complete-compound-reading rule back to the campaign branch before the next article.",
-    "observed_head": "753820d7a461cabd5c98e659dfeec96d14429bd0"
+    "summary": "Completed 27543152 annotation and repaired its pre-existing translation misalignment; opened #189 and implemented the actionable finish-quarantine fix for #190 before continuing.",
+    "observed_head": "1333f9c5e44e484429033e1f1ddcd4b54f7a38e7"
   },
   "next_task": null
 }
