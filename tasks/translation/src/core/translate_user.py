@@ -98,6 +98,10 @@ def finish_document(
     if rep["quarantined"]:
         report["status"] = "translate_quarantined"
         report["reasons"] = rep["reasons"][:3]
+        report["next_action"] = (
+            "保持 SOURCE 与 ENTITY_STORE 和 prepare 时一致后重跑 finish；"
+            "原 job 未带实体上下文时显式传 ENTITY_STORE="
+        )
         return report
 
     segs = {s["segment_id"]: s for s in rev["segments"]}
@@ -381,9 +385,15 @@ def finish_user(
             docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
     rendered_sids = [d["document_id"].rsplit(":", 1)[-1] for d in docs if d.get("rendered")]
     merged = merge_author(render_dir, source_dir.name, rendered_sids)
-    summary = {"total": len(docs), "published": sum(1 for d in docs if d.get("published")),
-               "no_result": sum(1 for d in docs if d.get("status") == "no_result"),
-               "errors": sum(1 for d in docs if d.get("status") == "error")}
+    summary = {
+        "total": len(docs),
+        "published": sum(1 for d in docs if d.get("published")),
+        "no_result": sum(1 for d in docs if d.get("status") == "no_result"),
+        "quarantined": sum(1 for d in docs if d.get("status") == "translate_quarantined"),
+        "unresolved": sum(1 for d in docs if d.get("status") == "unresolved"),
+        "qa_failed": sum(1 for d in docs if d.get("status") == "document_qa_failed"),
+        "errors": sum(1 for d in docs if d.get("status") == "error"),
+    }
     manifest = {"provider": provider, "summary": summary, "merged": merged, "documents": docs}
     render_dir.mkdir(parents=True, exist_ok=True)
     (render_dir / "translate_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -861,8 +871,9 @@ def main() -> int:
                         entity_store=args.entity_store, entity_review_queue=args.entity_review_queue,
                         limit=args.limit,
                         producer_name=producer_name, model=args.model)
-        print(json.dumps(m["summary"], ensure_ascii=False))
-        return 0
+        failed = any(m["summary"][key] for key in ("quarantined", "unresolved", "qa_failed", "errors"))
+        print(json.dumps(m if failed else m["summary"], ensure_ascii=False, indent=2 if failed else None))
+        return 1 if failed else 0
 
     translate_fn = make_translate_fn(args.executor, args.model)
     manifest = translate_user(
