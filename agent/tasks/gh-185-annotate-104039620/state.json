@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "task_id": "gh-185-annotate-104039620",
+  "title": "Annotate Sabi Wanderer 104039620 collection",
+  "status": "active",
+  "branch": "chore/annotate-104039620",
+  "objective": "Annotate every current and newly updated work by Pixiv creator 104039620, review each result, record and fix general issues, then rebuild and overwrite the Google Drive author collection.",
+  "github": {
+    "issue": 185,
+    "pull_request": null
+  },
+  "scope": {
+    "in": [
+      "tasks/translation/data/pixiv/104039620 source inventory and current translation artifacts",
+      "per-work annotation jobs, TSV candidates, refs-annotate, and rendered study files",
+      ".agents/skills/annotate and translation pipeline fixes proven necessary by real-work dogfood",
+      "agent/tasks/gh-185-annotate-104039620 execution state and GitHub issue #185 progress records",
+      "錆流浪 author collection build, Google Drive overwrite, and post-publish verification"
+    ],
+    "out": [
+      "unrelated authors and non-translation subprojects",
+      "broad workspace migration tracked by #155",
+      "semantic multi-model ranking that is not required to finish the collection",
+      "publishing private source excerpts or adult text in public GitHub comments"
+    ]
+  },
+  "context_files": [
+    {
+      "path": "docs/PROJECT_STATUS.md",
+      "purpose": "Current project phase and priorities",
+      "required": true
+    },
+    {
+      "path": ".agents/skills/annotate/SKILL.md",
+      "purpose": "Per-work annotation executor and acceptance contract",
+      "required": true
+    },
+    {
+      "path": ".agents/skills/annotate/references/annotation-guide.md",
+      "purpose": "Annotation density, reading, meaning, and grammar quality guidance",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/docs/system-design.md",
+      "purpose": "Artifact, candidate, version, ref, and study-rendering architecture",
+      "required": true
+    },
+    {
+      "path": "tasks/translation/README.md",
+      "purpose": "Supported Make entrypoints for source sync, annotation, and publishing",
+      "required": true
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "summary": "Run one work through the complete annotate loop before starting the next.",
+      "reason": "The user wants each real result reviewed so general problems are fixed before they spread across the collection.",
+      "status": "active"
+    },
+    {
+      "id": "D2",
+      "summary": "Record routine per-work evidence on #185; open a separate issue and PR only for generalizable skill or pipeline changes.",
+      "reason": "This keeps GitHub readable while preserving one-issue-one-change review discipline.",
+      "status": "active"
+    },
+    {
+      "id": "D3",
+      "summary": "Do not publish source excerpts in GitHub records.",
+      "reason": "The repository is public and the source works can contain adult/private reading material; segment IDs and neutral minimal examples are sufficient.",
+      "status": "active"
+    }
+  ],
+  "open_questions": [],
+  "blockers": [],
+  "plan": [
+    {
+      "id": "S1",
+      "title": "Sync and inventory creator 104039620",
+      "status": "in_progress",
+      "depends_on": [],
+      "acceptance": [
+        "Pixiv download/update entrypoint has been run for creator 104039620.",
+        "Every current source work is listed with source revision, translation ref, annotation ref, and study status.",
+        "The existing Google Drive destination and prior managed collection files are identified without modifying them."
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Complete the per-work annotate and quality-review loop",
+      "status": "pending",
+      "depends_on": ["S1"],
+      "acceptance": [
+        "Each work has a candidate bound to the current source revision.",
+        "Each finish has zero unresolved segments and creates a current annotation ref plus study output.",
+        "Each work passes replay idempotence and a human sample review recorded on #185.",
+        "Generalizable defects are tracked and fixed through separate issues and PRs before continuing."
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Reconcile source updates and complete final coverage",
+      "status": "pending",
+      "depends_on": ["S2"],
+      "acceptance": [
+        "A final Pixiv sync finds no unprocessed new or revised work.",
+        "All translation and annotation refs match their current source revisions.",
+        "All study outputs render without unresolved segments."
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "Build and overwrite the Google Drive author collection",
+      "status": "pending",
+      "depends_on": ["S3"],
+      "acceptance": [
+        "The author collection includes the intended study artifacts for every current work.",
+        "The mounted Google Drive destination is overwritten using the repository Make entrypoint.",
+        "Local and Drive manifests/files/digests match and obsolete managed collection files are absent."
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Close the campaign with reproducible evidence",
+      "status": "pending",
+      "depends_on": ["S4"],
+      "acceptance": [
+        "Issue #185 contains final work counts, validation results, publish path, and any follow-up issues.",
+        "Required repository validation passes.",
+        "Task state and final checkpoint are complete and reviewable."
+      ]
+    }
+  ],
+  "next_action": {
+    "step_id": "S1",
+    "instruction": "Run the supported Pixiv update entrypoint for creator 104039620, inventory every source/translation/annotation/study artifact, and locate the previous mounted Google Drive collection without modifying it.",
+    "acceptance": [
+      "The current remote-backed work set and local coverage gaps are explicit.",
+      "The prior Google Drive destination and managed files are identified.",
+      "The inventory milestone is recorded on #185."
+    ]
+  },
+  "validation": {
+    "required_commands": [
+      "make agent-validate",
+      "conda run -n llm python -m pytest tasks/translation/src -q",
+      "make docs-drift",
+      "git diff --check"
+    ],
+    "last_results": []
+  },
+  "known_unrelated_changes": [],
+  "last_checkpoint": {
+    "checkpoint_id": "cp-20260718T075836Z-codex",
+    "timestamp": "2026-07-18T07:58:36Z",
+    "agent": "codex",
+    "summary": "Bootstrapped the author annotation campaign and set source/artifact inventory as the first execution unit.",
+    "observed_head": "a9d919e942d1c65406b31430993e1c2d93fa2aeb"
+  },
+  "next_task": null
+}
