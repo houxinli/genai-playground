@@ -1565,6 +1565,9 @@ segment 只有一个物理行,因此 `multiline_translation` 和上/下文、`[t
 用 `resolve_entities_for_revision` 把本篇适用实体解析进 `context_pack.entities`(折入 task 身份);
 **finish 必须传同一个库**,实体约束中途变更 → context_digest 变 → import 按 stale 隔离(协议行为,需重新 prepare)。
 此前实体链路只在 `translate-bundle`/`export-job` CLI 可用,agent 主路线(prepare/finish)的 context_pack 一直为空。
+finish 的 quarantine、unresolved、document QA failure 都是发布阻断,CLI 必须在摘要中分别计数、返回非零并输出
+文档级原因;quarantine 同时给出恢复动作,要求 SOURCE/ENTITY_STORE 与 prepare 保持一致(旧空实体上下文显式传
+`ENTITY_STORE=`)。不得把 `published=0,errors=0` 当成功,也不得手改 result/ref 绕过 stale 防护。
 
 **bilingual 注音(2026-07-14)**:`renderer.add_furigana` 用 pykakasi 给日文源行的汉字注音(漢字(かな),
 送假名剥到括号外,如 映る→映(うつ)る)。**注音只在作者合集构建时施加**(`author_collection.build_collection(furigana=True)`,
