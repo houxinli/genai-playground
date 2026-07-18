@@ -18,6 +18,7 @@
 ## 📅 2026年
 
 ### 07月
+- [2026-07-18 陪读复合词完整读音](./2026-07-18-annotation-full-readings.md)
 - [2026-07-15 篇内首次译名记忆](./2026-07-15-document-entity-memory.md)
 - [2026-07-15 执行器结构污染与作者合集新鲜度闸门](./2026-07-15-output-integrity.md)
 - [2026-07-15 OpenRouter 翻译后实体收割](./2026-07-15-entity-harvest.md)
