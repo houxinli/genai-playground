@@ -2,7 +2,7 @@
   "schema_version": 1,
   "task_id": "gh-174-annotate-pipeline",
   "title": "Address PR 179 annotate review feedback",
-  "status": "active",
+  "status": "complete",
   "branch": "feat/annotate-pipeline",
   "objective": "Fix all four unresolved P2 review threads on PR #179 without expanding annotation quality selection scope.",
   "github": {
@@ -77,7 +77,7 @@
     {
       "id": "S2",
       "title": "Publish the review fixes to PR #179",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [
         "S1"
       ],
@@ -88,15 +88,7 @@
       ]
     }
   ],
-  "next_action": {
-    "step_id": "S2",
-    "instruction": "Commit the validated P2 fixes, push feat/annotate-pipeline, and verify PR #179 CI and thread state.",
-    "acceptance": [
-      "The remote PR head contains the fix commit.",
-      "CI succeeds on the updated PR head.",
-      "No semantic quality-selection or output-naming redesign is included."
-    ]
-  },
+  "next_action": null,
   "validation": {
     "required_commands": [
       "make agent-validate",
@@ -128,16 +120,22 @@
         "status": "passed",
         "summary": "No whitespace errors",
         "timestamp": "2026-07-18T06:59:27Z"
+      },
+      {
+        "command": "gh pr checks 179 --watch --interval 10",
+        "status": "passed",
+        "summary": "Both GitHub Actions unittest jobs passed on commit 36ed02d",
+        "timestamp": "2026-07-18T07:03:56Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T065927Z-codex",
-    "timestamp": "2026-07-18T06:59:27Z",
+    "checkpoint_id": "cp-20260718T070356Z-codex",
+    "timestamp": "2026-07-18T07:03:56Z",
     "agent": "codex",
-    "summary": "Implemented and validated all four PR #179 P2 fixes; next action is commit and push.",
-    "observed_head": "f21b00abc06792eda9fabe3e3bf7f79b1a2c20ae"
+    "summary": "Published all four PR #179 P2 fixes; CI passed and the addressed review threads are outdated.",
+    "observed_head": "36ed02d7f18846c9545e502ffa1315b04c061608"
   },
   "next_task": null
 }
