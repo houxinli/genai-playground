@@ -4,10 +4,14 @@
 
 from __future__ import annotations
 
+import io
+import json
 import shutil
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from . import translate_user as tu
@@ -389,6 +393,32 @@ class TranslateUserTest(unittest.TestCase):
             m2 = tu.finish_user("pixiv", src_dir, store, render, results, jobs_dir=jobs,
                                 producer_name="cursor-grok")
             self.assertEqual("translate_quarantined", m2["documents"][0]["status"])
+            self.assertEqual(1, m2["summary"]["quarantined"])
+            self.assertIn("ENTITY_STORE", m2["documents"][0]["next_action"])
+
+    def test_cli_finish_returns_nonzero_and_quarantine_reason(self):
+        manifest = {
+            "summary": {
+                "total": 1, "published": 0, "no_result": 0, "quarantined": 1,
+                "unresolved": 0, "qa_failed": 0, "errors": 0,
+            },
+            "documents": [{
+                "status": "translate_quarantined",
+                "reasons": ["task_digest mismatch"],
+                "next_action": "保持 SOURCE 与 ENTITY_STORE 和 prepare 时一致后重跑 finish",
+            }],
+        }
+        argv = [
+            "translate_user.py", "--provider", "pixiv", "--source-dir", "src", "--store", "store",
+            "--mode", "finish", "--render-dir", "render", "--results-dir", "results",
+        ]
+        output = io.StringIO()
+        with patch("sys.argv", argv), patch.object(tu, "finish_user", return_value=manifest), redirect_stdout(output):
+            exit_code = tu.main()
+        self.assertEqual(1, exit_code)
+        payload = json.loads(output.getvalue())
+        self.assertEqual("translate_quarantined", payload["documents"][0]["status"])
+        self.assertEqual("task_digest mismatch", payload["documents"][0]["reasons"][0])
 
     def test_blank_tsv_rows_block_version_not_holey_publish(self):
         # gh-142 回归:填空 TSV 的空行曾被 reviewable 放宽路径选中 → 212 篇带洞发布。
