@@ -139,9 +139,9 @@
   ],
   "next_action": {
     "step_id": "S2",
-    "instruction": "Run the complete annotate skill loop for pixiv 28349232 and review it before selecting another work.",
+    "instruction": "Run the complete annotate skill loop for pixiv 26044806 and review it before selecting another work.",
     "acceptance": [
-      "28349232 publishes with zero unresolved segments and a current annotation ref plus study output.",
+      "26044806 publishes with zero unresolved segments and a current annotation ref plus study output.",
       "Repeated finish adds no attestation/version and leaves the ref unchanged.",
       "A beginning/middle/end review and any generalizable finding are recorded on #185."
     ]
@@ -219,16 +219,28 @@
         "status": "passed",
         "summary": "Both unittest jobs passed after adding the required system-design coupling update; #190 closed at merge commit 5768d30.",
         "timestamp": "2026-07-18T09:33:26Z"
+      },
+      {
+        "command": "make annotate MODE=finish/status PROVIDER=pixiv WS=...pixiv-28349232",
+        "status": "passed",
+        "summary": "28349232 published 216/216 body annotations with zero unresolved; replay kept attestation/version counts plus translation ref, annotation ref, and study digest stable.",
+        "timestamp": "2026-07-18T09:49:25Z"
+      },
+      {
+        "command": "make translate-user MODE=verify ...pixiv-28349232",
+        "status": "passed",
+        "summary": "ok=true; current translation version matches source and rendered output matches ref.",
+        "timestamp": "2026-07-18T09:49:25Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T093326Z-codex",
-    "timestamp": "2026-07-18T09:33:26Z",
+    "checkpoint_id": "cp-20260718T094925Z-codex",
+    "timestamp": "2026-07-18T09:49:25Z",
     "agent": "codex",
-    "summary": "Merged PR #191 to close #190, restored the design-coupled fix to the campaign branch, and recorded 27543152 as the fifth completed work on #185.",
-    "observed_head": "a97374608eb192e311f97b8c7c91edd0bb3c6be0"
+    "summary": "Completed 28349232 as work 6/25 with 216 validated annotation rows, human semantic cleanup, translation verification, and replay-stable artifact evidence.",
+    "observed_head": "2036461265a17043e121a70950a3cfbf5ebe3c1f"
   },
   "next_task": null
 }
