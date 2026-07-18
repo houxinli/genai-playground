@@ -22,7 +22,7 @@ def _make_work(ws_root: Path, sid: str, *, title: str, rendered=True, provider="
     if rendered:
         rd = ws_root / f"{provider}-{sid}" / "rendered"
         rd.mkdir(parents=True, exist_ok=True)
-        for var in ("zh", "bilingual"):
+        for var in ("zh", "bilingual", "study"):
             (rd / f"{sid}.{var}.txt").write_text(
                 f"---\nID: {sid}\ntitle: {title}\n---\n\n正文 {sid} {var}\n", encoding="utf-8")
 
@@ -72,6 +72,37 @@ class AuthorCollectionTest(unittest.TestCase):
             self.assertFalse((gd / "作者D·中文.txt").exists())     # 无整本 txt
             self.assertFalse((Path(t) / "coll" / "作者D_zh.txt").exists())
             self.assertTrue(res["verification"]["ok"])           # epub-only 自校验通过
+
+    def test_study_variant_collection_and_gdrive_naming(self):
+        # variants=('zh','study'):产出中文+陪读两本 epub,GDrive 用「·陪读」显示名;不产日中对照。
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            _make_work(ws, "700001", title="精读篇")
+            _make_work(ws, "700002", title="精读篇二")
+            gd = Path(t) / "gdrive"
+            out = Path(t) / "coll"
+            res = ac.build_collection("作者S", "700000", workspaces_root=ws, out_dir=out,
+                                      gdrive_dir=gd, variants=("zh", "study"))
+            self.assertEqual(2, res["epub_chapters"]["study"])
+            self.assertTrue((out / "作者S_study.epub").is_file())
+            self.assertTrue((gd / "作者S·中文.epub").is_file())
+            self.assertTrue((gd / "作者S·陪读.epub").is_file())
+            self.assertFalse((gd / "作者S·日中对照.epub").exists())     # 未选 bilingual
+            self.assertTrue(res["verification"]["ok"])
+            # verify 用 manifest 记录的 variants 复核(不回退默认 zh+bilingual)
+            self.assertTrue(ac.verify_collection(
+                "700000", workspaces_root=ws, out_dir=out)["ok"])
+
+    def test_study_variant_missing_study_render_refuses(self):
+        # 请求 study 但某篇缺 study.txt → 拒绝生成部分合集。
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            _make_work(ws, "700001", title="有")
+            _make_work(ws, "700002", title="缺")
+            (ws / "pixiv-700002" / "rendered" / "700002.study.txt").unlink()
+            with self.assertRaisesRegex(ValueError, "拒绝生成部分合集"):
+                ac.build_collection("作者M", "700000", workspaces_root=ws,
+                                    out_dir=Path(t) / "coll", variants=("zh", "study"))
 
     def test_formats_txt_only(self):
         with tempfile.TemporaryDirectory() as t:

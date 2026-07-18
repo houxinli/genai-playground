@@ -115,16 +115,19 @@ def _sid_sort_key(sid: str):
     return (0, int(sid)) if sid.isdigit() else (1, sid)
 
 
-def merge_author(render_dir: Path, author_key: str, source_ids: List[str]) -> Dict[str, Any]:
-    """把本次成功渲染的逐文档产物按作者合并成整本:bilingual / zh 各一个文件,放回 render_dir。
+def merge_author(
+    render_dir: Path, author_key: str, source_ids: List[str], variants=("bilingual", "zh"),
+) -> Dict[str, Any]:
+    """把本次成功渲染的逐文档产物按作者合并成整本:每个 variant 一个文件,放回 render_dir。
 
     **由本次渲染的 source_ids 驱动**(不 glob 磁盘):否则上次遗留/别的作者的 `*.txt` 会被卷进书、
     章节数虚高(Codex #103)。按 source_id 升序;每篇前置 `第N章 <中文标题>`。合并文件不做 versioning。
+    variants:合并哪些变体(默认 bilingual+zh;可含 study/陪读)。
     """
     render_dir = Path(render_dir)
     ordered = sorted(set(source_ids), key=_sid_sort_key)
     out: Dict[str, Any] = {}
-    for variant in ("bilingual", "zh"):
+    for variant in variants:
         chapters = []
         for sid in ordered:
             f = render_dir / f"{sid}.{variant}.txt"
