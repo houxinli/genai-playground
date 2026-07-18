@@ -77,7 +77,7 @@
     {
       "id": "S1",
       "title": "Sync and inventory creator 104039620",
-      "status": "in_progress",
+      "status": "completed",
       "depends_on": [],
       "acceptance": [
         "Pixiv download/update entrypoint has been run for creator 104039620.",
@@ -88,7 +88,7 @@
     {
       "id": "S2",
       "title": "Complete the per-work annotate and quality-review loop",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": ["S1"],
       "acceptance": [
         "Each work has a candidate bound to the current source revision.",
@@ -132,12 +132,12 @@
     }
   ],
   "next_action": {
-    "step_id": "S1",
-    "instruction": "Run the supported Pixiv update entrypoint for creator 104039620, inventory every source/translation/annotation/study artifact, and locate the previous mounted Google Drive collection without modifying it.",
+    "step_id": "S2",
+    "instruction": "Run the complete annotate skill loop for the next shortest unannotated work, pixiv 27659699, then review and record its quality before selecting another work.",
     "acceptance": [
-      "The current remote-backed work set and local coverage gaps are explicit.",
-      "The prior Google Drive destination and managed files are identified.",
-      "The inventory milestone is recorded on #185."
+      "27659699 publishes with zero unresolved segments and a current annotation ref plus study output.",
+      "Repeated finish adds no attestation/version and leaves the ref unchanged.",
+      "A beginning/middle/end sample review and any generalizable finding are recorded on #185."
     ]
   },
   "validation": {
@@ -147,15 +147,40 @@
       "make docs-drift",
       "git diff --check"
     ],
-    "last_results": []
+    "last_results": [
+      {
+        "command": "make pixiv-download USER_ID=104039620 ARGS=...",
+        "status": "passed",
+        "summary": "Pixiv sync found 25 current works: written=0, skipped=25, failed=0.",
+        "timestamp": "2026-07-18T08:16:02Z"
+      },
+      {
+        "command": "make translate-user MODE=verify ... (25 per-work workspaces)",
+        "status": "passed",
+        "summary": "All 25 translation refs match current source revisions and rendered outputs match refs.",
+        "timestamp": "2026-07-18T08:16:02Z"
+      },
+      {
+        "command": "make author-collection-verify CREATOR=104039620 PROVIDER=pixiv",
+        "status": "passed",
+        "summary": "Existing 25-document zh/bilingual EPUB collection is internally consistent and matches the two Google Drive files by SHA-256.",
+        "timestamp": "2026-07-18T08:16:02Z"
+      },
+      {
+        "command": "make annotate MODE=finish/status PROVIDER=pixiv WS=...pixiv-25977608",
+        "status": "passed",
+        "summary": "25977608 published 265/265 segments with zero unresolved; replay added zero attestations and versions and kept the ref digest stable.",
+        "timestamp": "2026-07-18T08:16:02Z"
+      }
+    ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T075836Z-codex",
-    "timestamp": "2026-07-18T07:58:36Z",
+    "checkpoint_id": "cp-20260718T081602Z-codex",
+    "timestamp": "2026-07-18T08:16:02Z",
     "agent": "codex",
-    "summary": "Bootstrapped the author annotation campaign and set source/artifact inventory as the first execution unit.",
-    "observed_head": "a9d919e942d1c65406b31430993e1c2d93fa2aeb"
+    "summary": "Completed the current-author inventory and the 25977608 annotate, quality-review, and idempotence loop.",
+    "observed_head": "f973ee3ce0a36a74e878e82a971e93ea78bde551"
   },
   "next_task": null
 }
