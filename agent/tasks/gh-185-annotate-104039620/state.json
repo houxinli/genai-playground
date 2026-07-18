@@ -133,11 +133,11 @@
   ],
   "next_action": {
     "step_id": "S2",
-    "instruction": "Run the complete annotate skill loop for the next shortest unannotated work, pixiv 28166382, then review and record its quality before selecting another work.",
+    "instruction": "Fix the full-compound-reading rule through issue #187 and a separate PR, bring the merged change back to the campaign branch, then select pixiv 27543152 as the next annotation work.",
     "acceptance": [
-      "28166382 publishes with zero unresolved segments and a current annotation ref plus study output.",
-      "Repeated finish adds no attestation/version and leaves the ref unchanged.",
-      "A beginning/middle/end sample review and any generalizable finding are recorded on #185."
+      "The annotate skill and guide require the reading to cover the complete annotated compound and include clear positive and negative examples.",
+      "Issue #187 is linked to a focused PR and the merged change is present on the campaign branch.",
+      "The next per-work loop starts only after the general rule fix is available to its executor."
     ]
   },
   "validation": {
@@ -177,16 +177,22 @@
         "status": "passed",
         "summary": "27659699 published 228/228 segments with zero unresolved; semantic sample fixes were republished and final replay kept attestation/version counts and ref digest stable.",
         "timestamp": "2026-07-18T08:31:09Z"
+      },
+      {
+        "command": "make annotate MODE=finish/status PROVIDER=pixiv WS=...pixiv-28166382",
+        "status": "passed",
+        "summary": "28166382 published 270/270 segments with zero unresolved; semantic review removed repeated annotations and completed compound readings, and replay kept attestation/version counts plus ref and study digests stable.",
+        "timestamp": "2026-07-18T08:51:25Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T083109Z-codex",
-    "timestamp": "2026-07-18T08:31:09Z",
+    "checkpoint_id": "cp-20260718T085125Z-codex",
+    "timestamp": "2026-07-18T08:51:25Z",
     "agent": "codex",
-    "summary": "Completed the 27659699 annotate, semantic sample revision, publication, and idempotence loop.",
-    "observed_head": "6494b6ce9eeeabc2a6ec96d4c409c155ccd03cbe"
+    "summary": "Completed the 28166382 annotate, semantic review, publication, idempotence loop, and opened #187 for the repeated full-reading defect.",
+    "observed_head": "9196e383e947d01a73dda141246b95d0aa6c2b12"
   },
   "next_task": null
 }
