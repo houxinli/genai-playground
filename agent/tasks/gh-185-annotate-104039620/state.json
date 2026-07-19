@@ -145,11 +145,11 @@
   ],
   "next_action": {
     "step_id": "S5",
-    "instruction": "Close the campaign: (1) merge study-collection support PR #193 (Codex review) and rebase this chore branch onto it so the zh,study collection build uses merged code; (2) when the GitHub connector quota returns, backfill #185 with final counts (25/25 annotated, collection published to GDrive as 中文+陪读) and the pending 26851649/26291311 progress plus the study-rerender ergonomics issue; (3) IMPORTANT caveat to record: the last 10 works (25916915, 26912829, 26367355, 26536704, 26766619, 27066763, 27168808, 27481476, 27605913, 28004594) were annotated by the composer-2.5 batch WITHOUT the per-work translation semantic re-review/repair that Codex applied to its 15 works — their legacy translations were not independently re-reviewed this pass.",
+    "instruction": "Close the campaign: (1) merge study-collection support PR #193 (Codex review) and rebase this chore branch onto it so the zh,study collection build uses merged code (until merged, the collection is built by checking out feat/study-collection, since data/ is shared across branches); (2) when the GitHub connector quota returns, backfill #185 with final counts (25/25 annotated + 10/10 translation re-reviewed, collection published to GDrive as 中文+陪读) and the pending 26851649/26291311 progress plus the study-rerender ergonomics issue. The earlier caveat is RESOLVED: the 10 batch works received a composer-2.5 translation re-review (translate review skill) this pass — it found major legacy misalignment (off-by-one/shift) and hard errors (7-231 rows/work fixed; the 2-row work confirms precise not churn), republished with ENTITY_STORE= empty to match the original no-entity task, re-rendered study, verify ok, and the GDrive 陪读 epub now carries the fixes.",
     "acceptance": [
       "PR #193 merged and chore branch rebased; author-collection VARIANTS=zh,study builds from merged code.",
-      "Issue #185 has final work counts, validation results, GDrive publish path, and the annotation-only caveat for the 10 batch works.",
-      "A follow-up decision is recorded on whether the 10 batch works need the same translation semantic review as Codex's 15."
+      "Issue #185 has final work counts, validation results, GDrive publish path, and the translation re-review outcome for the 10 batch works.",
+      "Consider generalizing the ENTITY_STORE= empty re-finish requirement into the translate review skill docs (legacy no-entity jobs quarantine under default ENTITY_STORE)."
     ]
   },
   "validation": {
@@ -381,16 +381,34 @@
         "status": "passed",
         "summary": "On feat/study-collection (PR #193): 477 passed (+2 study variant tests), docs-drift ok (baseline 475->477), agent-validate ok.",
         "timestamp": "2026-07-18T16:20:00Z"
+      },
+      {
+        "command": "cursor-agent composer-2.5 translate review batch for the 10 works (structural guard) + refinish",
+        "status": "passed",
+        "summary": "Ran the translate review skill on all 10 batch works in fresh composer-2.5 sessions with a structural guard (only column-3 translation may change; row count/seg#/src-echo drift reverts to backup). Found major legacy misalignment: rows changed 25916915:18, 26912829:7, 26367355:12, 26536704:7, 26766619:76, 27066763:105, 27168808:2, 27481476:122, 27605913:231, 28004594:86. Spot-check confirmed real off-by-one/shift and hard-error fixes, not style churn (the 2-row work left 720 rows untouched).",
+        "timestamp": "2026-07-18T21:05:00Z"
+      },
+      {
+        "command": "make translate-user MODE=finish ENTITY_STORE= + annotate finish + verify (10 works)",
+        "status": "passed",
+        "summary": "Legacy jobs were prepared without entities, so default ENTITY_STORE quarantines on task_digest mismatch; re-finishing with ENTITY_STORE= empty matched the original no-entity task. All 10: translation published (quarantined:0), study re-rendered, verify ok=true.",
+        "timestamp": "2026-07-18T21:05:00Z"
+      },
+      {
+        "command": "rebuild 錆流浪 zh,study collection on feat/study-collection + GDrive sync",
+        "status": "passed",
+        "summary": "Built from feat/study-collection (study code not yet merged; data/ shared across branches). zh+study epubs (25 ch each), self-verify ok, synced GDrive 中文+陪读 (SHA-matched, 陪读 now carries the review fixes), removed a 日中对照 accidentally re-added by an old-code build on chore. Verified corrected aligned translation text is present in the 陪读 epub.",
+        "timestamp": "2026-07-18T21:05:00Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T162000Z-claude",
-    "timestamp": "2026-07-18T16:20:00Z",
+    "checkpoint_id": "cp-20260718T210500Z-claude",
+    "timestamp": "2026-07-18T21:05:00Z",
     "agent": "claude",
-    "summary": "Took over from stuck Codex and finished the final 10 works via composer-2.5 batch (annotation-only, no translation semantic re-review); all 25 works annotated with 6111 valid annotations and zero skeleton failures. Added study-variant support to author_collection (PR #193, 477 tests) and built+synced the 錆流浪 zh+study collection to GDrive (中文 + 陪读), dropping the redundant 日中对照 per user choice. Remaining: merge #193 + rebase, backfill #185 when connector quota returns, decide whether the 10 batch works need Codex-style translation re-review.",
-    "observed_head": "a7dc5c28018bb4e6d66935e254f0f52f4e0f2b2e"
+    "summary": "Translation re-review of the 10 batch works via composer-2.5 (translate review skill, fresh sessions + structural guard). Found and fixed major legacy misalignment (off-by-one/shift) and hard errors; republished all 10 with ENTITY_STORE= empty (original no-entity task), re-rendered study, verify ok. Rebuilt zh+study collection from feat/study-collection and synced GDrive (中文+陪读, SHA-matched, fixes present); removed a stray 日中对照. Earlier annotation-only caveat is resolved. Remaining: merge PR #193 + rebase chore; backfill #185 when connector quota returns.",
+    "observed_head": "10a7769"
   },
   "next_task": null
 }
