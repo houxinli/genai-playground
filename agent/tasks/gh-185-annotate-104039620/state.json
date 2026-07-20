@@ -83,7 +83,13 @@
       "status": "active"
     }
   ],
-  "open_questions": [],
+  "open_questions": [
+    {
+      "id": "Q1",
+      "question": "27104161 dogfood exposed two systemic annotation-quality issues (redundant meaning on 中日 same-form same-meaning words like 質量; under-annotated grammar like なさらないでください) that were fixed in the annotation guide and re-annotated only for 27104161. The other 24 works still use the pre-guide-fix annotations. Re-annotate all 24 with the improved guide, or leave as-is?",
+      "status": "open"
+    }
+  ],
   "blockers": [],
   "plan": [
     {
@@ -399,16 +405,22 @@
         "status": "passed",
         "summary": "Built from feat/study-collection (study code not yet merged; data/ shared across branches). zh+study epubs (25 ch each), self-verify ok, synced GDrive 中文+陪读 (SHA-matched, 陪读 now carries the review fixes), removed a 日中对照 accidentally re-added by an old-code build on chore. Verified corrected aligned translation text is present in the 陪读 epub.",
         "timestamp": "2026-07-18T21:05:00Z"
+      },
+      {
+        "command": "27104161 user-reported quality fix (translation misalignment + annotation quality) + republish + rebuild",
+        "status": "passed",
+        "summary": "User spot-check found (1) a translation misalignment: seg110-113 held the previous segment's translation and the long 長乳 sentence lost its translation, plus a stray ビキニ kana residue on seg108. Fixed manually, then a full composer-2.5 translate review caught a SECOND shift (seg116-118), a title mistranslation (おっぱい筋力トレーニング mis-rendered 乳交), and ぼっちゃま mis-rendered as 胖次酱 on seg120/125. (2) Annotation quality: improved the annotate guide with two rules (中日 same-form same-meaning words like 質量/監視 get reading only, not meaning; grammar incl. honorific/compound patterns like なさらないでください must be annotated even in long sentences), re-annotated 27104161 with composer-2.5 (353 segs, 0 skeleton failures). Republished translation (default ENTITY_STORE — this work's job WAS prepared with entities, unlike the 10 batch works) and annotation (PRODUCER_PRIORITY=composer-2.5,codex), re-rendered study, verify ok. Rebuilt zh,study collection and synced GDrive; confirmed 27104161 in the 陪读 epub now shows aligned translation + 質量(しつりょう) reading-only + 勘違い grammar.",
+        "timestamp": "2026-07-20T12:00:00Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260718T210500Z-claude",
-    "timestamp": "2026-07-18T21:05:00Z",
+    "checkpoint_id": "cp-20260720T120000Z-claude",
+    "timestamp": "2026-07-20T12:00:00Z",
     "agent": "claude",
-    "summary": "Translation re-review of the 10 batch works via composer-2.5 (translate review skill, fresh sessions + structural guard). Found and fixed major legacy misalignment (off-by-one/shift) and hard errors; republished all 10 with ENTITY_STORE= empty (original no-entity task), re-rendered study, verify ok. Rebuilt zh+study collection from feat/study-collection and synced GDrive (中文+陪读, SHA-matched, fixes present); removed a stray 日中对照. Earlier annotation-only caveat is resolved. Remaining: merge PR #193 + rebase chore; backfill #185 when connector quota returns.",
-    "observed_head": "10a7769"
+    "summary": "Fixed user-reported quality issues on 27104161: a translation misalignment (seg110-113 shifted, long 長乳 sentence's translation lost; also a 2nd shift seg116-118, title mistranslation, and ぼっちゃま→胖次酱 name errors caught by a full composer-2.5 translate review) and annotation quality (質量 over-annotated with redundant meaning; なさらないでください grammar under-annotated). Root cause of the annotation issues was the guide, not the model: added two rules (中日 same-form same-meaning → reading only; grammar incl. honorific/compound must be annotated even in long sentences), re-annotated 27104161 (353 segs, 0 skeleton failures). Republished translation (default ENTITY_STORE for this work) + annotation, re-rendered study, verify ok, rebuilt zh,study collection and synced GDrive. OPEN Q1: the other 24 works still have the pre-guide-fix annotations — decide whether to re-annotate them all.",
+    "observed_head": "b5645da"
   },
   "next_task": null
 }
