@@ -84,11 +84,7 @@
     }
   ],
   "open_questions": [
-    {
-      "id": "Q1",
-      "question": "27104161 dogfood exposed two systemic annotation-quality issues (redundant meaning on 中日 same-form same-meaning words like 質量; under-annotated grammar like なさらないでください) that were fixed in the annotation guide and re-annotated only for 27104161. The other 24 works still use the pre-guide-fix annotations. Re-annotate all 24 with the improved guide, or leave as-is?",
-      "status": "open"
-    }
+    "Q1: 27104161 dogfood exposed two systemic annotation issues fixed in the guide (中日 same-form same-meaning words like 質量 should get reading only, not meaning; grammar like なさらないでください was under-annotated) and re-annotated only for 27104161. The other 24 works still use pre-guide-fix annotations — re-annotate all 24 with the improved guide, or leave as-is?"
   ],
   "blockers": [],
   "plan": [
