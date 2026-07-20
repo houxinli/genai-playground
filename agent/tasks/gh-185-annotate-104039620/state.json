@@ -416,7 +416,7 @@
     "timestamp": "2026-07-20T12:00:00Z",
     "agent": "claude",
     "summary": "Fixed user-reported quality issues on 27104161: a translation misalignment (seg110-113 shifted, long 長乳 sentence's translation lost; also a 2nd shift seg116-118, title mistranslation, and ぼっちゃま→胖次酱 name errors caught by a full composer-2.5 translate review) and annotation quality (質量 over-annotated with redundant meaning; なさらないでください grammar under-annotated). Root cause of the annotation issues was the guide, not the model: added two rules (中日 same-form same-meaning → reading only; grammar incl. honorific/compound must be annotated even in long sentences), re-annotated 27104161 (353 segs, 0 skeleton failures). Republished translation (default ENTITY_STORE for this work) + annotation, re-rendered study, verify ok, rebuilt zh,study collection and synced GDrive. OPEN Q1: the other 24 works still have the pre-guide-fix annotations — decide whether to re-annotate them all.",
-    "observed_head": "b5645da"
+    "observed_head": "937ffe123b10da57ce3b15ea90d759e53233c982"
   },
   "next_task": null
 }
