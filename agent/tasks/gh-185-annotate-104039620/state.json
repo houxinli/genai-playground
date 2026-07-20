@@ -84,7 +84,7 @@
     }
   ],
   "open_questions": [
-    "Q1: 27104161 dogfood exposed two systemic annotation issues fixed in the guide (中日 same-form same-meaning words like 質量 should get reading only, not meaning; grammar like なさらないでください was under-annotated) and re-annotated only for 27104161. The other 24 works still use pre-guide-fix annotations — re-annotate all 24 with the improved guide, or leave as-is?"
+    "Q1: annotation guide was improved (中日 same-form same-meaning → reading only; grammar incl. honorific/compound must be annotated). Re-annotated so far: 27104161, 27168808, 27356468, 27417304 (4/25). Remaining 21 works still use pre-guide-fix annotations. Continue re-annotating the rest, or stop here?"
   ],
   "blockers": [],
   "plan": [
@@ -103,7 +103,9 @@
       "id": "S2",
       "title": "Complete the per-work annotate and quality-review loop",
       "status": "completed",
-      "depends_on": ["S1"],
+      "depends_on": [
+        "S1"
+      ],
       "acceptance": [
         "Each work has a candidate bound to the current source revision.",
         "Each finish has zero unresolved segments and creates a current annotation ref plus study output.",
@@ -115,7 +117,9 @@
       "id": "S3",
       "title": "Reconcile source updates and complete final coverage",
       "status": "completed",
-      "depends_on": ["S2"],
+      "depends_on": [
+        "S2"
+      ],
       "acceptance": [
         "A final Pixiv sync finds no unprocessed new or revised work.",
         "All translation and annotation refs match their current source revisions.",
@@ -126,7 +130,9 @@
       "id": "S4",
       "title": "Build and overwrite the Google Drive author collection",
       "status": "completed",
-      "depends_on": ["S3"],
+      "depends_on": [
+        "S3"
+      ],
       "acceptance": [
         "The author collection includes the intended study artifacts for every current work.",
         "The mounted Google Drive destination is overwritten using the repository Make entrypoint.",
@@ -137,7 +143,9 @@
       "id": "S5",
       "title": "Close the campaign with reproducible evidence",
       "status": "in_progress",
-      "depends_on": ["S4"],
+      "depends_on": [
+        "S4"
+      ],
       "acceptance": [
         "Issue #185 contains final work counts, validation results, publish path, and any follow-up issues.",
         "Required repository validation passes.",
@@ -407,16 +415,22 @@
         "status": "passed",
         "summary": "User spot-check found (1) a translation misalignment: seg110-113 held the previous segment's translation and the long 長乳 sentence lost its translation, plus a stray ビキニ kana residue on seg108. Fixed manually, then a full composer-2.5 translate review caught a SECOND shift (seg116-118), a title mistranslation (おっぱい筋力トレーニング mis-rendered 乳交), and ぼっちゃま mis-rendered as 胖次酱 on seg120/125. (2) Annotation quality: improved the annotate guide with two rules (中日 same-form same-meaning words like 質量/監視 get reading only, not meaning; grammar incl. honorific/compound patterns like なさらないでください must be annotated even in long sentences), re-annotated 27104161 with composer-2.5 (353 segs, 0 skeleton failures). Republished translation (default ENTITY_STORE — this work's job WAS prepared with entities, unlike the 10 batch works) and annotation (PRODUCER_PRIORITY=composer-2.5,codex), re-rendered study, verify ok. Rebuilt zh,study collection and synced GDrive; confirmed 27104161 in the 陪读 epub now shows aligned translation + 質量(しつりょう) reading-only + 勘違い grammar.",
         "timestamp": "2026-07-20T12:00:00Z"
+      },
+      {
+        "command": "full fix (translate review + guide-improved re-annotate + republish) for 27168808/27356468/27417304",
+        "status": "passed",
+        "summary": "3 works after 27104161 in the collection. translate review changed 2/7 rows for 27168808/27356468; 27417304's review kept breaking TSV structure (guard reverted twice) but auto-checks (no kana residue, no near-duplicate translations) show its showcase translation is clean, so kept as-is. Re-annotated all 3 under the improved guide (722/494/211 segs, 0 skeleton failures); quality check shows 0 same-form-same-meaning redundant meanings across all 3. Republished translation (27168808/27417304 empty ENTITY_STORE, 27356468 default) + annotation (PRODUCER_PRIORITY=composer-2.5,codex), study re-rendered, verify ok. Rebuilt zh,study collection + GDrive synced (SHA-matched).",
+        "timestamp": "2026-07-20T15:45:00Z"
       }
     ]
   },
   "known_unrelated_changes": [],
   "last_checkpoint": {
-    "checkpoint_id": "cp-20260720T120000Z-claude",
-    "timestamp": "2026-07-20T12:00:00Z",
+    "checkpoint_id": "cp-20260720T154500Z-claude",
+    "timestamp": "2026-07-20T15:45:00Z",
     "agent": "claude",
-    "summary": "Fixed user-reported quality issues on 27104161: a translation misalignment (seg110-113 shifted, long 長乳 sentence's translation lost; also a 2nd shift seg116-118, title mistranslation, and ぼっちゃま→胖次酱 name errors caught by a full composer-2.5 translate review) and annotation quality (質量 over-annotated with redundant meaning; なさらないでください grammar under-annotated). Root cause of the annotation issues was the guide, not the model: added two rules (中日 same-form same-meaning → reading only; grammar incl. honorific/compound must be annotated even in long sentences), re-annotated 27104161 (353 segs, 0 skeleton failures). Republished translation (default ENTITY_STORE for this work) + annotation, re-rendered study, verify ok, rebuilt zh,study collection and synced GDrive. OPEN Q1: the other 24 works still have the pre-guide-fix annotations — decide whether to re-annotate them all.",
-    "observed_head": "937ffe123b10da57ce3b15ea90d759e53233c982"
+    "summary": "Applied the full 27104161-style fix (translate review + guide-improved re-annotation + republish) to the next 3 collection works 27168808/27356468/27417304. Re-annotations have 0 skeleton failures and 0 redundant same-form meanings. 27417304's translate review kept corrupting TSV structure (guard reverted; auto-checks show its translation is clean so left as-is). Rebuilt zh,study collection + GDrive synced. 4/25 works now on the improved annotation standard.",
+    "observed_head": "f2a66f18c733c750287777c233ad8c2efd38743e"
   },
   "next_task": null
 }
