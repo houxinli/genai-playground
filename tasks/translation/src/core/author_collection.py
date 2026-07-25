@@ -38,7 +38,11 @@ KNOWN_VARIANTS = ("zh", "bilingual", "study")
 
 
 def _normalize_variants(variants) -> tuple:
-    picked = tuple(v for v in KNOWN_VARIANTS if v in set(variants or ()))
+    # 未知名字必须报错而非静默丢弃:`VARIANTS=zh,studdy` 否则会安静地只出中文本并覆盖 GDrive 旧合集。
+    unknown = sorted(set(variants or ()) - set(KNOWN_VARIANTS))
+    if unknown:
+        raise ValueError(f"未知 variant {unknown}，可选 {KNOWN_VARIANTS}")
+    picked = tuple(v for v in KNOWN_VARIANTS if v in set(variants))
     if not picked:
         raise ValueError(f"variants 至少需含 {KNOWN_VARIANTS} 之一")
     return picked

@@ -104,6 +104,15 @@ class AuthorCollectionTest(unittest.TestCase):
                 ac.build_collection("作者M", "700000", workspaces_root=ws,
                                     out_dir=Path(t) / "coll", variants=("zh", "study"))
 
+    def test_unknown_variant_refuses(self):
+        # 拼错的 variant 不能被静默丢弃(会安静地少出一本并覆盖 GDrive 旧合集)。
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            _make_work(ws, "700001", title="一篇")
+            with self.assertRaisesRegex(ValueError, "未知 variant"):
+                ac.build_collection("作者U", "700000", workspaces_root=ws,
+                                    out_dir=Path(t) / "coll", variants=("zh", "studdy"))
+
     def test_formats_txt_only(self):
         with tempfile.TemporaryDirectory() as t:
             ws = Path(t) / "workspaces"
