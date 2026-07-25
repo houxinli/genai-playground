@@ -261,10 +261,10 @@ extract-entities:
 	$(PY) tasks/translation/src/core/entity_extract.py --revision "$(REVISION)" $(if $(ENTITY_STORE),--entity-store "$(ENTITY_STORE)") $(if $(QUEUE),--queue "$(QUEUE)") $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(CREATOR_ID),--creator-id "$(CREATOR_ID)") $(if $(LINK),--link)
 
 # 作者合集:跨 per-work workspace 收集已发布 rendered → 按作者名合成整本(可选复制 GDrive)。
-# 用法: make author-collection AUTHOR=錆流浪 CREATOR=104039620 [PROVIDER=pixiv] [GDRIVE="/path/to/novels"] [WORKSPACES=...] [OUT=...]
+# 用法: make author-collection AUTHOR=錆流浪 CREATOR=104039620 [PROVIDER=pixiv] [GDRIVE="/path/to/novels"] [WORKSPACES=...] [OUT=...] [VARIANTS=zh,study]
 author-collection:
 	@test -n "$(AUTHOR)" && test -n "$(CREATOR)" || { echo "author-collection 需要 AUTHOR= CREATOR="; exit 2; }
-	$(PY) tasks/translation/src/core/author_collection.py --author "$(AUTHOR)" --creator "$(CREATOR)" $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(WORKSPACES),--workspaces-root "$(WORKSPACES)") $(if $(OUT),--out "$(OUT)") $(if $(GDRIVE),--gdrive "$(GDRIVE)")
+	$(PY) tasks/translation/src/core/author_collection.py --author "$(AUTHOR)" --creator "$(CREATOR)" $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(WORKSPACES),--workspaces-root "$(WORKSPACES)") $(if $(OUT),--out "$(OUT)") $(if $(GDRIVE),--gdrive "$(GDRIVE)") $(if $(VARIANTS),--variants "$(VARIANTS)")
 
 # 只读核对现有合集是否仍覆盖全部 current refs，且 per-document rendered/整本输出未漂移。
 author-collection-verify:
