@@ -649,6 +649,7 @@ class AutoRouteArtifactsTest(unittest.TestCase):
         )
 
     def test_writes_zh_tsv_and_matching_job(self):
+        src_dir = Path(__file__).resolve().parent / "testdata" / "fixtures" / "pixiv" / "700001"
         with tempfile.TemporaryDirectory() as t:
             tmp = Path(t)
             manifest = self._run(tmp)
@@ -657,6 +658,11 @@ class AutoRouteArtifactsTest(unittest.TestCase):
             job = tmp / "jobs" / "700001.job.json"
             self.assertTrue(tsv.is_file())
             self.assertTrue(job.is_file())
+            # result.json 是 verify 的硬条件,auto 路线也必须落
+            self.assertTrue((tmp / "results" / "700001.result.json").is_file())
+            verification = tu.verify_user("pixiv", src_dir, tmp / "store", tmp / "rendered",
+                                          tmp / "results")
+            self.assertTrue(verification["ok"], verification)
             bundle = json.loads(job.read_text(encoding="utf-8"))
             rows = [l.split("\t", 2) for l in tsv.read_text(encoding="utf-8").rstrip("\n").split("\n")]
             self.assertEqual(len(bundle["segments"]), len(rows))

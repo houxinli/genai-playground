@@ -254,12 +254,17 @@ def translate_bundle(
                     f"segment {seg['segment_id']} 返回结构污染: {seg_errors};"
                     "执行器必须只输出当前段的一行译文"
                 )
+            # Result schema 的 finding 只认 code/severity/message/evidence/line,
+            # 段落定位走 evidence(与 entity_finding 同款)——不为此扩 schema。
             findings.append({
                 "code": "segment_quality",
                 "severity": "warning",
                 "message": f"重试后仍未通过内联复检: {seg_errors}",
-                "segments": [seg["segment_id"]],
-                "indices": [index],
+                "evidence": json.dumps(
+                    {"segment_id": seg["segment_id"], "errors": seg_errors},
+                    ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                ),
+                "line": index + 1,
             })
         text, first_uses, _ = entity_harvest.apply_observations(
             seg["source_text"], text, observations, locked_targets

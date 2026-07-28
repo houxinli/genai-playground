@@ -211,13 +211,25 @@ class SegmentQualityGateTest(unittest.TestCase):
         codes = [f["code"] for f in result["findings"]]
         self.assertIn("segment_quality", codes)
         self.assertEqual(len(bundle["segments"]), len(result["candidates"]))
+        # finding 必须仍是 schema 合法的 result,否则 import 端整份 quarantine(574 段那篇实测)
+        self.assertEqual([], validate_artifact("result", result))
+        self.assertEqual([], check_result_against_task(bundle["task"], result))
 
-    def test_protocol_residue_on_one_line_is_not_published(self):
+    def test_trailing_entity_record_is_recovered_not_published(self):
         # deepseek 把 T 行和 E 行挤在同一物理行:整条协议曾被原样当成译文发布。
+        # 现在解析层把它拆回去——译文干净,实体照收。
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        result = ex.translate_bundle(bundle, lambda _m: "T\t译文\tE\tおにーさん\t哥哥")
+        for c in result["candidates"]:
+            self.assertEqual("译文", c["text"])
+
+    def test_unrecoverable_protocol_residue_still_aborts(self):
+        # 残缺的 E 记录(列数不对)拆不回去,只能中断整篇,不能当正文发布。
         rev = _rev()
         bundle = te.export_job(rev, _body_ids(rev))
         with self.assertRaisesRegex(ValueError, "结构污染"):
-            ex.translate_bundle(bundle, lambda _m: "T\t译文\tE\tおにーさん\t哥哥")
+            ex.translate_bundle(bundle, lambda _m: "T\t译文\tE\t哥哥")
 
     def test_second_t_record_is_not_glued_into_translation(self):
         rev = _rev()

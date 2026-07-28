@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -20,6 +21,11 @@ except ImportError:
 
 
 ENTITY_FINDING_CODE = "entity_first_use"
+
+# 尾随的 E 记录:`<译文>E <日文名> <中文名>`,分隔符可能是空格或 TAB,E 前可能连空格都没有
+# (实测 `……那种差距是如此绝对。E ペニス 肉棒`)。要求源名含假名才拆——合格译文本就不该有假名,
+# 所以这个条件既能认出漏出来的 E 记录,又不会误伤正常中文句尾。
+_TRAILING_ENTITY_RE = re.compile(r"E[ \t]([^\s]*[ぁ-んァ-ヶ][^\s]*)[ \t]([^\s]+)\s*$")
 
 
 def normalize_executor_response(response: str) -> str:
@@ -69,9 +75,15 @@ def parse_executor_response(response: str) -> Tuple[str, List[Dict[str, str]]]:
     while cursor < len(lines) and not lines[cursor].startswith("E") and not lines[cursor].startswith("T\t"):
         translation = f"{translation}{lines[cursor].strip()}"
         cursor += 1
+    observations: List[Dict[str, str]] = []
+    # 模型偶发把 E 记录直接续在 T 行末尾且用空格分隔(`……不会改变。E ペニス 肉棒`)。
+    # 它确实是想报一个实体,只是分隔符和换行都丢了 → 在解析层拆回来:译文去掉尾巴,观察照收。
+    trailing = _TRAILING_ENTITY_RE.search(translation)
+    if trailing:
+        translation = translation[: trailing.start()].rstrip()
+        observations.append({"source": trailing.group(1), "target": trailing.group(2)})
     if "\t" in translation:
         raise ValueError("译文含 TAB,疑似整条 T/E 协议被塞进了同一物理行")
-    observations: List[Dict[str, str]] = []
     for line_number, line in enumerate(lines[cursor:], cursor + 1):
         if not line.startswith("E"):
             # 协议后的解释/空话忽略,避免小模型偶发尾注拖垮整篇。

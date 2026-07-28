@@ -192,3 +192,19 @@ class EntityReviewTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrailingEntityRecordTest(unittest.TestCase):
+    """E 记录被空格续在 T 行末尾:解析层拆回来,不要把协议残留当译文发布。"""
+
+    def test_trailing_space_separated_entity_is_split_off(self):
+        text, obs = eh.parse_executor_response("T\t少年的肉棒不会改变。E ペニス 肉棒")
+        self.assertEqual("少年的肉棒不会改变。", text)
+        self.assertEqual([{"source": "ペニス", "target": "肉棒"}], obs)
+
+    def test_plain_translation_is_untouched(self):
+        for good in ("普通译文，句尾没有实体记录", "他说了 E 这个字母", "结尾是英文 THE END"):
+            with self.subTest(good=good):
+                text, obs = eh.parse_executor_response(f"T\t{good}")
+                self.assertEqual(good, text)
+                self.assertEqual([], obs)

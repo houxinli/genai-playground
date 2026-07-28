@@ -265,6 +265,11 @@ def translate_document(
                              entity_store=entity_store, entity_review_queue=entity_review_queue)
     if results_dir is not None:
         report["zh_tsv"] = str(_write_zh_tsv(Path(results_dir), prep["source_id"], prep["bundle"], result))
+        # result.json 是规范业务工件,verify 把它当硬条件;auto 路线的 result 就在手里,由 harness 落盘
+        # (仍不是执行器手写身份字段——身份来自 prepare 的 bundle)。
+        result_path = Path(results_dir) / f"{prep['source_id']}.result.json"
+        result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        report["result_json"] = str(result_path)
     return report
 
 
