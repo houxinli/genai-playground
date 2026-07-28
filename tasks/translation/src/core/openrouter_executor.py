@@ -180,6 +180,25 @@ def _translate_segment(
     return best
 
 
+def _load_checkpoint(path: Optional[Path], bundle: Dict[str, Any]) -> Dict[int, str]:
+    """读断点 TSV(与产物同格式),返回 段序号→译文;src_echo 对不上就整份作废重译。"""
+    if path is None or not Path(path).is_file():
+        return {}
+    done: Dict[int, str] = {}
+    segments = bundle["segments"]
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t", 2)
+        if len(parts) != 3 or not parts[0].isdigit():
+            return {}
+        index = int(parts[0])
+        if index >= len(segments) or not segments[index]["source_text"].startswith(parts[1]):
+            return {}  # 断点属于别的源/别的切分 → 不要拿来续,宁可重译
+        done[index] = parts[2]
+    return done
+
+
 def translate_bundle(
     bundle: Dict[str, Any],
     call_fn: Callable[[List[Dict[str, str]]], str],
@@ -187,8 +206,14 @@ def translate_bundle(
     model: str = DEFAULT_MODEL,
     candidate_key: str = "grok",
     completed_at: Optional[str] = None,
+    checkpoint_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """逐段调 call_fn 翻译；本篇首次译名锁定并只把 canonical target 传给下一段。"""
+    """逐段调 call_fn 翻译；本篇首次译名锁定并只把 canonical target 传给下一段。
+
+    checkpoint_path:每段译完就**追加**进这个 TSV(即最终产物格式),中断后重跑自动续上。
+    长篇一次限流就丢掉全部已译段落的代价太高(574 段那篇实测在 200 段处丢光)。
+    首次译名同时落 `<checkpoint>.names.tsv` 并在续跑时预载,否则续跑段落会脱离前半篇的译名锁定。
+    """
     task = bundle["task"]
     context_pack = bundle.get("context_pack", {})
     source_hashes = task["source_hashes"]
@@ -196,8 +221,28 @@ def translate_bundle(
     findings = []
     locked_targets = entity_harvest.context_targets(context_pack)
     document_targets: Dict[str, str] = {}
+    done = _load_checkpoint(checkpoint_path, bundle)
+    names_path = Path(f"{checkpoint_path}.names.tsv") if checkpoint_path is not None else None
+    if done and names_path is not None and names_path.is_file():
+        for line in names_path.read_text(encoding="utf-8").splitlines():
+            source, _, target = line.partition("\t")
+            if source and target:
+                document_targets[source] = target
+                locked_targets.setdefault(source, target)
+    if done:
+        print(f"openrouter resume: 复用断点 {len(done)}/{len(bundle['segments'])} 段", flush=True)
     previous_text = ""
     for index, seg in enumerate(bundle["segments"]):
+        if index in done:
+            text = done[index]
+            candidates.append({
+                "result_candidate_key": candidate_key,
+                "segment_id": seg["segment_id"],
+                "source_hash": source_hashes[seg["segment_id"]],
+                "text": text,
+            })
+            previous_text = text
+            continue
         text, observations, seg_errors = _translate_segment(
             seg, context_pack, document_targets, previous_text, call_fn
         )
@@ -224,6 +269,9 @@ def translate_bundle(
             findings.append(entity_harvest.entity_finding(
                 entity["source"], entity["target"], seg["segment_id"], index + 1
             ))
+            if names_path is not None:
+                with names_path.open("a", encoding="utf-8") as fh:
+                    fh.write(f"{entity['source']}\t{entity['target']}\n")
         previous_text = text
         candidates.append({
             "result_candidate_key": candidate_key,
@@ -231,6 +279,9 @@ def translate_bundle(
             "source_hash": source_hashes[seg["segment_id"]],
             "text": text,
         })
+        if checkpoint_path is not None:
+            with Path(checkpoint_path).open("a", encoding="utf-8") as fh:
+                fh.write(f"{index}\t{seg['source_text'][:12]}\t{text}\n")
         if (index + 1) % 10 == 0 or index + 1 == len(bundle["segments"]):
             print(f"openrouter translated {index + 1}/{len(bundle['segments'])}", flush=True)
     return {
@@ -265,7 +316,14 @@ def openrouter_call(messages: List[Dict[str, str]], model: str, api_key: str,
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = json.load(resp)
-            return body["choices"][0]["message"]["content"]
+            if "choices" in body:
+                return body["choices"][0]["message"]["content"]
+            # OpenRouter 限流/上游故障时会返回 **HTTP 200 + {"error": {...}}**,不是错误码。
+            # 原样解包只会得到 KeyError: 'choices',整篇中断且看不出原因(574 段那篇实测)。
+            detail = (body.get("error") or {}).get("message") or json.dumps(body, ensure_ascii=False)[:200]
+            last_exc = RuntimeError(f"OpenRouter 返回无 choices: {detail}")
+            if attempt == retries:
+                raise last_exc
         except urllib.error.HTTPError as exc:
             last_exc = exc
             if exc.code not in _RETRYABLE_STATUS or attempt == retries:

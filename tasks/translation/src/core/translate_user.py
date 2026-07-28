@@ -36,18 +36,31 @@ except ImportError:  # 作为脚本运行
 TranslateFn = Callable[[Dict[str, Any]], Dict[str, Any]]
 
 
-def _openrouter_fn(model: str = ox.DEFAULT_MODEL) -> TranslateFn:
+def _checkpoint_path(checkpoint_dir: Optional[Path], bundle: Dict[str, Any]) -> Optional[Path]:
+    """断点文件与最终产物同名同格式(`<sid>.zh.tsv`):跑完就是产物,中断了就是续跑输入。"""
+    if checkpoint_dir is None:
+        return None
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    return checkpoint_dir / f"{bundle['task']['document_id'].rsplit(':', 1)[-1]}.zh.tsv"
+
+
+def _openrouter_fn(model: str = ox.DEFAULT_MODEL, checkpoint_dir: Optional[Path] = None) -> TranslateFn:
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         raise RuntimeError("executor=openrouter 需要环境变量 OPENROUTER_API_KEY")
-    return lambda bundle: ox.translate_bundle(bundle, lambda m: ox.openrouter_call(m, model, key), model=model)
+    return lambda bundle: ox.translate_bundle(
+        bundle, lambda m: ox.openrouter_call(m, model, key), model=model,
+        checkpoint_path=_checkpoint_path(checkpoint_dir, bundle),
+    )
 
 
-def make_translate_fn(executor: str, model: Optional[str] = None) -> TranslateFn:
+def make_translate_fn(executor: str, model: Optional[str] = None,
+                      checkpoint_dir: Optional[Path] = None) -> TranslateFn:
     """executor 名 → translate_fn(bundle)->result。自动路线在此实现;agent 路线(cursor/claude)
     不在此(由 skill 薄壳调 prepare/finish 自己翻),CLI 不接受。"""
     if executor == "openrouter":
-        return _openrouter_fn(model or ox.DEFAULT_MODEL)
+        return _openrouter_fn(model or ox.DEFAULT_MODEL, checkpoint_dir)
     raise ValueError(f"未知/不可自动执行的 executor: {executor!r}(cursor/claude 走 skill 薄壳)")
 
 
@@ -909,7 +922,7 @@ def main() -> int:
         print(json.dumps(m if failed else m["summary"], ensure_ascii=False, indent=2 if failed else None))
         return 1 if failed else 0
 
-    translate_fn = make_translate_fn(args.executor, args.model)
+    translate_fn = make_translate_fn(args.executor, args.model, checkpoint_dir=args.results_dir)
     manifest = translate_user(
         args.provider, args.source_dir, args.store, args.render_dir, translate_fn,
         bilingual_dir=args.bilingual_dir, entity_store=args.entity_store,

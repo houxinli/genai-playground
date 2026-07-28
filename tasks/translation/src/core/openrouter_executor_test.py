@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import unittest
+import unittest.mock
 from pathlib import Path
 
 try:
@@ -242,3 +243,83 @@ class SegmentQualityGateTest(unittest.TestCase):
             "neighbor_overlap",
             ex.segment_quality_errors("今日はいい天気だ。", "「早上好」今天天气真好，很不错。", "「早上好」"),
         )
+
+
+class CheckpointResumeTest(unittest.TestCase):
+    """长篇一次限流不该丢掉已译段落:断点即产物格式,重跑自动续上。"""
+
+    def test_writes_checkpoint_and_resumes_without_recalling(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+
+        def ok_call(messages):
+            line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+            return f"T\t{TR[line.split('] ', 1)[1]]}"
+
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            first = ex.translate_bundle(bundle, ok_call, checkpoint_path=cp)
+            rows = cp.read_text(encoding="utf-8").rstrip("\n").split("\n")
+            self.assertEqual(len(bundle["segments"]), len(rows))
+
+            def boom(_messages):
+                raise AssertionError("续跑不应重新调用模型")
+
+            second = ex.translate_bundle(bundle, boom, checkpoint_path=cp)
+            self.assertEqual([c["text"] for c in first["candidates"]],
+                             [c["text"] for c in second["candidates"]])
+
+    def test_partial_checkpoint_only_translates_remaining(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        calls = []
+
+        def counting(messages):
+            line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+            src = line.split("] ", 1)[1]
+            calls.append(src)
+            return f"T\t{TR[src]}"
+
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            seg0 = bundle["segments"][0]
+            cp.write_text(f"0\t{seg0['source_text'][:12]}\t已译好的第一段\n", encoding="utf-8")
+            result = ex.translate_bundle(bundle, counting, checkpoint_path=cp)
+            self.assertEqual("已译好的第一段", result["candidates"][0]["text"])
+            self.assertEqual(len(bundle["segments"]) - 1, len(calls))
+
+    def test_checkpoint_from_other_source_is_discarded(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+
+        def ok_call(messages):
+            line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+            return f"T\t{TR[line.split('] ', 1)[1]]}"
+
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            cp.write_text("0\t完全不同的源文\t别的篇的译文\n", encoding="utf-8")  # src_echo 对不上
+            result = ex.translate_bundle(bundle, ok_call, checkpoint_path=cp)
+            self.assertNotIn("别的篇的译文", [c["text"] for c in result["candidates"]])
+
+
+class ApiErrorBodyTest(unittest.TestCase):
+    def test_http_200_with_error_body_is_retried_then_reported(self):
+        import urllib.request
+        from contextlib import contextmanager
+        import io, json as _json
+
+        @contextmanager
+        def fake_urlopen(_req, timeout=None):
+            yield io.BytesIO(_json.dumps({"error": {"code": 429, "message": "rate limited"}}).encode())
+
+        with unittest.mock.patch.object(urllib.request, "urlopen", fake_urlopen):
+            with self.assertRaisesRegex(RuntimeError, "rate limited"):
+                ex.openrouter_call([{"role": "user", "content": "x"}], "m", "k",
+                                   retries=1, sleep_fn=lambda _s: None)
