@@ -22,24 +22,67 @@ except ImportError:
 ENTITY_FINDING_CODE = "entity_first_use"
 
 
+def normalize_executor_response(response: str) -> str:
+    """把空格塌缩的 T/E 行还原成 TAB 分隔（部分模型如 deepseek 会把 TAB 写成空格）。"""
+    lines = response.strip("\r\n").splitlines()
+    if not lines:
+        return response
+    out: List[str] = []
+    for index, line in enumerate(lines):
+        if line.startswith("T\t") or line.startswith("E\t"):
+            out.append(line)
+            continue
+        if index == 0 and line.startswith("T "):
+            out.append("T\t" + line[2:])
+            continue
+        if line.startswith("E "):
+            rest = line[2:]
+            if "\t" in rest:
+                source, target = rest.split("\t", 1)
+                out.append(f"E\t{source.strip()}\t{target.strip()}")
+            else:
+                parts = rest.split(None, 1)
+                if len(parts) == 2:
+                    out.append(f"E\t{parts[0]}\t{parts[1]}")
+                else:
+                    out.append(line)
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
 def parse_executor_response(response: str) -> Tuple[str, List[Dict[str, str]]]:
     """解析 API 的简单行协议：首行 ``T<TAB>译文``，随后零到多行 ``E<TAB>源名<TAB>译名``。
 
     所有响应都必须使用 T/E 协议，避免 API 路线静默跳过篇内名字记忆。
     """
-    content = response.strip("\r\n")
-    lines = content.splitlines()
+    content = normalize_executor_response(response)
+    lines = [line for line in content.splitlines() if line.strip()]
     if not lines or not lines[0].startswith("T\t"):
         raise ValueError("响应首行必须是 `T<TAB>译文`")
     translation = lines[0].split("\t", 1)[1].strip()
+    # 译文偶发被模型折行:把紧随 T 行、不以 E 开头的续行并回译文,直到遇到 E 或结束。
+    # **但另起一条 T 记录不是"折行"**——那是模型把两段(通常是上文+本段)分别译了。原样并回去会把
+    # `T<TAB>…` 原封不动粘进译文(实测 pixiv 27417304 的 34/100/103 段就是这么发布出去的);
+    # 这里改成中断合并,让残留的协议行留给下面的 TAB 检查判成协议漂移 → 走调用方的重写重试。
+    cursor = 1
+    while cursor < len(lines) and not lines[cursor].startswith("E") and not lines[cursor].startswith("T\t"):
+        translation = f"{translation}{lines[cursor].strip()}"
+        cursor += 1
+    if "\t" in translation:
+        raise ValueError("译文含 TAB,疑似整条 T/E 协议被塞进了同一物理行")
     observations: List[Dict[str, str]] = []
-    for line_number, line in enumerate(lines[1:], 2):
+    for line_number, line in enumerate(lines[cursor:], cursor + 1):
+        if not line.startswith("E"):
+            # 协议后的解释/空话忽略,避免小模型偶发尾注拖垮整篇。
+            continue
         parts = line.split("\t")
-        if len(parts) != 3 or parts[0] != "E":
-            raise ValueError(f"响应第 {line_number} 行必须是 `E<TAB>日文名<TAB>中文名`")
-        source, target = parts[1].strip(), parts[2].strip()
+        # 允许多余列(如 E<source><读音><译名>),取首列为源名、末列为译名。
+        if len(parts) < 3:
+            continue
+        source, target = parts[1].strip(), parts[-1].strip()
         if not source or not target:
-            raise ValueError(f"响应第 {line_number} 行实体 source/target 不得为空")
+            continue
         observations.append({"source": source, "target": target})
     return translation, observations
 

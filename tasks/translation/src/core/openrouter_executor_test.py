@@ -171,3 +171,74 @@ class OpenRouterCallRetryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SegmentQualityGateTest(unittest.TestCase):
+    """内联复检:执行器自己发现「只译了这段吗」，用退档重试就地修，而不是留给 finish/人工。"""
+
+    def test_neighbor_leak_retried_then_fixed_without_prev_context(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        calls = []
+
+        def fake_call(messages):
+            user = messages[-1]["content"] if messages[-1]["role"] == "user" else messages[1]["content"]
+            calls.append(user)
+            line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+            src = line.split("] ", 1)[1]
+            # 只要 prompt 里还有 [上文]，就把上文也译进来(deepseek 的实际行为)
+            if "[上文" in messages[1]["content"]:
+                return f"T\t「早上好」{TR[src]}"
+            return f"T\t{TR[src]}"
+
+        result = ex.translate_bundle(bundle, fake_call)
+        texts = [c["text"] for c in result["candidates"]]
+        self.assertIn("今天天气真好。", texts)
+        self.assertNotIn("「早上好」今天天气真好。", texts)   # 窜入的那版没有被发布
+        self.assertTrue(any("[上文" not in c for c in calls))  # 退到了不给上文那一档
+        self.assertEqual([], [f for f in result["findings"] if f.get("code") == "segment_quality"])
+
+    def test_unfixable_quality_problem_is_published_with_finding(self):
+        # 三档都修不好的质量问题不阻断发布,只记 finding——阻断会让整篇没产物。
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+
+        def always_overlong(messages):
+            return "T\t" + "很长的译文" * 20
+
+        result = ex.translate_bundle(bundle, always_overlong)
+        codes = [f["code"] for f in result["findings"]]
+        self.assertIn("segment_quality", codes)
+        self.assertEqual(len(bundle["segments"]), len(result["candidates"]))
+
+    def test_protocol_residue_on_one_line_is_not_published(self):
+        # deepseek 把 T 行和 E 行挤在同一物理行:整条协议曾被原样当成译文发布。
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        with self.assertRaisesRegex(ValueError, "结构污染"):
+            ex.translate_bundle(bundle, lambda _m: "T\t译文\tE\tおにーさん\t哥哥")
+
+    def test_second_t_record_is_not_glued_into_translation(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        seen = []
+
+        def two_t_lines(messages):
+            line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+            src = line.split("] ", 1)[1]
+            seen.append(src)
+            if len(seen) <= 1:
+                return f"T\t上一段的译文\nT\t{TR[src]}"   # 两条 T 记录,不是折行
+            return f"T\t{TR[src]}"
+
+        result = ex.translate_bundle(bundle, two_t_lines)
+        for c in result["candidates"]:
+            self.assertNotIn("T\t", c["text"])
+
+    def test_quality_errors_flags(self):
+        self.assertEqual([], ex.segment_quality_errors("今日はいい天気だ。", "今天天气真好。", "「早上好」"))
+        self.assertIn("overlong_vs_source", ex.segment_quality_errors("はい♡", "非常长的译文" * 10))
+        self.assertIn(
+            "neighbor_overlap",
+            ex.segment_quality_errors("今日はいい天気だ。", "「早上好」今天天气真好，很不错。", "「早上好」"),
+        )

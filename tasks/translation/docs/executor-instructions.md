@@ -86,7 +86,12 @@ revision shard 已存在,否则整份 quarantine。对全新文档也因此一�
 Agent/harness 路线直接维护纯 `zh.tsv` 与可选两列 `names.tsv`。API adapter 为了在一次模型调用里同时取得
 译文与本段实际名字，使用临时行协议：首行 `T<TAB>中文译文`，随后零到多行
 `E<TAB>日文原写法<TAB>本段实际中文译名`。adapter 会把 T 行变成 candidate、按 first-wins 合并 E 行；
-下一次调用只注入合并后的 canonical target，不注入冲突译名。该 T/E envelope 不直接落进 `zh.tsv`。
+下一次调用只注入合并后的 canonical target，不注入冲突译名。该 T/E envelope 不直接落进 `zh.tsv`——
+但 adapter 会把最终译文**也写一份 `zh.tsv`** 到 `results_dir`，所以两条路线的可改产物是同一个文件，
+review/fill 都在 TSV 上做，不需要从 store 反推。
+
+协议只允许**一条 T 记录**：把两段（常见是上文 + 本段）分别译成两条 T 行，或把 T 行和 E 行挤在同一物理行，
+都算协议漂移，adapter 会要求重写而不是把残留当正文。译文里出现 TAB 一律视为漂移。
 
 ## 派生:result.json
 

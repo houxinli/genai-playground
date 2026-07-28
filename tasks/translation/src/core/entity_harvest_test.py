@@ -53,6 +53,20 @@ class EntityMemoryTest(unittest.TestCase):
             entities,
         )
 
+    def test_parse_accepts_space_collapsed_te_protocol(self):
+        translation, entities = eh.parse_executor_response(
+            "T 卡尔亚笑了。\nE カルア 卡尔亚"
+        )
+        self.assertEqual("卡尔亚笑了。", translation)
+        self.assertEqual([{"source": "カルア", "target": "卡尔亚"}], entities)
+
+    def test_parse_accepts_extra_e_columns(self):
+        translation, entities = eh.parse_executor_response(
+            "T\tK子红了脸。\nE\tＫ子\tＫ子\tK子"
+        )
+        self.assertEqual("K子红了脸。", translation)
+        self.assertEqual([{"source": "Ｋ子", "target": "K子"}], entities)
+
     def test_plain_single_line_response_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "首行"):
             eh.parse_executor_response("普通译文。")
@@ -60,8 +74,16 @@ class EntityMemoryTest(unittest.TestCase):
     def test_multiline_response_requires_te_protocol(self):
         with self.assertRaisesRegex(ValueError, "首行"):
             eh.parse_executor_response("译文\n额外解释")
-        with self.assertRaisesRegex(ValueError, "第 2 行"):
-            eh.parse_executor_response("T\t译文\n多余说明")
+        text, entities = eh.parse_executor_response("T\t译文\n多余说明")
+        self.assertEqual("译文多余说明", text)
+        self.assertEqual([], entities)
+
+    def test_parse_folds_t_continuation_before_entities(self):
+        text, entities = eh.parse_executor_response(
+            "T\t前半\n后半\nE\tカルア\t卡尔亚\n备注忽略"
+        )
+        self.assertEqual("前半后半", text)
+        self.assertEqual([{"source": "カルア", "target": "卡尔亚"}], entities)
 
     def test_first_use_locks_and_later_variant_only_rewrites_current_text(self):
         locked = {}

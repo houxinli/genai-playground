@@ -23,9 +23,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 try:
-    from . import entity_harvest
+    from . import document_qa, entity_harvest
     from .document_qa import translation_shape_errors
 except ImportError:
+    import document_qa
     import entity_harvest
     from document_qa import translation_shape_errors
 
@@ -35,11 +36,14 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 _SYSTEM_BASE = (
     "你是一名专业的日译中网络小说译者。逐段翻译,不要解释、不要注释、不要 Markdown、"
     "不要输出原文或上下文标记。沿用原文的方引号「」『』。中文用恰当中文标点。"
+    "**只翻译 `[翻译这一段]` 标记的那一段**;`[上文]`/`[下文]` 只供你理解指代和语气,"
+    "绝对不要翻译、复述或把它们的内容拼进译文。"
     "译文必须只有一个物理行,禁止换行。译文不得残留日文假名。"
     "tags 段译成 `原词 / 中文` 并保留 `[]` 与逗号。"
-    "严格使用简单行协议:第一行是 `T<TAB>中文译文`;之后把本段实际使用的每个人名或专名"
-    "各写一行"
-    " `E<TAB>日文原写法<TAB>本段实际中文译名`;没有人名就只写 T 行。不要报告普通名词,"
+    "严格使用简单行协议:第一行是 `T` + ASCII 制表符(TAB,U+0009) + 中文译文;"
+    "之后把本段实际使用的每个人名或专名各写一行"
+    " `E` + TAB + 日文原写法 + TAB + 本段实际中文译名;"
+    "分隔符必须是 TAB,禁止用空格代替。没有人名就只写 T 行。不要报告普通名词,"
     "也不要报告本段源文或译文中没有实际出现的名字。"
 )
 
@@ -70,8 +74,14 @@ def build_messages(
     segment: Dict[str, Any],
     context_pack: Dict[str, Any],
     document_targets: Optional[Dict[str, str]] = None,
+    *,
+    neighbors_mode: str = "both",
 ) -> List[Dict[str, str]]:
-    """单段 → chat messages。注入硬约束 + 邻句上下文(邻句只供参考,不翻译/不输出)。"""
+    """单段 → chat messages。注入硬约束 + 邻句上下文(邻句只供参考,不翻译/不输出)。
+
+    neighbors_mode:`both`=前后都给(默认);`next`=只给下文;`none`=不给邻句。
+    退档用:小模型顶不住时,上文正是被误译进来的那段,拿掉它比继续加指令有效(见 translate_bundle)。
+    """
     system = _SYSTEM_BASE
     constraints = _constraints_block(context_pack)
     if constraints:
@@ -81,12 +91,93 @@ def build_messages(
         system += "\n\n" + document_constraints
     neighbors = context_pack.get("neighbors", {}).get(segment["segment_id"], {})
     parts: List[str] = []
-    if neighbors.get("prev"):
+    if neighbors.get("prev") and neighbors_mode == "both":
         parts.append(f"[上文,仅供理解,勿翻译] {neighbors['prev']}")
     parts.append(f"[翻译这一段] {segment['source_text']}")
-    if neighbors.get("next"):
+    if neighbors.get("next") and neighbors_mode in ("both", "next"):
         parts.append(f"[下文,仅供理解,勿翻译] {neighbors['next']}")
     return [{"role": "system", "content": system}, {"role": "user", "content": "\n".join(parts)}]
+
+
+# 本段译文相对源文的长度上限:超出即疑似把邻句也译了进来(中译日文一般 0.6–1.1 倍)。
+# 常数项容忍极短段(拟声词、"はい♡" 这类)的正常膨胀。
+_OVERLONG_SLOPE, _OVERLONG_INTERCEPT = 1.35, 12
+
+
+def segment_quality_errors(source_text: str, text: str, previous_text: str = "") -> List[str]:
+    """单段译文的内联复检:返回问题码,空表示通过。
+
+    比 `translation_shape_errors` 更严——那是"能不能进 TSV"的结构底线,这里是"这段是不是真的只译了这段"。
+    放在执行器内联做,是因为误判成本只有一次重试;放到 finish 才发现就只能整篇返工。
+    """
+    errors: List[str] = []
+    errors.extend(translation_shape_errors(text))
+    if "\t" in text:
+        errors.append("protocol_residue")
+    if len(text) > _OVERLONG_SLOPE * len(source_text) + _OVERLONG_INTERCEPT:
+        errors.append("overlong_vs_source")
+    if previous_text and document_qa.neighbor_leak_suspect(
+        previous_text, text, threshold=document_qa.NEIGHBOR_OVERLAP_EXECUTOR
+    ):
+        errors.append("neighbor_overlap")
+    return errors
+
+
+_FORMAT_REWRITE = (
+    "格式错误。请严格重写:第一行必须是 T + ASCII TAB + 中文译文;"
+    "随后每行 E + TAB + 日文原名 + TAB + 中文译名(恰好三列,不要多余列)。"
+    "没有人名就只写 T 行。"
+)
+_ONLY_THIS_SEGMENT = (
+    "上一次回答把 `[上文]`/`[下文]` 的内容也翻译进来了。请只重新输出 `[翻译这一段]` 那一段的译文,"
+    "一个物理行,不要包含上下文的任何内容。"
+)
+
+
+def _translate_segment(
+    seg: Dict[str, Any],
+    context_pack: Dict[str, Any],
+    document_targets: Dict[str, str],
+    previous_text: str,
+    call_fn: Callable[[List[Dict[str, str]]], str],
+):
+    """一段的三档重试:正常 → 带纠正指令重问 → 拿掉 `[上文]` 重问。返回 (译文, 观察, 剩余问题码)。
+
+    档位是按**实测有效性**排的(pixiv 27417304,deepseek/deepseek-chat):
+    system prompt 加"只译本段"后泄漏从约半数降到 16/213;剩下那批加指令重问也不改,
+    但拿掉 `[上文]` 后全部干净——上文在 prompt 里,模型就忍不住要译它。
+    """
+    attempts = [
+        ("both", None),
+        ("both", _ONLY_THIS_SEGMENT),
+        ("next", None),   # 上文是污染源,直接不给
+    ]
+    best: Optional[tuple] = None
+    for neighbors_mode, correction in attempts:
+        messages = build_messages(seg, context_pack, document_targets, neighbors_mode=neighbors_mode)
+        if correction is not None:
+            messages = messages + [{"role": "user", "content": correction}]
+        response = call_fn(messages)
+        try:
+            text, observations = entity_harvest.parse_executor_response(response)
+        except ValueError:
+            # 协议漂移:同一档内先给一次严格格式纠错机会,避免整篇因一次跑偏中断。
+            response = call_fn(messages + [
+                {"role": "assistant", "content": response},
+                {"role": "user", "content": _FORMAT_REWRITE},
+            ])
+            try:
+                text, observations = entity_harvest.parse_executor_response(response)
+            except ValueError:
+                continue
+        errors = segment_quality_errors(seg["source_text"], text, previous_text)
+        if not errors:
+            return text, observations, []
+        if best is None or len(errors) < len(best[2]):
+            best = (text, observations, errors)
+    if best is None:
+        raise ValueError(f"segment {seg['segment_id']} 返回结构污染: 三次重试都无法解析 T/E 协议")
+    return best
 
 
 def translate_bundle(
@@ -105,12 +196,26 @@ def translate_bundle(
     findings = []
     locked_targets = entity_harvest.context_targets(context_pack)
     document_targets: Dict[str, str] = {}
+    previous_text = ""
     for index, seg in enumerate(bundle["segments"]):
-        response = call_fn(build_messages(seg, context_pack, document_targets))
-        try:
-            text, observations = entity_harvest.parse_executor_response(response)
-        except ValueError as exc:
-            raise ValueError(f"segment {seg['segment_id']} 返回结构污染: {exc}") from exc
+        text, observations, seg_errors = _translate_segment(
+            seg, context_pack, document_targets, previous_text, call_fn
+        )
+        if seg_errors:
+            # 退无可退:结构错(进不了 TSV)仍然中断整篇;质量错(邻段窜入/超长)照常发布并记 finding,
+            # 与 skill「质量问题不阻断发布」一致——阻断反而让整篇没产物、更难修。
+            if any(code in ("multiline_translation", "protocol_residue") for code in seg_errors):
+                raise ValueError(
+                    f"segment {seg['segment_id']} 返回结构污染: {seg_errors};"
+                    "执行器必须只输出当前段的一行译文"
+                )
+            findings.append({
+                "code": "segment_quality",
+                "severity": "warning",
+                "message": f"重试后仍未通过内联复检: {seg_errors}",
+                "segments": [seg["segment_id"]],
+                "indices": [index],
+            })
         text, first_uses, _ = entity_harvest.apply_observations(
             seg["source_text"], text, observations, locked_targets
         )
@@ -119,18 +224,15 @@ def translate_bundle(
             findings.append(entity_harvest.entity_finding(
                 entity["source"], entity["target"], seg["segment_id"], index + 1
             ))
-        shape_errors = translation_shape_errors(text)
-        if shape_errors:
-            raise ValueError(
-                f"segment {seg['segment_id']} 返回结构污染: {shape_errors};"
-                "执行器必须只输出当前段的一行译文"
-            )
+        previous_text = text
         candidates.append({
             "result_candidate_key": candidate_key,
             "segment_id": seg["segment_id"],
             "source_hash": source_hashes[seg["segment_id"]],
             "text": text,
         })
+        if (index + 1) % 10 == 0 or index + 1 == len(bundle["segments"]):
+            print(f"openrouter translated {index + 1}/{len(bundle['segments'])}", flush=True)
     return {
         "schema_version": 1,
         "task_id": task["task_id"],
