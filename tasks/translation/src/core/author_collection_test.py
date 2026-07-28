@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +15,8 @@ except ImportError:
     import author_collection as ac
 
 
-def _make_work(ws_root: Path, sid: str, *, title: str, rendered=True, provider="pixiv", creator="700000"):
+def _make_work(ws_root: Path, sid: str, *, title: str, rendered=True, provider="pixiv", creator="700000",
+               variants=("zh", "bilingual")):
     """造一个已发布 work 的最小 workspace:ref + rendered。"""
     refs = ws_root / f"{provider}-{sid}" / "store" / "refs" / provider / creator
     refs.mkdir(parents=True, exist_ok=True)
@@ -22,7 +24,7 @@ def _make_work(ws_root: Path, sid: str, *, title: str, rendered=True, provider="
     if rendered:
         rd = ws_root / f"{provider}-{sid}" / "rendered"
         rd.mkdir(parents=True, exist_ok=True)
-        for var in ("zh", "bilingual"):
+        for var in variants:
             (rd / f"{sid}.{var}.txt").write_text(
                 f"---\nID: {sid}\ntitle: {title}\n---\n\n正文 {sid} {var}\n", encoding="utf-8")
 
@@ -260,6 +262,74 @@ class AuthorCollectionTest(unittest.TestCase):
                                 out_dir=Path(t) / "coll", furigana=False)
             bil = (Path(t) / "coll" / "作者G_bilingual.txt").read_text(encoding="utf-8")
             self.assertIn("今日は晴れです", bil)  # 源文保持原始日文,无注音
+
+
+class StudyVariantTest(unittest.TestCase):
+    """陪读(study)整本:注解线渲染的 `<sid>.study.txt` 与 zh/bilingual 同构,可作为一个 variant 发布。"""
+
+    def test_builds_zh_and_study_collection(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            out = Path(t) / "coll"
+            gd = Path(t) / "gdrive"
+            for sid in ("700001", "700002"):
+                _make_work(ws, sid, title=f"第{sid}篇", variants=("zh", "bilingual", "study"))
+            res = ac.build_collection("作者S", "700000", formats=("txt", "epub"), variants=("zh", "study"),
+                                      workspaces_root=ws, out_dir=out, gdrive_dir=gd)
+            self.assertTrue(res["verification"]["ok"])
+            self.assertEqual(2, res["chapters"]["study"])
+            self.assertEqual(2, res["epub_chapters"]["study"])
+            self.assertTrue((out / "作者S_study.epub").is_file())
+            self.assertTrue((gd / "作者S·陪读.epub").is_file())     # GDrive 上是人类可读名
+            self.assertFalse((out / "作者S_bilingual.epub").is_file())  # 没选的 variant 不产出
+            manifest = json.loads((out / "collection_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(["zh", "study"], manifest["variants"])
+
+    def test_verify_uses_manifest_variants(self):
+        # 合集发的是 zh+study,verify 就只核对这两个;不能因为缺 bilingual 而误报。
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            out = Path(t) / "coll"
+            _make_work(ws, "700001", title="只一篇", variants=("zh", "study"))
+            ac.build_collection("作者T", "700000", variants=("zh", "study"),
+                                workspaces_root=ws, out_dir=out)
+            self.assertTrue(ac.verify_collection("700000", workspaces_root=ws, out_dir=out)["ok"])
+            study = ws / "pixiv-700001" / "rendered" / "700001.study.txt"
+            study.write_text(study.read_text(encoding="utf-8") + "已重渲染\n", encoding="utf-8")
+            verification = ac.verify_collection("700000", workspaces_root=ws, out_dir=out)
+            self.assertFalse(verification["ok"])
+            self.assertIn("700001.study.txt 已变化", "\n".join(verification["errors"]))
+
+    def test_missing_study_refuses_partial_collection(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            _make_work(ws, "700001", title="有陪读", variants=("zh", "study"))
+            _make_work(ws, "700002", title="没陪读", variants=("zh",))
+            with self.assertRaises(ValueError) as ctx:
+                ac.build_collection("作者U", "700000", variants=("zh", "study"),
+                                    workspaces_root=ws, out_dir=Path(t) / "coll")
+            self.assertIn("700002.study", str(ctx.exception))
+
+    def test_unknown_variant_rejected(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            _make_work(ws, "700001", title="只一篇")
+            with self.assertRaises(ValueError):
+                ac.build_collection("作者Z", "700000", variants=("zh", "annotated"),
+                                    workspaces_root=ws, out_dir=Path(t) / "coll")
+
+    def test_legacy_manifest_without_variants_still_verifies(self):
+        # 旧 manifest 没有 variants 字段 → 按默认 zh+bilingual 核对,不报错。
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            out = Path(t) / "coll"
+            _make_work(ws, "700001", title="只一篇")
+            ac.build_collection("作者L", "700000", workspaces_root=ws, out_dir=out)
+            manifest_path = out / "collection_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest.pop("variants")
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+            self.assertTrue(ac.verify_collection("700000", workspaces_root=ws, out_dir=out)["ok"])
 
 
 if __name__ == "__main__":
