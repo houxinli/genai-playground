@@ -20,6 +20,7 @@
 ### 07月
 - [2026-07-18 Finish 隔离状态显式失败](./2026-07-18-finish-quarantine-feedback.md)
 - [2026-07-18 陪读复合词完整读音](./2026-07-18-annotation-full-readings.md)
+- [2026-07-28 执行器内联复检与自动路线产物对齐](./2026-07-28-executor-inline-recheck.md)
 - [2026-07-15 篇内首次译名记忆](./2026-07-15-document-entity-memory.md)
 - [2026-07-15 执行器结构污染与作者合集新鲜度闸门](./2026-07-15-output-integrity.md)
 - [2026-07-15 OpenRouter 翻译后实体收割](./2026-07-15-entity-harvest.md)

@@ -1592,11 +1592,33 @@ finish 的 quarantine、unresolved、document QA failure 都是发布阻断,CLI 
 **GDrive 文件名也用友好名**(`<author>·中文.epub` / `<author>·日中对照.epub`,`_gdrive_display_name`):微信读书对本地
 导入 epub 按**文件名**显示、不读 dc:title,统一 `_var` 会显示成 "作者_zh" 或区分不开;本地合集目录仍保留 `_var` 规范名。
 
+**发布 variant 控制(2026-07-28)**:`build_collection(variants=...)` / `make author-collection VARIANTS=zh,study`
+控制发哪几本,可选 `zh`/`bilingual`/`study`,**默认 `('zh','bilingual')`**。`study` 是注解线(#174)渲染的陪读版
+`<sid>.study.txt`,与翻译线产物同构,所以收集/合并/打包完全共用一套逻辑;EPUB/GDrive 名为 `<author>·陪读`。
+furigana **只施加在 bilingual** 上:study 的源文行已带注解,再叠注音会变成全文注音版(annotation-guide 硬边界)。
+manifest 记 `variants`,`verify_collection` **以 manifest 为准**核对(旧 manifest 无字段→默认 zh+bilingual,向后兼容)——
+否则用非默认 variant 建的合集会被误报成缺 rendered/输出不完整。
+
 **作者合集完整性/新鲜度闸门(2026-07-14)**:`author_collection` 构建前必须确认每个 current ref 同时有
-zh/bilingual 两种 rendered；缺任一输入即失败并保留旧合集,不再输出“少几章但命令成功”的部分成品。新整本先在
+本次要发的各 variant 的 rendered；缺任一输入即失败并保留旧合集,不再输出“少几章但命令成功”的部分成品。新整本先在
 临时目录构建并自校验,成功后才替换目标目录；`collection_manifest.json` 记录 schema version、完整 source-id/
 version-id 集合、逐篇 rendered digest、章节数和整本输出 digest。`make author-collection-verify` 只读比较 manifest
 与当前 refs/rendered/output：新增/删除 ref、current version 变化、重渲染或成品被修改都会返回非零,要求重建后再交付。
+
+**执行器内联复检 + 邻段窜入检测(2026-07-28,#gh-27417304)**:API 路线在 `translate_bundle` 里逐段自检
+(`openrouter_executor.segment_quality_errors`:协议残留 / 超长 / 邻段窜入),不通过就**退档重试**——
+①原样重问 ②追加「只译本段」纠正 ③**拿掉 `[上文]`** 重问。三档仍不过:结构错(进不了 TSV)中断整篇,
+质量错照常发布并记 `segment_quality` finding(与 skill「质量问题不阻断发布」一致)。
+判据双阈值:`NEIGHBOR_OVERLAP_EXECUTOR=0.35`(执行器内联,误判成本只是一次重试,宁可宽)、
+`NEIGHBOR_OVERLAP_REPORT=0.55`(finish QA 的 `neighbor_overlap` warning,要给人看,必须窄)。
+`neighbor_leak_suspect` 用「开头相似度 ∪ 上段译文近乎原样出现在本段开头」两条判据取或——
+只用相似度时上一段很短会失灵(实测漏 4 段)。**为什么需要这一层**:deepseek/deepseek-chat 会把
+`[上文]` 邻句一起译进本段(实测约半数段落),而整段并不相同,`duplicate_translation`/`block_paste` 全漏检;
+拿 27417304 的原始产物回放,内联复检拦下 81/213 段、finish QA 报 39 段,修好后分别降到 4 段和 1 段。
+
+**API 路线也落 zh.tsv(2026-07-28)**:`translate_user(results_dir=...)` 让自动路线与 agent 路线产出**同一个**
+`<sid>.zh.tsv`。此前自动路线只往 store 发布,workspace 没有可读可改的译文产物,review/fill 无处下手,
+改一段得写临时脚本从 store 反推 candidate。统一后 `MODE=finish RESULTS_DIR=...` 对两条路线都成立。
 
 **实体库默认接线(2026-07-14)**:`make translate-user` 默认 `ENTITY_STORE=tasks/translation/data/entities`,
 prepare 把该 creator 适用人名/术语解析进 `context_pack.entities`;`openrouter_executor._constraints_block`
