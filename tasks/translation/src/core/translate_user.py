@@ -216,15 +216,43 @@ def finish_document(
     return report
 
 
+def _write_zh_tsv(results_dir: Path, source_id: str, bundle: Dict[str, Any], result: Dict[str, Any]) -> Path:
+    """把 API 路线的 result 落成与 agent 路线同款的 v2 三列 `<sid>.zh.tsv`。
+
+    自动路线本来只往 store 里发布,workspace 没有可读可改的译文产物 → review/fill 无处下手,
+    修一段就得写临时脚本从 store 反推(pixiv 27417304 的教训)。两条路线统一到同一个 TSV 后,
+    `MODE=finish RESULTS_DIR=...` 对两者都成立。
+    """
+    texts = {c["segment_id"]: c["text"] for c in result.get("candidates", [])}
+    results_dir.mkdir(parents=True, exist_ok=True)
+    out = results_dir / f"{source_id}.zh.tsv"
+    lines = [
+        f"{index}\t{seg['source_text'][:12]}\t{texts.get(seg['segment_id'], '')}"
+        for index, seg in enumerate(bundle["segments"])
+    ]
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
+
+
 def translate_document(
     provider, source_path, store, translate_fn, render_dir=None, bilingual_dir=None, entity_store=None,
-    entity_review_queue=None,
+    entity_review_queue=None, results_dir=None, jobs_dir=None,
 ) -> Dict[str, Any]:
     """自动路线单篇：prepare → translate_fn(边译边锁本文实体) → finish。"""
     prep = prepare_document(provider, source_path, store, bilingual_dir, entity_store=entity_store)
+    if jobs_dir is not None:
+        # **job 必须和 tsv 一起落**:改 tsv 后重跑 finish 要用**本次 prepare 的原始 job** 组装,
+        # 否则要么没有 job、要么用上一轮遗留的旧 job → task_digest 不符被整份 quarantine。
+        jobs_dir = Path(jobs_dir)
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+        (jobs_dir / f"{prep['source_id']}.job.json").write_text(
+            json.dumps(prep["bundle"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     result = translate_fn(prep["bundle"])
-    return finish_document(provider, source_path, store, result, render_dir, bilingual_dir,
-                           entity_store=entity_store, entity_review_queue=entity_review_queue)
+    report = finish_document(provider, source_path, store, result, render_dir, bilingual_dir,
+                             entity_store=entity_store, entity_review_queue=entity_review_queue)
+    if results_dir is not None:
+        report["zh_tsv"] = str(_write_zh_tsv(Path(results_dir), prep["source_id"], prep["bundle"], result))
+    return report
 
 
 def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=None, entity_store=None, limit=None) -> Dict[str, Any]:
@@ -765,8 +793,13 @@ def translate_user(
     entity_store: Optional[Path] = None,
     entity_review_queue: Optional[Path] = None,
     limit: Optional[int] = None,
+    results_dir: Optional[Path] = None,
+    jobs_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """整作者逐篇翻译并合并整本；首次译名可在发布后送入 review。"""
+    """整作者逐篇翻译并合并整本；首次译名可在发布后送入 review。
+
+    传 results_dir/jobs_dir 时,每篇同时落 v2 三列 `<sid>.zh.tsv` 与本次 prepare 的原始 job
+    (与 agent 路线同款):改 tsv 后 `MODE=finish RESULTS_DIR=... JOBS_DIR=...` 即可重新组装发布。"""
     source_dir, store_root = Path(source_dir), Path(store_root)
     store = ArtifactStore(store_root)
     sources = sorted(source_dir.glob("*.txt"))
@@ -778,6 +811,7 @@ def translate_user(
             docs.append(translate_document(
                 provider, src, store, translate_fn, render_dir, bilingual_dir,
                 entity_store=entity_store, entity_review_queue=entity_review_queue,
+                results_dir=results_dir, jobs_dir=jobs_dir,
             ))
         except Exception as exc:  # 逐篇容错
             docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
@@ -880,6 +914,7 @@ def main() -> int:
         args.provider, args.source_dir, args.store, args.render_dir, translate_fn,
         bilingual_dir=args.bilingual_dir, entity_store=args.entity_store,
         entity_review_queue=args.entity_review_queue, limit=args.limit,
+        results_dir=args.results_dir, jobs_dir=args.jobs_dir,
     )
     print(json.dumps(manifest["summary"], ensure_ascii=False))
     return 0
