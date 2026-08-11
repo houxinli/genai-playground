@@ -10,9 +10,11 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -78,10 +80,25 @@ class ReviewQueue:
         id_errors = validate_review_identity(review)
         if id_errors:
             raise ValueError(f"entity-review 身份不符: {id_errors}")
-        records = {r["review_id"]: r for r in self.list_all()}
-        records[review["review_id"]] = review  # update 语义
-        self._atomic_write(list(records.values()))
+        # 「读全量→合并→整体覆写」必须整段持锁:原子 rename 只保证写不撕裂,挡不住 lost update。
+        # 多篇并行 finish(篇间并行是设计允许的)时,两个进程各读到同一份快照再各自覆写,
+        # 后写的那份会静默吞掉前一份的提案。锁粒度与 ArtifactStore 的 shard flock 一致。
+        with self._locked():
+            records = {r["review_id"]: r for r in self.list_all()}
+            records[review["review_id"]] = review  # update 语义
+            self._atomic_write(list(records.values()))
         return review
+
+    @contextmanager
+    def _locked(self):
+        self.root.mkdir(parents=True, exist_ok=True)
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        with lock_path.open("w") as lock_fh:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_fh, fcntl.LOCK_UN)
 
     def _atomic_write(self, records: List[Dict[str, Any]]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)

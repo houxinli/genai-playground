@@ -219,3 +219,37 @@ class ResolveTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _put_many(root: str, tag: str, count: int) -> None:
+    """子进程入口:必须是模块级函数(multiprocessing 要能 pickle)。"""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    try:
+        from core.entity_review import ReviewQueue as RQ, review_id_for as rid
+    except ImportError:
+        from entity_review import ReviewQueue as RQ, review_id_for as rid
+    q = RQ(Path(root))
+    for i in range(count):
+        mention = f"{tag}-{i}"
+        q.put({
+            "schema_version": 1, "review_id": rid(mention, DOC, None, None),
+            "mention": mention, "document_id": DOC, "confidence": 0.5,
+            "reason": "unmatched_needs_target", "status": "pending",
+            "created_at": "2026-08-07T00:00:00Z",
+        })
+
+
+class ConcurrentPutTest(unittest.TestCase):
+    """篇间并行 finish 会并发入队:读全量→覆写必须整段持锁,否则后写的静默吞掉先写的提案。"""
+
+    def test_parallel_puts_do_not_lose_records(self):
+        import multiprocessing
+        ctx = multiprocessing.get_context("fork")
+        with tempfile.TemporaryDirectory() as t:
+            procs = [ctx.Process(target=_put_many, args=(t, f"p{k}", 8)) for k in range(4)]
+            for p in procs:
+                p.start()
+            for p in procs:
+                p.join()
+            self.assertEqual(32, len(ReviewQueue(Path(t)).list_all()))
