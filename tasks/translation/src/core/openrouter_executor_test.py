@@ -335,3 +335,24 @@ class ApiErrorBodyTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "rate limited"):
                 ex.openrouter_call([{"role": "user", "content": "x"}], "m", "k",
                                    retries=1, sleep_fn=lambda _s: None)
+
+
+class PassthroughMarkerTest(unittest.TestCase):
+    """`[newpage]` 这类排版标记没有可译内容:喂给模型只会被邻句填空,原样透传且不调 API。"""
+
+    def test_newpage_segment_is_passed_through_without_api_call(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        bundle["segments"][0]["source_text"] = "[newpage]"
+        calls = []
+
+        def fake_call(messages):
+            line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+            src = line.split("] ", 1)[1]
+            calls.append(src)
+            return f"T\t{TR.get(src, '译文')}"
+
+        result = ex.translate_bundle(bundle, fake_call)
+        self.assertEqual("[newpage]", result["candidates"][0]["text"])
+        self.assertNotIn("[newpage]", calls)          # 没为它调过模型
+        self.assertEqual(len(bundle["segments"]) - 1, len(calls))

@@ -22,10 +22,18 @@ except ImportError:
 
 ENTITY_FINDING_CODE = "entity_first_use"
 
-# 尾随的 E 记录:`<译文>E <日文名> <中文名>`,分隔符可能是空格或 TAB,E 前可能连空格都没有
-# (实测 `……那种差距是如此绝对。E ペニス 肉棒`)。要求源名含假名才拆——合格译文本就不该有假名,
-# 所以这个条件既能认出漏出来的 E 记录,又不会误伤正常中文句尾。
-_TRAILING_ENTITY_RE = re.compile(r"E[ \t]([^\s]*[ぁ-んァ-ヶ][^\s]*)[ \t]([^\s]+)\s*$")
+# 尾随的 E 记录:模型把实体行续在 T 行末尾。实测过的写法(pixiv 9425701 那批):
+#   `……绝对。E ペニス 肉棒`  `……乳沟中。[E]ルーナ,露娜`  `……夹住。[E] なし`
+# 分隔符可能是空格/TAB/逗号,E 可能被方括号包起来,E 前可能连空格都没有。
+# 要求源名含假名才拆——合格译文本就不该有假名,既能认出漏出的 E 记录又不误伤正常中文句尾。
+_TRAILING_ENTITY_RE = re.compile(
+    r"\[?E\]?[ \t]*([^\s,，]*[ぁ-んァ-ヶ][^\s,，]*)[ \t,，]+([^\s,，]+)\s*$"
+)
+# `[E] なし`(模型报"本段没有实体")这类只有源名没有译名的残留,同样得从译文里摘掉。
+_TRAILING_EMPTY_ENTITY_RE = re.compile(r"\[?E\]?[ \t]+[^\s]*[ぁ-んァ-ヶ][^\s]*\s*$")
+# tags 段的 `原词 / 中文` 样式漏进正文段尾(实测 `……好想揉捏……♡）[乳交 / 乳交]`)。
+# 要求方括号前有非空白内容 → 整段就是括号列表的 tags 段本身不受影响。
+_TRAILING_TAGS_RE = re.compile(r"(?<=\S)\s*\[[^\[\]]+/[^\[\]]+\]\s*$")
 
 
 def normalize_executor_response(response: str) -> str:
@@ -82,6 +90,11 @@ def parse_executor_response(response: str) -> Tuple[str, List[Dict[str, str]]]:
     if trailing:
         translation = translation[: trailing.start()].rstrip()
         observations.append({"source": trailing.group(1), "target": trailing.group(2)})
+    else:
+        empty_entity = _TRAILING_EMPTY_ENTITY_RE.search(translation)
+        if empty_entity:
+            translation = translation[: empty_entity.start()].rstrip()
+    translation = _TRAILING_TAGS_RE.sub("", translation).rstrip()
     if "\t" in translation:
         raise ValueError("译文含 TAB,疑似整条 T/E 协议被塞进了同一物理行")
     for line_number, line in enumerate(lines[cursor:], cursor + 1):

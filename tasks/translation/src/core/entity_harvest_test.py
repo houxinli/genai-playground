@@ -208,3 +208,29 @@ class TrailingEntityRecordTest(unittest.TestCase):
                 text, obs = eh.parse_executor_response(f"T\t{good}")
                 self.assertEqual(good, text)
                 self.assertEqual([], obs)
+
+
+class TrailingAnnotationVariantsTest(unittest.TestCase):
+    """实测过的几种「模型把注记续在译文末尾」写法,解析层都要摘干净。"""
+
+    def test_bracketed_e_record_with_comma(self):
+        text, obs = eh.parse_executor_response("T\t注入她的乳沟中。[E]ルーナ,露娜")
+        self.assertEqual("注入她的乳沟中。", text)
+        self.assertEqual([{"source": "ルーナ", "target": "露娜"}], obs)
+
+    def test_bracketed_e_record_without_target(self):
+        text, obs = eh.parse_executor_response("T\t用巨乳温柔地夹住。[E] なし")
+        self.assertEqual("用巨乳温柔地夹住。", text)
+        self.assertEqual([], obs)
+
+    def test_trailing_tags_style_annotation(self):
+        text, obs = eh.parse_executor_response("T\t好想揉捏……♡）[乳交 / 乳交]")
+        self.assertEqual("好想揉捏……♡）", text)
+        self.assertEqual([], obs)
+
+    def test_tags_segment_itself_is_untouched(self):
+        # metadata.tags 段整段就是括号列表,不能被尾巴规则吃掉
+        tags = "[R-18 / R-18, パイズリ / 乳交, 爆乳 / 爆乳]"
+        text, obs = eh.parse_executor_response(f"T\t{tags}")
+        self.assertEqual(tags, text)
+        self.assertEqual([], obs)

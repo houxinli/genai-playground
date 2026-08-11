@@ -123,6 +123,12 @@ def segment_quality_errors(source_text: str, text: str, previous_text: str = "")
     return errors
 
 
+# 结构标记段:源文整段就是一个排版标记,没有可译内容。喂给模型只会让它拿邻句填空
+# (实测 pixiv 9425701 三篇都把整段邻段正文塞进了 `[newpage]`),原样透传即可。
+# 语料里 725 处,顺带省掉同等数量的 API 调用。
+PASSTHROUGH_SEGMENTS = frozenset({"[newpage]"})
+
+
 _FORMAT_REWRITE = (
     "格式错误。请严格重写:第一行必须是 T + ASCII TAB + 中文译文;"
     "随后每行 E + TAB + 日文原名 + TAB + 中文译名(恰好三列,不要多余列)。"
@@ -233,6 +239,19 @@ def translate_bundle(
         print(f"openrouter resume: 复用断点 {len(done)}/{len(bundle['segments'])} 段", flush=True)
     previous_text = ""
     for index, seg in enumerate(bundle["segments"]):
+        marker = seg["source_text"].strip()
+        if marker in PASSTHROUGH_SEGMENTS and index not in done:
+            candidates.append({
+                "result_candidate_key": candidate_key,
+                "segment_id": seg["segment_id"],
+                "source_hash": source_hashes[seg["segment_id"]],
+                "text": marker,
+            })
+            previous_text = marker
+            if checkpoint_path is not None:
+                with Path(checkpoint_path).open("a", encoding="utf-8") as fh:
+                    fh.write(f"{index}\t{seg['source_text'][:12]}\t{marker}\n")
+            continue
         if index in done:
             text = done[index]
             candidates.append({
