@@ -714,3 +714,33 @@ class NamesCheckpointAtomicityTest(unittest.TestCase):
             self.assertNotIn("旧孤儿译名", body)
             self.assertIn("マホ\t真秀", body)                 # 有效记录保留
             eh.parse_locked_names_tsv(body)                   # 不再违反 first-wins
+
+    def test_orphan_cleanup_runs_with_zero_completed_segments(self):
+        """崩在首段"写名字表"与"写段断点"之间:done 为空,清理不能被跳过(Codex #194 复审)。"""
+        import tempfile
+        from pathlib import Path as _P
+        try:
+            from . import entity_harvest as eh
+        except ImportError:
+            import entity_harvest as eh
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        bundle["segments"][0]["source_text"] = "ユキが来た。"
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            names = _P(t) / "700001.names.tsv"
+            cp.write_text("", encoding="utf-8")                    # 一段都没落盘
+            names.write_text("ユキ\t旧孤儿译名\n", encoding="utf-8")
+            ex._write_checkpoint_meta(cp, ex._checkpoint_identity(bundle, ex.DEFAULT_MODEL, "openrouter", False),
+                                      names={"ユキ": 0})
+
+            def with_new_target(messages):
+                src = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0].split("] ", 1)[1]
+                if "ユキ" in src:
+                    return "T\t小雪来了。\nE\tユキ\t小雪"
+                return f"T\t{TR.get(src, '译文')}"
+
+            ex.translate_bundle(bundle, with_new_target, checkpoint_path=cp)
+            body = names.read_text(encoding="utf-8")
+            self.assertNotIn("旧孤儿译名", body)
+            eh.parse_locked_names_tsv(body)                        # 不违反 first-wins

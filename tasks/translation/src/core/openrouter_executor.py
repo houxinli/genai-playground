@@ -327,7 +327,10 @@ def translate_bundle(
     # 于是人工改完 TSV 再 finish 时首次译名 findings 全部丢失(Codex #194 P2)。
     names_path = _names_sidecar_path(Path(checkpoint_path)) if checkpoint_path is not None else None
     name_segments = _read_checkpoint_names(Path(checkpoint_path)) if checkpoint_path is not None else {}
-    if done and names_path is not None and names_path.is_file():
+    # **不能用 `if done` 保护**:崩在"第一段写完名字表"与"写第一条段断点"之间时 done 为空,
+    # 清理被整个跳过、孤儿留存,重译首段给出不同译名就与它并存 → finish 按 first-wins 拒绝整篇。
+    # 只要名字表在就收敛一次(done 为空时全部是孤儿,表清空,让名字重新被发现)。
+    if names_path is not None and names_path.is_file():
         kept: List[str] = []
         for line in names_path.read_text(encoding="utf-8").splitlines():
             source, _, target = line.partition("\t")
