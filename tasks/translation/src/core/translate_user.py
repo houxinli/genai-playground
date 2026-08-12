@@ -369,8 +369,22 @@ def _sync_result_from_tsv(
     # 内联复检留下的 segment_quality 等**非实体 findings 是待人工复核的告警**,
     # 重组时若只保留 names 派生的 findings,等于静默删掉它们(Codex #194 复审)。
     # 它们绑定 segment_id,与 TSV 是否被改无关,原样带过来。
+    # 只保留**对应候选文本未变**的非实体 finding:若人工已在 TSV 里修好那段(例如改掉邻段窜入),
+    # 无条件复制会让 result 继续声称该段有错,与当前候选不符(Codex #194 复审)。
+    current_texts = {c.get("segment_id"): c.get("text") for c in (current or {}).get("candidates", [])}
+    # translations 按**段序号**索引(parse_translations_tsv 的契约),不是 segment_id。
+    index_of = {seg["segment_id"]: i for i, seg in enumerate(bundle["segments"])}
+
+    def _still_applies(finding: Dict[str, Any]) -> bool:
+        try:
+            sid_of = json.loads(finding.get("evidence") or "{}").get("segment_id")
+        except (TypeError, ValueError):
+            sid_of = None
+        if not sid_of or sid_of not in index_of:
+            return False              # 无法定位到段 → 无法证明仍适用,不带过来
+        return current_texts.get(sid_of) == translations.get(index_of[sid_of])
     carried = [f for f in (current or {}).get("findings", [])
-               if f.get("code") != entity_harvest.ENTITY_FINDING_CODE]
+               if f.get("code") != entity_harvest.ENTITY_FINDING_CODE and _still_applies(f)]
     expected = result_assemble.assemble_result(
         bundle,
         translations,
@@ -699,6 +713,13 @@ def finish_annotate_document(
             source_text = source_path.read_text(encoding="utf-8")
             (render_dir / f"{sid_short}.study.txt").write_text(
                 render_bilingual(rev, source_text, translations, annotations=annotations), encoding="utf-8")
+            # provenance:study = 注解版本 + 当前翻译版本交织。只在 manifest 里记 ref 的版本号
+            # 证明不了"这个文件是那个版本渲染的"——注解推进后渲染失败时,旧 study.txt 会被绑上
+            # 新版本号且 verify 全绿(Codex #194 三次提出)。渲染产物自带版本,合集据此核对。
+            (render_dir / f"{sid_short}.study.meta.json").write_text(
+                json.dumps({"annotate_version_id": version["version_id"],
+                            "translate_version_id": trans_ref["version_id"]},
+                           ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
             report["study_rendered"] = True
     return report
 

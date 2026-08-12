@@ -101,6 +101,17 @@ def _guard_out_dir(out_dir: Path, workspaces_root: Path) -> None:
                     f"out_dir 已存在且含非合集内容({entry.name}),拒绝清空: {out_dir}")
 
 
+def _study_render_provenance(workspace: Path, sid: str) -> Optional[Dict[str, Any]]:
+    """study 渲染产物自带的版本 sidecar(annotate finish 写)。"""
+    meta = Path(workspace) / "rendered" / f"{sid}.study.meta.json"
+    if not meta.is_file():
+        return None
+    try:
+        return json.loads(meta.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _annotate_version(workspace: Path, provider: str, creator_id: str, sid: str) -> Optional[str]:
     """注解通道(refs-annotate)的 current version;没有注解版本时返回 None。"""
     ref = Path(workspace) / "store" / "refs-annotate" / provider / creator_id / f"{sid}.json"
@@ -323,8 +334,18 @@ def build_collection(
                 missing.append(f"{sid}.{var}")
         # study 还要求注解通道有 current ref:没有就说明这篇根本没做过陪读,
         # 与缺 rendered 同等对待,拒绝出部分合集(而不是让自校验在 staging 之后才炸)。
-        if "study" in variants and _annotate_version(ws, provider, creator_id, sid) is None:
-            missing.append(f"{sid}.annotate-ref")
+        if "study" in variants:
+            current_annotate = _annotate_version(ws, provider, creator_id, sid)
+            if current_annotate is None:
+                missing.append(f"{sid}.annotate-ref")
+            else:
+                # 只读 ref 的版本号证明不了"这个 study.txt 是那个版本渲染的":注解推进后
+                # 渲染失败时旧文件仍在,会被绑上新版本号。渲染产物自带 provenance,在此核对。
+                prov = _study_render_provenance(ws, sid)
+                if prov is None:
+                    missing.append(f"{sid}.study-provenance")
+                elif prov.get("annotate_version_id") != current_annotate:
+                    missing.append(f"{sid}.study-stale(渲染于 {prov.get('annotate_version_id')})")
     if missing:
         raise ValueError(f"{len(missing)} 个已发布 rendered 缺失，拒绝生成部分合集: {missing[:10]}")
 

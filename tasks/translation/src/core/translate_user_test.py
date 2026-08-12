@@ -719,7 +719,10 @@ class ResyncPreservesProvenanceTest(unittest.TestCase):
                                 "source_hash": bundle["task"]["source_hashes"][s["segment_id"]],
                                 "text": f"译文{i}"} for i, s in enumerate(bundle["segments"])],
                 "findings": [{"code": "segment_quality", "severity": "warning",
-                              "message": "重试后仍未通过内联复检", "line": 1}],
+                              "message": "重试后仍未通过内联复检",
+                              "evidence": json.dumps({"segment_id": bundle["segments"][0]["segment_id"],
+                                                      "errors": ["neighbor_overlap"]}, ensure_ascii=False),
+                              "line": 1}],
                 "recommended_candidate_keys": ["grok"], "completed_at": "2026-08-12T00:00:00+00:00",
             }
 
@@ -736,3 +739,17 @@ class ResyncPreservesProvenanceTest(unittest.TestCase):
             result = json.loads((tmp / "results" / "700001.result.json").read_text(encoding="utf-8"))
             self.assertEqual("api", result["producer"]["type"])       # 不被改写成 harness
             self.assertIn("segment_quality", [f["code"] for f in result["findings"]])
+
+    def test_finding_is_dropped_after_its_segment_is_edited(self):
+        """人工在 TSV 里修好那段之后,旧告警不该继续声称该段有错。"""
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = self._auto_run(tmp)
+            tsv = tmp / "results" / "700001.zh.tsv"
+            rows = [l.split("\t", 2) for l in tsv.read_text(encoding="utf-8").rstrip("\n").split("\n")]
+            rows[0][2] = "人工修好的译文"
+            tsv.write_text("\n".join("\t".join(r) for r in rows) + "\n", encoding="utf-8")
+            tu.finish_user("pixiv", src_dir, tmp / "store", tmp / "rendered", tmp / "results",
+                           jobs_dir=tmp / "jobs")
+            result = json.loads((tmp / "results" / "700001.result.json").read_text(encoding="utf-8"))
+            self.assertNotIn("segment_quality", [f["code"] for f in result["findings"]])

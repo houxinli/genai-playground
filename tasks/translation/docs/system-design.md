@@ -1599,6 +1599,11 @@ furigana **只施加在 bilingual** 上:study 的源文行已带注解,再叠注
 manifest 记 `variants`,`verify_collection` **以 manifest 为准**核对(旧 manifest 无字段→默认 zh+bilingual,向后兼容)——
 否则用非默认 variant 建的合集会被误报成缺 rendered/输出不完整。
 
+**study 渲染产物自带 provenance(2026-08-12)**:annotate finish 渲染 `study.txt` 的同时写
+`<sid>.study.meta.json` 记 {annotate_version_id, translate_version_id}。只在合集 manifest 里记
+current ref 的版本号**证明不了**"这个文件由那个版本渲染"——注解推进后渲染失败时,旧文件仍在、
+会被绑上新版本号且 verify 全绿。合集构建时核对 sidecar 与 current annotate ref,不一致或缺失即拒绝。
+
 **study 合集核对注解通道版本(2026-08-12,Codex #194 review)**:study 是「注解版本 + 当前翻译版本」
 渲染出来的,只记翻译 version 判不出新鲜度——注解推进了但渲染失败、或残留旧 `study.txt`,
 都会把过期内容当成已发布输入交付。manifest 增记 `annotate_version_id`,verify 一并核对;

@@ -25,6 +25,11 @@ def _make_work(ws_root: Path, sid: str, *, title: str, rendered=True, provider="
         aref = ws_root / f"{provider}-{sid}" / "store" / "refs-annotate" / provider / creator
         aref.mkdir(parents=True, exist_ok=True)
         (aref / f"{sid}.json").write_text(json.dumps({"version_id": annotate_version}), encoding="utf-8")
+        rd = ws_root / f"{provider}-{sid}" / "rendered"
+        rd.mkdir(parents=True, exist_ok=True)
+        (rd / f"{sid}.study.meta.json").write_text(
+            json.dumps({"annotate_version_id": annotate_version, "translate_version_id": "v1"}),
+            encoding="utf-8")
     if rendered:
         rd = ws_root / f"{provider}-{sid}" / "rendered"
         rd.mkdir(parents=True, exist_ok=True)
@@ -394,6 +399,8 @@ class StudyWorkspaceSelectionTest(unittest.TestCase):
             for var in ("zh", "study"):
                 (rd / f"700001.{var}.txt").write_text(
                     f"---\nID: 700001\ntitle: 有注解\n---\n\n正文 {var}\n", encoding="utf-8")
+            (rd / "700001.study.meta.json").write_text(
+                json.dumps({"annotate_version_id": "av9", "translate_version_id": "v1"}), encoding="utf-8")
             out = Path(t) / "coll"
             res = ac.build_collection("作者W", "700000", variants=("zh", "study"),
                                       workspaces_root=ws, out_dir=out)
@@ -419,3 +426,29 @@ class ConflictingAnnotateVersionTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "不同注解版本"):
                 ac.build_collection("作者X2", "700000", variants=("zh", "study"),
                                     workspaces_root=ws, out_dir=Path(t) / "coll")
+
+
+class StudyProvenanceTest(unittest.TestCase):
+    """只记 ref 版本号证明不了 study.txt 由该版本渲染:渲染产物自带 provenance,合集据此核对。"""
+
+    def test_stale_study_render_is_refused(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            _make_work(ws, "700001", title="一篇", variants=("zh", "study"), annotate_version="av1")
+            # 注解推进到 av2,但 study.txt 渲染失败 → 旧文件与旧 provenance 还在
+            aref = ws / "pixiv-700001" / "store" / "refs-annotate" / "pixiv" / "700000" / "700001.json"
+            aref.write_text(json.dumps({"version_id": "av2"}), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                ac.build_collection("作者Y2", "700000", variants=("zh", "study"),
+                                    workspaces_root=ws, out_dir=Path(t) / "coll")
+            self.assertIn("study-stale", str(ctx.exception))
+
+    def test_missing_provenance_is_refused(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            _make_work(ws, "700001", title="一篇", variants=("zh", "study"), annotate_version="av1")
+            (ws / "pixiv-700001" / "rendered" / "700001.study.meta.json").unlink()
+            with self.assertRaises(ValueError) as ctx:
+                ac.build_collection("作者Z2", "700000", variants=("zh", "study"),
+                                    workspaces_root=ws, out_dir=Path(t) / "coll")
+            self.assertIn("study-provenance", str(ctx.exception))
