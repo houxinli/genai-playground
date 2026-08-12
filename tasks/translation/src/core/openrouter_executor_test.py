@@ -682,3 +682,35 @@ class NamesCheckpointAtomicityTest(unittest.TestCase):
             ents = [f for f in result["findings"] if f["code"] == "entity_first_use"]
             self.assertTrue(any("ユキ" in f["message"] for f in ents),
                             "段未落盘时名字必须重新被发现,否则永久缺席 entity-review")
+
+    def test_orphan_name_is_removed_from_sidecar(self):
+        """孤儿记录必须从文件里删掉:留着会与重译产生的新译名并存,finish 按 first-wins 拒绝整篇。"""
+        import tempfile
+        from pathlib import Path as _P
+        try:
+            from . import entity_harvest as eh
+        except ImportError:
+            import entity_harvest as eh
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        bundle["segments"][0]["source_text"] = "ユキが来た。"
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            names = _P(t) / "700001.names.tsv"
+            # 段 1 已落盘且其名字有效;段 0 是孤儿(名字在表里,段没落盘)
+            cp.write_text(f"1\t{bundle['segments'][1]['source_text'][:12]}\t有效译文\n", encoding="utf-8")
+            names.write_text("ユキ\t旧孤儿译名\nマホ\t真秀\n", encoding="utf-8")
+            ex._write_checkpoint_meta(cp, ex._checkpoint_identity(bundle, ex.DEFAULT_MODEL, "openrouter", False),
+                                      names={"ユキ": 0, "マホ": 1})
+
+            def with_new_target(messages):
+                src = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0].split("] ", 1)[1]
+                if "ユキ" in src:
+                    return "T\t小雪来了。\nE\tユキ\t小雪"      # 与孤儿记录不同的译名
+                return f"T\t{TR.get(src, '译文')}"
+
+            ex.translate_bundle(bundle, with_new_target, checkpoint_path=cp)
+            body = names.read_text(encoding="utf-8")
+            self.assertNotIn("旧孤儿译名", body)
+            self.assertIn("マホ\t真秀", body)                 # 有效记录保留
+            eh.parse_locked_names_tsv(body)                   # 不再违反 first-wins

@@ -328,6 +328,7 @@ def translate_bundle(
     names_path = _names_sidecar_path(Path(checkpoint_path)) if checkpoint_path is not None else None
     name_segments = _read_checkpoint_names(Path(checkpoint_path)) if checkpoint_path is not None else {}
     if done and names_path is not None and names_path.is_file():
+        kept: List[str] = []
         for line in names_path.read_text(encoding="utf-8").splitlines():
             source, _, target = line.partition("\t")
             if not source or not target:
@@ -338,9 +339,17 @@ def translate_bundle(
             # 与 entity-review(Codex #194 复审)。段号未知的一律不预载,让它重新被发现。
             index = name_segments.get(source)
             if index is None or index not in done:
+                # 孤儿记录:光跳过预载不够,还要**从文件里删掉**。留着的话重译该段若给出不同译名,
+                # 同一 source 会有两条不同 target,finish 的 parse_locked_names_tsv 按 first-wins
+                # 拒绝整篇,自动翻译产出的 TSV 反而组装不了(Codex #194 复审)。
+                name_segments.pop(source, None)
                 continue
+            kept.append(f"{source}\t{target}")
             document_targets[source] = target
             locked_targets.setdefault(source, target)
+        names_path.write_text("".join(f"{l}\n" for l in kept), encoding="utf-8")
+        if checkpoint_path is not None:
+            _write_checkpoint_meta(Path(checkpoint_path), identity, names=name_segments)
     if done:
         print(f"openrouter resume: 复用断点 {len(done)}/{len(bundle['segments'])} 段", flush=True)
         # 只恢复 candidate 不够:中断前发现的首次译名若不重建 finding,就进不了 entity-review,
