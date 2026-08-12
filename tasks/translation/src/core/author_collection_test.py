@@ -400,3 +400,22 @@ class StudyWorkspaceSelectionTest(unittest.TestCase):
             self.assertTrue(res["verification"]["ok"])
             m = json.loads((out / "collection_manifest.json").read_text(encoding="utf-8"))
             self.assertEqual("av9", m["documents"][0]["annotate_version_id"])
+
+
+class ConflictingAnnotateVersionTest(unittest.TestCase):
+    def test_different_annotate_versions_are_rejected(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            _make_work(ws, "700001", title="旧注解", variants=("zh", "study"), annotate_version="av1")
+            second = ws / "pixiv-dup"
+            for sub, body in (("store/refs/pixiv/700000", '{"version_id":"v1"}'),
+                              ("store/refs-annotate/pixiv/700000", '{"version_id":"av2"}')):
+                d = second / sub; d.mkdir(parents=True)
+                (d / "700001.json").write_text(body, encoding="utf-8")
+            rd = second / "rendered"; rd.mkdir()
+            for var in ("zh", "study"):
+                (rd / f"700001.{var}.txt").write_text(
+                    f"---\nID: 700001\ntitle: 新注解\n---\n\n正文 {var}\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "不同注解版本"):
+                ac.build_collection("作者X2", "700000", variants=("zh", "study"),
+                                    workspaces_root=ws, out_dir=Path(t) / "coll")

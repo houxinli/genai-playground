@@ -364,13 +364,21 @@ def _sync_result_from_tsv(
     current_producer = current.get("producer", {}) if current else {}
     effective_producer = producer_name or current_producer.get("name") or "agent"
     effective_model = model if model is not None else current_producer.get("model")
+    # producer type 沿用现有 result:auto 路线产的是 api/<executor>,重组不该把它改写成 harness。
+    effective_type = current_producer.get("type") or "harness"
+    # 内联复检留下的 segment_quality 等**非实体 findings 是待人工复核的告警**,
+    # 重组时若只保留 names 派生的 findings,等于静默删掉它们(Codex #194 复审)。
+    # 它们绑定 segment_id,与 TSV 是否被改无关,原样带过来。
+    carried = [f for f in (current or {}).get("findings", [])
+               if f.get("code") != entity_harvest.ENTITY_FINDING_CODE]
     expected = result_assemble.assemble_result(
         bundle,
         translations,
         producer_name=effective_producer,
+        producer_type=effective_type,
         model=effective_model,
         completed_at=current.get("completed_at") if current else None,
-        findings=findings,
+        findings=carried + findings,
     )
     if current is None or _stable_result_signature(current) != _stable_result_signature(expected):
         result_path.write_text(json.dumps(expected, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

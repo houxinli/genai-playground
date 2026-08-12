@@ -702,3 +702,37 @@ class CarryPrevZhWiringTest(unittest.TestCase):
                               side_effect=lambda b, c, **kw: seen.update(kw) or {"candidates": []}):
                 tu.make_translate_fn("openrouter", "m", carry_previous_translation=True)({"task": {}, "segments": []})
         self.assertTrue(seen.get("carry_previous_translation"))
+
+
+class ResyncPreservesProvenanceTest(unittest.TestCase):
+    """MODE=finish 从 TSV 重组 result 时,不能丢 producer type,也不能删待复核的告警。"""
+
+    def _auto_run(self, tmp: Path):
+        src_dir = Path(__file__).resolve().parent / "testdata" / "fixtures" / "pixiv" / "700001"
+
+        def fake(bundle):
+            return {
+                "schema_version": 1, "task_id": bundle["task"]["task_id"],
+                "task_digest": bundle["task_digest"],
+                "producer": {"type": "api", "name": "openrouter", "model": "m"},
+                "candidates": [{"result_candidate_key": "grok", "segment_id": s["segment_id"],
+                                "source_hash": bundle["task"]["source_hashes"][s["segment_id"]],
+                                "text": f"译文{i}"} for i, s in enumerate(bundle["segments"])],
+                "findings": [{"code": "segment_quality", "severity": "warning",
+                              "message": "重试后仍未通过内联复检", "line": 1}],
+                "recommended_candidate_keys": ["grok"], "completed_at": "2026-08-12T00:00:00+00:00",
+            }
+
+        tu.translate_user("pixiv", src_dir, tmp / "store", tmp / "rendered", fake,
+                          results_dir=tmp / "results", jobs_dir=tmp / "jobs")
+        return src_dir
+
+    def test_finish_keeps_api_producer_type_and_quality_findings(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = self._auto_run(tmp)
+            tu.finish_user("pixiv", src_dir, tmp / "store", tmp / "rendered", tmp / "results",
+                           jobs_dir=tmp / "jobs")
+            result = json.loads((tmp / "results" / "700001.result.json").read_text(encoding="utf-8"))
+            self.assertEqual("api", result["producer"]["type"])       # 不被改写成 harness
+            self.assertIn("segment_quality", [f["code"] for f in result["findings"]])

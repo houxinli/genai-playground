@@ -154,6 +154,16 @@ def _published_documents(workspaces_root: Path, provider: str, creator_id: str,
 
         previous_score = _score(previous)
         candidate_score = _score(candidate)
+        if "study" in variants:
+            # 注解版本冲突要像翻译 version 冲突一样显式拒绝:两个 workspace 的 annotate ref
+            # 指向不同版本时,按 glob 顺序静默选一个会发布旧 study,而 manifest/verify 全绿。
+            previous_annotate = _annotate_version(previous["workspace"], provider, creator_id, sid)
+            candidate_annotate = _annotate_version(candidate["workspace"], provider, creator_id, sid)
+            if previous_annotate and candidate_annotate and previous_annotate != candidate_annotate:
+                raise ValueError(
+                    f"{provider}:{creator_id}:{sid} 在多个 workspace 指向不同注解版本: "
+                    f"{previous_annotate} != {candidate_annotate}"
+                )
         if candidate_score > previous_score:
             documents[sid] = candidate
     return dict(sorted(
