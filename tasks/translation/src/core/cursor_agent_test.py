@@ -52,12 +52,14 @@ class CallTest(unittest.TestCase):
     def test_nonzero_exit_raises(self):
         with self.assertRaisesRegex(RuntimeError, "退出码"):
             ca.cursor_agent_call([{"role": "user", "content": "x"}],
-                                 runner=lambda *a, **k: _Proc(rc=1, err="boom"))
+                                 runner=lambda *a, **k: _Proc(rc=1, err="boom"),
+                                 retries=0, sleep_fn=lambda _s: None)
 
     def test_empty_output_raises(self):
         with self.assertRaisesRegex(RuntimeError, "无输出"):
             ca.cursor_agent_call([{"role": "user", "content": "x"}],
-                                 runner=lambda *a, **k: _Proc(out="  \n"))
+                                 runner=lambda *a, **k: _Proc(out="  \n"),
+                                 retries=0, sleep_fn=lambda _s: None)
 
 
 class MakeTranslateFnTest(unittest.TestCase):
@@ -72,3 +74,48 @@ class MakeTranslateFnTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TransportRetryTest(unittest.TestCase):
+    """传输故障必须在这一层重试:上层三档阶梯只捕 ValueError,超时/非零退出会穿透中止整篇。"""
+
+    def test_transient_failure_is_retried_then_succeeds(self):
+        calls = {"n": 0}
+
+        def flaky(argv, **kw):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                return _Proc(rc=1, err="transient")
+            return _Proc(out="T\t译文")
+
+        out = ca.cursor_agent_call([{"role": "user", "content": "x"}],
+                                   runner=flaky, sleep_fn=lambda _s: None)
+        self.assertEqual("T\t译文", out)
+        self.assertEqual(3, calls["n"])
+
+    def test_timeout_is_retried(self):
+        calls = {"n": 0}
+
+        def slow(argv, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise subprocess.TimeoutExpired(cmd="cursor-agent", timeout=1)
+            return _Proc(out="T\t译文")
+
+        self.assertEqual("T\t译文", ca.cursor_agent_call([{"role": "user", "content": "x"}],
+                                                        runner=slow, sleep_fn=lambda _s: None))
+
+    def test_backoff_is_exponential(self):
+        waits = []
+        ca.cursor_agent_call.__wrapped__ if hasattr(ca.cursor_agent_call, "__wrapped__") else None
+        calls = {"n": 0}
+
+        def always_bad(argv, **kw):
+            calls["n"] += 1
+            return _Proc(rc=1)
+
+        with self.assertRaises(RuntimeError):
+            ca.cursor_agent_call([{"role": "user", "content": "x"}], runner=always_bad,
+                                 retries=3, backoff=2.0, sleep_fn=waits.append)
+        self.assertEqual([2.0, 4.0, 8.0], waits)
+        self.assertEqual(4, calls["n"])

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from typing import Dict, List
 
 DEFAULT_MODEL = "cursor-grok-4.5-high"
@@ -32,13 +33,28 @@ def render_prompt(messages: List[Dict[str, str]]) -> str:
 
 
 def cursor_agent_call(messages: List[Dict[str, str]], model: str = DEFAULT_MODEL,
-                      *, timeout: float = 300, runner=subprocess.run) -> str:
-    """单次调用。非零退出或空输出都抛错,交给上层的重试阶梯处理。"""
-    proc = runner([*_BASE_ARGS, "--model", model, render_prompt(messages)],
-                  capture_output=True, text=True, timeout=timeout)
-    if proc.returncode != 0:
-        raise RuntimeError(f"cursor-agent 退出码 {proc.returncode}: {(proc.stderr or '')[:200]}")
-    out = (proc.stdout or "").strip()
-    if not out:
-        raise RuntimeError("cursor-agent 无输出")
-    return out
+                      *, timeout: float = 300, runner=subprocess.run,
+                      retries: int = 3, backoff: float = 3.0, sleep_fn=time.sleep) -> str:
+    """单次调用,带退避重试。
+
+    **传输故障必须在这一层重试**:上层 `_translate_segment` 的三档阶梯只处理"调用成功但输出不合格",
+    它的 try/except 只捕 ValueError;超时/非零退出/空输出会直接穿透上去中止整篇(Codex #194 复审)。
+    长篇逐段跑几百次 CLI,偶发一次瞬时故障不该让整篇作废。
+    """
+    argv = [*_BASE_ARGS, "--model", model, render_prompt(messages)]
+    last: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            proc = runner(argv, capture_output=True, text=True, timeout=timeout)
+            if proc.returncode != 0:
+                raise RuntimeError(f"cursor-agent 退出码 {proc.returncode}: {(proc.stderr or '')[:200]}")
+            out = (proc.stdout or "").strip()
+            if not out:
+                raise RuntimeError("cursor-agent 无输出")
+            return out
+        except (RuntimeError, subprocess.TimeoutExpired, OSError) as exc:
+            last = exc
+            if attempt == retries:
+                raise
+            sleep_fn(backoff * (2 ** attempt))
+    raise last  # 不可达(循环内已抛),保险

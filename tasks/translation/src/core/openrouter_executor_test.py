@@ -297,7 +297,7 @@ class CheckpointResumeTest(unittest.TestCase):
             seg0 = bundle["segments"][0]
             cp.write_text(f"0\t{seg0['source_text'][:12]}\t已译好的第一段\n", encoding="utf-8")
             # 真实的中途断点带 sidecar meta;没有 meta 的会被当成外来产物丢弃(见 CheckpointOwnershipTest)
-            ex._write_checkpoint_meta(cp, bundle, ex.DEFAULT_MODEL)
+            ex._write_checkpoint_meta(cp, ex._checkpoint_identity(bundle, ex.DEFAULT_MODEL, 'openrouter', False))
             result = ex.translate_bundle(bundle, counting, checkpoint_path=cp)
             self.assertEqual("已译好的第一段", result["candidates"][0]["text"])
             self.assertEqual(len(bundle["segments"]) - 1, len(calls))
@@ -456,7 +456,7 @@ class CheckpointOwnershipTest(unittest.TestCase):
             cp = _P(t) / "700001.zh.tsv"
             seg0 = bundle["segments"][0]
             cp.write_text(f"0\t{seg0['source_text'][:12]}\t中断前译好的\n", encoding="utf-8")
-            ex._write_checkpoint_meta(cp, bundle, ex.DEFAULT_MODEL)     # completed=False
+            ex._write_checkpoint_meta(cp, ex._checkpoint_identity(bundle, ex.DEFAULT_MODEL, 'openrouter', False))     # completed=False
             calls = []
 
             def counting(messages):
@@ -558,7 +558,7 @@ class CodexReviewFixesTest(unittest.TestCase):
             # 造一个"中断前已发现实体"的断点:首段译文 + names sidecar,meta 未完成
             cp.write_text(f"0\t{bundle['segments'][0]['source_text'][:12]}\t小雪来了。\n", encoding="utf-8")
             (_P(t) / "700001.names.tsv").write_text("ユキ\t小雪\n", encoding="utf-8")
-            ex._write_checkpoint_meta(cp, bundle, ex.DEFAULT_MODEL)
+            ex._write_checkpoint_meta(cp, ex._checkpoint_identity(bundle, ex.DEFAULT_MODEL, 'openrouter', False))
             result = ex.translate_bundle(bundle, self._ok, checkpoint_path=cp)
             ents = [f for f in result["findings"] if f["code"] == "entity_first_use"]
             self.assertTrue(any("ユキ" in f["message"] for f in ents),
@@ -613,3 +613,41 @@ class CodexSecondRoundFixesTest(unittest.TestCase):
             ex.translate_bundle(bundle, ok, checkpoint_path=cp)
             self.assertTrue(_P(f"{names}.stale").is_file())   # 旧名字表同批轮换,不会被追加污染
             self.assertNotIn("旧译名", names.read_text(encoding="utf-8") if names.is_file() else "")
+
+
+class CheckpointIdentityTest(unittest.TestCase):
+    """断点身份要含一切影响 prompt 的执行参数,否则 A/B 两臂共用目录会混进同一产物。"""
+
+    @staticmethod
+    def _ok(messages):
+        line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+        return f"T\t{TR[line.split('] ', 1)[1]]}"
+
+    def test_other_ab_arm_checkpoint_is_not_reused(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            seg0 = bundle["segments"][0]
+            cp.write_text(f"0\t{seg0['source_text'][:12]}\tA 臂的译文\n", encoding="utf-8")
+            # A 臂(不带上文译文)的未完成断点
+            ex._write_checkpoint_meta(cp, ex._checkpoint_identity(bundle, ex.DEFAULT_MODEL, "openrouter", False))
+            # B 臂(带上文译文)不该认它
+            result = ex.translate_bundle(bundle, self._ok, checkpoint_path=cp,
+                                         carry_previous_translation=True)
+            self.assertNotIn("A 臂的译文", [c["text"] for c in result["candidates"]])
+
+    def test_producer_change_invalidates_checkpoint(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            cp.write_text(f"0\t{bundle['segments'][0]['source_text'][:12]}\t别的执行器译的\n", encoding="utf-8")
+            ex._write_checkpoint_meta(cp, ex._checkpoint_identity(bundle, "m", "openrouter", False))
+            result = ex.translate_bundle(bundle, self._ok, checkpoint_path=cp, model="m",
+                                         producer_name="cursor-agent")
+            self.assertNotIn("别的执行器译的", [c["text"] for c in result["candidates"]])

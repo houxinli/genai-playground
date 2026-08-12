@@ -213,7 +213,18 @@ def _checkpoint_meta_path(path: Path) -> Path:
     return Path(f"{path}.meta.json")
 
 
-def _checkpoint_is_ours(path: Path, bundle: Dict[str, Any], model: str) -> bool:
+def _checkpoint_identity(bundle: Dict[str, Any], model: str, producer_name: str,
+                         carry_previous_translation: bool) -> Dict[str, Any]:
+    """断点身份 = 一切影响 prompt/产物的执行参数。
+
+    只比 task_digest+model 不够:A/B 两臂若共用 results 目录,前一臂的未完成断点会被后一臂
+    认作自己的,把半篇旧实验臂和半篇新实验臂混进同一产物,直接污染结论(Codex #194 复审)。
+    """
+    return {"task_digest": bundle.get("task_digest"), "model": model,
+            "producer": producer_name, "carry_prev_zh": bool(carry_previous_translation)}
+
+
+def _checkpoint_is_ours(path: Path, identity: Dict[str, Any]) -> bool:
     """断点是否属于**本次**翻译(同一 job、同一模型)。
 
     断点文件与最终产物同名同格式,所以「上一轮已完成的译文」和「本轮中途的断点」长得一模一样。
@@ -232,13 +243,13 @@ def _checkpoint_is_ours(path: Path, bundle: Dict[str, Any], model: str) -> bool:
         # 上一轮已成功跑完 → 这是**产物**不是断点。同源同模型重跑(改进 prompt 后重译正是这种)
         # 若当断点复用,会整篇跳过、旧译文原样重发且 published=1 看不出异常(Codex #194 P1)。
         return False
-    return meta.get("task_digest") == bundle.get("task_digest") and meta.get("model") == model
+    return all(meta.get(k) == v for k, v in identity.items())
 
 
-def _write_checkpoint_meta(path: Path, bundle: Dict[str, Any], model: str, *, completed: bool = False) -> None:
+def _write_checkpoint_meta(path: Path, identity: Dict[str, Any], *, completed: bool = False) -> None:
     _checkpoint_meta_path(path).write_text(
-        json.dumps({"task_digest": bundle.get("task_digest"), "model": model, "completed": completed},
-                   ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+        json.dumps({**identity, "completed": completed}, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8")
 
 
 def _load_checkpoint(path: Optional[Path], bundle: Dict[str, Any]) -> Dict[int, str]:
@@ -284,7 +295,8 @@ def translate_bundle(
     findings = []
     locked_targets = entity_harvest.context_targets(context_pack)
     document_targets: Dict[str, str] = {}
-    if checkpoint_path is not None and not _checkpoint_is_ours(Path(checkpoint_path), bundle, model):
+    identity = _checkpoint_identity(bundle, model, producer_name, carry_previous_translation)
+    if checkpoint_path is not None and not _checkpoint_is_ours(Path(checkpoint_path), identity):
         # 不是本轮的断点(上一轮完成品/换了模型/换了 job)→ 不复用,从头翻并接管这个文件。
         if Path(checkpoint_path).is_file():
             stale = Path(f"{checkpoint_path}.stale")
@@ -295,7 +307,7 @@ def translate_bundle(
         stale_names = _names_sidecar_path(Path(checkpoint_path))
         if stale_names.is_file():
             stale_names.replace(Path(f"{stale_names}.stale"))
-        _write_checkpoint_meta(Path(checkpoint_path), bundle, model)
+        _write_checkpoint_meta(Path(checkpoint_path), identity)
     done = _load_checkpoint(checkpoint_path, bundle)
     # finish_user 读的是 `<sid>.names.tsv`(translate_user.py),此前写成 `<sid>.zh.tsv.names.tsv`,
     # 于是人工改完 TSV 再 finish 时首次译名 findings 全部丢失(Codex #194 P2)。
@@ -389,7 +401,7 @@ def translate_bundle(
         if (index + 1) % 10 == 0 or index + 1 == len(bundle["segments"]):
             print(f"openrouter translated {index + 1}/{len(bundle['segments'])}", flush=True)
     if checkpoint_path is not None:
-        _write_checkpoint_meta(Path(checkpoint_path), bundle, model, completed=True)
+        _write_checkpoint_meta(Path(checkpoint_path), identity, completed=True)
     return {
         "schema_version": 1,
         "task_id": task["task_id"],
