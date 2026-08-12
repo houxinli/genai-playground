@@ -269,6 +269,7 @@ def translate_bundle(
     completed_at: Optional[str] = None,
     checkpoint_path: Optional[Path] = None,
     carry_previous_translation: bool = False,
+    producer_name: str = "openrouter",
 ) -> Dict[str, Any]:
     """逐段调 call_fn 翻译；本篇首次译名锁定并只把 canonical target 传给下一段。
 
@@ -289,6 +290,11 @@ def translate_bundle(
             stale = Path(f"{checkpoint_path}.stale")
             Path(checkpoint_path).replace(stale)
             print(f"openrouter: 断点不属于本轮(已移至 {stale.name}),从头翻译", flush=True)
+        # names sidecar 必须同批轮换:留着的话新一轮发现的实体会追加进旧表,
+        # 译名不同时 finish 的 parse_locked_names_tsv 会按 first-wins 拒绝,整篇组装不了。
+        stale_names = _names_sidecar_path(Path(checkpoint_path))
+        if stale_names.is_file():
+            stale_names.replace(Path(f"{stale_names}.stale"))
         _write_checkpoint_meta(Path(checkpoint_path), bundle, model)
     done = _load_checkpoint(checkpoint_path, bundle)
     # finish_user 读的是 `<sid>.names.tsv`(translate_user.py),此前写成 `<sid>.zh.tsv.names.tsv`,
@@ -388,7 +394,9 @@ def translate_bundle(
         "schema_version": 1,
         "task_id": task["task_id"],
         "task_digest": bundle["task_digest"],
-        "producer": {"type": "api", "name": "openrouter", "model": model},
+        # producer 要如实反映**实际执行器**:共用 translate_bundle 不代表都是 OpenRouter,
+        # 否则 cursor-agent 的候选会被归因给 OpenRouter,污染审计与成本统计(Codex #194 复审)。
+        "producer": {"type": "api", "name": producer_name, "model": model},
         "candidates": candidates,
         "findings": findings,
         "recommended_candidate_keys": [candidate_key],

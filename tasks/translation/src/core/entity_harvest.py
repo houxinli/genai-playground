@@ -46,7 +46,9 @@ def normalize_executor_response(response: str) -> str:
         if line.startswith("T\t") or line.startswith("E\t"):
             out.append(line)
             continue
-        if index == 0 and line.startswith("T "):
+        if line.startswith("T "):
+            # **任意行**都要归一化,不只首行:第二条 T 若停留在空格形态,就不匹配"多条 T"判据,
+            # 反而被折行循环拼进第一条译文(Codex #194 复审)。归一化后由下游统一拒绝。
             out.append("T\t" + line[2:])
             continue
         if line.startswith("E "):

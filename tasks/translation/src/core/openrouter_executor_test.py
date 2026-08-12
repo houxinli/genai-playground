@@ -563,3 +563,53 @@ class CodexReviewFixesTest(unittest.TestCase):
             ents = [f for f in result["findings"] if f["code"] == "entity_first_use"]
             self.assertTrue(any("ユキ" in f["message"] for f in ents),
                             "中断前发现的名字必须重建 finding,否则进不了 entity-review")
+
+
+class CodexSecondRoundFixesTest(unittest.TestCase):
+    def test_space_separated_second_t_is_rejected(self):
+        # normalize 只转首行时,第二条空格 T 会被折行循环拼进第一条译文(Codex 复审)
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        tries = {"n": 0}
+
+        def space_two_then_ok(messages):
+            src = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0].split("] ", 1)[1]
+            tries["n"] += 1
+            if tries["n"] == 1:
+                return f"T 上一段的译文\nT {TR[src]}"
+            return f"T\t{TR[src]}"
+
+        result = ex.translate_bundle(bundle, space_two_then_ok)
+        self.assertNotIn("上一段的译文", result["candidates"][0]["text"])
+        self.assertIn(TR["「おはよう」"], result["candidates"][0]["text"])
+
+    def test_producer_reflects_actual_executor(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+
+        def ok(messages):
+            line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+            return f"T\t{TR[line.split('] ', 1)[1]]}"
+
+        r = ex.translate_bundle(bundle, ok, model="cursor-grok-4.5-high", producer_name="cursor-agent")
+        self.assertEqual("cursor-agent", r["producer"]["name"])
+        self.assertEqual("openrouter", ex.translate_bundle(bundle, ok)["producer"]["name"])
+
+    def test_names_sidecar_rotates_with_stale_checkpoint(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            names = _P(t) / "700001.names.tsv"
+            cp.write_text("0\t上一轮\t上一轮译文\n", encoding="utf-8")     # 无 meta → 外来断点
+            names.write_text("ユキ\t旧译名\n", encoding="utf-8")
+
+            def ok(messages):
+                line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+                return f"T\t{TR[line.split('] ', 1)[1]]}"
+
+            ex.translate_bundle(bundle, ok, checkpoint_path=cp)
+            self.assertTrue(_P(f"{names}.stale").is_file())   # 旧名字表同批轮换,不会被追加污染
+            self.assertNotIn("旧译名", names.read_text(encoding="utf-8") if names.is_file() else "")
