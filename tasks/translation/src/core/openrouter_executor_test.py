@@ -758,3 +758,55 @@ class NamesCheckpointAtomicityTest(unittest.TestCase):
                     ex._atomic_write_text(names, "只写了一半")
             self.assertEqual(original, names.read_text(encoding="utf-8"))   # 原文件未被截断
             self.assertEqual([], list(_P(t).glob("*.tmp")))                 # 临时文件已清理
+
+
+class TenthRoundFixesTest(unittest.TestCase):
+    """Codex 第十轮:上文译文只在有上文时给、producer type 随执行器、坏断点要轮换。"""
+
+    @staticmethod
+    def _ok(messages):
+        line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+        return f"T\t{TR.get(line.split('] ', 1)[1], '译文')}"
+
+    def test_no_previous_translation_without_prev_source(self):
+        msgs = ex.build_messages({"segment_id": "x", "source_text": "犬がいた。"}, {},
+                                 previous_translation="metadata 的译文")
+        self.assertNotIn("上文译文", msgs[1]["content"])   # 没有 [上文] 就不给它的译文
+
+    def test_previous_text_tracks_body_only(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        bundle["segments"].insert(0, {"segment_id": "meta:0", "kind": "metadata.tags",
+                                      "source_text": "[R-18]"})
+        bundle["task"]["source_hashes"]["meta:0"] = "h0"
+        seen = []
+
+        def spy(messages):
+            seen.append(messages[1]["content"])
+            return self._ok(messages)
+
+        ex.translate_bundle(bundle, spy, carry_previous_translation=True)
+        self.assertFalse(any("[R-18]" in u or "上文译文] 译文" in u for u in seen[1:2]),
+                         "metadata 译文不该成为正文段的上文锚点")
+
+    def test_producer_type_follows_executor(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        r = ex.translate_bundle(bundle, self._ok, producer_name="cursor-agent", producer_type="harness")
+        self.assertEqual({"harness", "cursor-agent"}, {r["producer"]["type"], r["producer"]["name"]})
+        self.assertEqual("api", ex.translate_bundle(bundle, self._ok)["producer"]["type"])
+
+    def test_corrupt_checkpoint_is_rotated_not_appended(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            cp.write_text("0\t半行没写完", encoding="utf-8")      # 坏行:少一列
+            ex._write_checkpoint_meta(cp, ex._checkpoint_identity(bundle, ex.DEFAULT_MODEL, "openrouter", False))
+            ex.translate_bundle(bundle, self._ok, checkpoint_path=cp)
+            self.assertTrue(_P(f"{cp}.corrupt").is_file())         # 坏文件被轮换
+            self.assertNotIn("半行没写完", cp.read_text(encoding="utf-8"))
+            # 轮换后的新断点必须能再次解析(否则下次恢复仍在同一处失败)
+            self.assertIsNotNone(ex._load_checkpoint(cp, bundle))

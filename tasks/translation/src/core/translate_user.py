@@ -68,7 +68,7 @@ def _cursor_agent_fn(model: str = cursor_agent.DEFAULT_MODEL,
         bundle, lambda m: cursor_agent.cursor_agent_call(m, model), model=model,
         checkpoint_path=_checkpoint_path(checkpoint_dir, bundle),
         carry_previous_translation=carry_previous_translation,
-        producer_name="cursor-agent",
+        producer_name="cursor-agent", producer_type="harness",
     )
 
 

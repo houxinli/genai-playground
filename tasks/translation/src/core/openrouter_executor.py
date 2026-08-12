@@ -98,10 +98,11 @@ def build_messages(
     parts: List[str] = []
     if neighbors.get("prev") and neighbors_mode == "both":
         parts.append(f"[上文,仅供理解,勿翻译] {neighbors['prev']}")
-    if previous_translation and neighbors_mode == "both":
+    if previous_translation and neighbors.get("prev") and neighbors_mode == "both":
         # 跨段传递的此前只有译名映射,模型看不到自己译出的中文 → 文风/口吻/称谓逐段漂移。
-        # **必须紧跟 `[上文]` 之后**:与其源文相邻才构成一个「日→中」示范对;
-        # 悬在最前面时它是一句无来源的孤立中文,模型只当背景噪声(实测两条臂指标无差别)。
+        # **必须紧跟 `[上文]` 之后且仅在有上文时给**:与其源文相邻才构成一个「日→中」示范对。
+        # 没有对应 `[上文]` 却硬塞译文(首个 body 段会拿到 tags/title 的译文)只会变成孤立中文,
+        # 既不是风格锚点还可能诱发元数据窜入(Codex #194 复审)。
         # 措辞强调"已定稿、禁止复述",否则会重蹈邻段窜入——内联复检仍然兜底。
         parts.append(f"[上文译文,已定稿,只用于衔接语气与称谓,禁止复述或改写] {previous_translation}")
     parts.append(f"[翻译这一段] {segment['source_text']}")
@@ -286,8 +287,13 @@ def _write_checkpoint_meta(path: Path, identity: Dict[str, Any], *, completed: b
                        json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def _load_checkpoint(path: Optional[Path], bundle: Dict[str, Any]) -> Dict[int, str]:
-    """读断点 TSV(与产物同格式),返回 段序号→译文;src_echo 对不上就整份作废重译。"""
+def _load_checkpoint(path: Optional[Path], bundle: Dict[str, Any]) -> Optional[Dict[int, str]]:
+    """读断点 TSV(与产物同格式),返回 段序号→译文。
+
+    **解析失败返回 None**,与"合法的空断点"({} )区分开:半行/坏行时若仍保留原文件,
+    新译文会追加在坏内容之后,下次恢复又在同一坏行失败 → 长篇每次都从头重译,断点永远修不好
+    (Codex #194 复审)。调用方据此轮换掉坏文件。
+    """
     if path is None or not Path(path).is_file():
         return {}
     done: Dict[int, str] = {}
@@ -297,10 +303,10 @@ def _load_checkpoint(path: Optional[Path], bundle: Dict[str, Any]) -> Dict[int, 
             continue
         parts = line.split("\t", 2)
         if len(parts) != 3 or not parts[0].isdigit():
-            return {}
+            return None
         index = int(parts[0])
         if index >= len(segments) or not segments[index]["source_text"].startswith(parts[1]):
-            return {}  # 断点属于别的源/别的切分 → 不要拿来续,宁可重译
+            return None  # 断点属于别的源/别的切分/已损坏 → 不要拿来续
         done[index] = parts[2]
     return done
 
@@ -315,6 +321,7 @@ def translate_bundle(
     checkpoint_path: Optional[Path] = None,
     carry_previous_translation: bool = False,
     producer_name: str = "openrouter",
+    producer_type: str = "api",
 ) -> Dict[str, Any]:
     """逐段调 call_fn 翻译；本篇首次译名锁定并只把 canonical target 传给下一段。
 
@@ -343,6 +350,12 @@ def translate_bundle(
             stale_names.replace(Path(f"{stale_names}.stale"))
         _write_checkpoint_meta(Path(checkpoint_path), identity)
     done = _load_checkpoint(checkpoint_path, bundle)
+    if done is None:
+        # 坏断点:轮换掉再从头译,否则新行会追加在坏内容之后、下次恢复仍在同一处失败。
+        if checkpoint_path is not None and Path(checkpoint_path).is_file():
+            Path(checkpoint_path).replace(Path(f"{checkpoint_path}.corrupt"))
+            print(f"openrouter: 断点解析失败(已移至 .corrupt),从头翻译", flush=True)
+        done = {}
     # finish_user 读的是 `<sid>.names.tsv`(translate_user.py),此前写成 `<sid>.zh.tsv.names.tsv`,
     # 于是人工改完 TSV 再 finish 时首次译名 findings 全部丢失(Codex #194 P2)。
     names_path = _names_sidecar_path(Path(checkpoint_path)) if checkpoint_path is not None else None
@@ -393,7 +406,8 @@ def translate_bundle(
                 "source_hash": source_hashes[seg["segment_id"]],
                 "text": marker,
             })
-            previous_text = marker
+            if seg.get("kind") == "body":
+                previous_text = marker
             if checkpoint_path is not None:
                 with Path(checkpoint_path).open("a", encoding="utf-8") as fh:
                     fh.write(f"{index}\t{seg['source_text'][:12]}\t{marker}\n")
@@ -406,7 +420,8 @@ def translate_bundle(
                 "source_hash": source_hashes[seg["segment_id"]],
                 "text": text,
             })
-            previous_text = text
+            if seg.get("kind") == "body":
+                previous_text = text
             continue
         text, observations, seg_errors = _translate_segment(
             seg, context_pack, document_targets, previous_text, call_fn,
@@ -446,7 +461,9 @@ def translate_bundle(
                 name_segments[entity["source"]] = index
                 if checkpoint_path is not None:
                     _write_checkpoint_meta(Path(checkpoint_path), identity, names=name_segments)
-        previous_text = text
+        if seg.get("kind") == "body":
+            # 只跟踪 body:metadata(title/tags)的译文不是正文上文,拿它当锚点或做窜入比对都不对。
+            previous_text = text
         candidates.append({
             "result_candidate_key": candidate_key,
             "segment_id": seg["segment_id"],
@@ -466,7 +483,9 @@ def translate_bundle(
         "task_digest": bundle["task_digest"],
         # producer 要如实反映**实际执行器**:共用 translate_bundle 不代表都是 OpenRouter,
         # 否则 cursor-agent 的候选会被归因给 OpenRouter,污染审计与成本统计(Codex #194 复审)。
-        "producer": {"type": "api", "name": producer_name, "model": model},
+        # type 也要随执行器:result_import 只在 harness 类型下填 Attestation 的 harness 字段,
+        # 硬编码 api 会让 Cursor CLI 产物记成 API 调用且 harness=null(Codex #194 复审)。
+        "producer": {"type": producer_type, "name": producer_name, "model": model},
         "candidates": candidates,
         "findings": findings,
         "recommended_candidate_keys": [candidate_key],
