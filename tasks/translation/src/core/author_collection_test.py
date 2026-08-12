@@ -16,11 +16,15 @@ except ImportError:
 
 
 def _make_work(ws_root: Path, sid: str, *, title: str, rendered=True, provider="pixiv", creator="700000",
-               variants=("zh", "bilingual")):
-    """造一个已发布 work 的最小 workspace:ref + rendered。"""
+               variants=("zh", "bilingual"), annotate_version="av1"):
+    """造一个已发布 work 的最小 workspace:ref + rendered(+ study 时的 annotate ref)。"""
     refs = ws_root / f"{provider}-{sid}" / "store" / "refs" / provider / creator
     refs.mkdir(parents=True, exist_ok=True)
     (refs / f"{sid}.json").write_text('{"version_id":"v1"}', encoding="utf-8")
+    if "study" in variants and annotate_version:
+        aref = ws_root / f"{provider}-{sid}" / "store" / "refs-annotate" / provider / creator
+        aref.mkdir(parents=True, exist_ok=True)
+        (aref / f"{sid}.json").write_text(json.dumps({"version_id": annotate_version}), encoding="utf-8")
     if rendered:
         rd = ws_root / f"{provider}-{sid}" / "rendered"
         rd.mkdir(parents=True, exist_ok=True)
@@ -334,3 +338,38 @@ class StudyVariantTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StudyAnnotateFreshnessTest(unittest.TestCase):
+    """study 由「注解版本 + 当前翻译版本」渲染 → 只记翻译版本判不出新鲜度(Codex #194 P2)。"""
+
+    def test_manifest_records_annotate_version(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"; out = Path(t) / "coll"
+            _make_work(ws, "700001", title="一篇", variants=("zh", "study"))
+            ac.build_collection("作者N", "700000", variants=("zh", "study"), workspaces_root=ws, out_dir=out)
+            m = json.loads((out / "collection_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual("av1", m["documents"][0]["annotate_version_id"])
+
+    def test_annotate_version_change_requires_rebuild(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"; out = Path(t) / "coll"
+            _make_work(ws, "700001", title="一篇", variants=("zh", "study"))
+            ac.build_collection("作者O", "700000", variants=("zh", "study"), workspaces_root=ws, out_dir=out)
+            self.assertTrue(ac.verify_collection("700000", workspaces_root=ws, out_dir=out)["ok"])
+            # 注解推进了但 study.txt 没重渲染:旧判据全绿,新判据必须报
+            aref = ws / "pixiv-700001" / "store" / "refs-annotate" / "pixiv" / "700000" / "700001.json"
+            aref.write_text(json.dumps({"version_id": "av2"}), encoding="utf-8")
+            v = ac.verify_collection("700000", workspaces_root=ws, out_dir=out)
+            self.assertFalse(v["ok"])
+            self.assertIn("annotate 版本已变化", "\n".join(v["errors"]))
+
+    def test_missing_annotate_ref_refuses_partial_collection(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            _make_work(ws, "700001", title="有注解", variants=("zh", "study"))
+            _make_work(ws, "700002", title="没注解", variants=("zh", "study"), annotate_version=None)
+            with self.assertRaises(ValueError) as ctx:
+                ac.build_collection("作者P", "700000", variants=("zh", "study"),
+                                    workspaces_root=ws, out_dir=Path(t) / "coll")
+            self.assertIn("700002.annotate-ref", str(ctx.exception))

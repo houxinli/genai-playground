@@ -201,6 +201,34 @@ def _translate_segment(
     return best
 
 
+def _checkpoint_meta_path(path: Path) -> Path:
+    return Path(f"{path}.meta.json")
+
+
+def _checkpoint_is_ours(path: Path, bundle: Dict[str, Any], model: str) -> bool:
+    """断点是否属于**本次**翻译(同一 job、同一模型)。
+
+    断点文件与最终产物同名同格式,所以「上一轮已完成的译文」和「本轮中途的断点」长得一模一样。
+    只靠 src_echo 分不出来——源文没变时旧产物照样通过校验,于是整篇被跳过、旧译文原样重新发布,
+    而且 published=1 一切正常,从输出上完全看不出没翻(重译 pixiv 9425701 时实测踩到)。
+    因此额外要求 sidecar meta 里的 task_digest 与 model 都对得上;没有 meta 一律不复用。
+    """
+    meta_path = _checkpoint_meta_path(path)
+    if not meta_path.is_file():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return meta.get("task_digest") == bundle.get("task_digest") and meta.get("model") == model
+
+
+def _write_checkpoint_meta(path: Path, bundle: Dict[str, Any], model: str) -> None:
+    _checkpoint_meta_path(path).write_text(
+        json.dumps({"task_digest": bundle.get("task_digest"), "model": model},
+                   ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def _load_checkpoint(path: Optional[Path], bundle: Dict[str, Any]) -> Dict[int, str]:
     """读断点 TSV(与产物同格式),返回 段序号→译文;src_echo 对不上就整份作废重译。"""
     if path is None or not Path(path).is_file():
@@ -243,6 +271,13 @@ def translate_bundle(
     findings = []
     locked_targets = entity_harvest.context_targets(context_pack)
     document_targets: Dict[str, str] = {}
+    if checkpoint_path is not None and not _checkpoint_is_ours(Path(checkpoint_path), bundle, model):
+        # 不是本轮的断点(上一轮完成品/换了模型/换了 job)→ 不复用,从头翻并接管这个文件。
+        if Path(checkpoint_path).is_file():
+            stale = Path(f"{checkpoint_path}.stale")
+            Path(checkpoint_path).replace(stale)
+            print(f"openrouter: 断点不属于本轮(已移至 {stale.name}),从头翻译", flush=True)
+        _write_checkpoint_meta(Path(checkpoint_path), bundle, model)
     done = _load_checkpoint(checkpoint_path, bundle)
     names_path = Path(f"{checkpoint_path}.names.tsv") if checkpoint_path is not None else None
     if done and names_path is not None and names_path.is_file():

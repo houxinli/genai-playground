@@ -1599,6 +1599,17 @@ furigana **只施加在 bilingual** 上:study 的源文行已带注解,再叠注
 manifest 记 `variants`,`verify_collection` **以 manifest 为准**核对(旧 manifest 无字段→默认 zh+bilingual,向后兼容)——
 否则用非默认 variant 建的合集会被误报成缺 rendered/输出不完整。
 
+**study 合集核对注解通道版本(2026-08-12,Codex #194 review)**:study 是「注解版本 + 当前翻译版本」
+渲染出来的,只记翻译 version 判不出新鲜度——注解推进了但渲染失败、或残留旧 `study.txt`,
+都会把过期内容当成已发布输入交付。manifest 增记 `annotate_version_id`,verify 一并核对;
+缺 annotate current ref 与缺 rendered 同等对待,拒绝出部分合集。
+
+**断点归属校验(2026-08-12)**:断点文件与最终产物同名同格式,所以「上一轮完成品」和「本轮中途断点」
+长得一样,只靠 src_echo 分不出——重译时旧产物会通过校验、整篇被跳过、旧译文原样重新发布,
+而且 `published=1` 从输出上看不出没翻(重译 pixiv 9425701 时实测踩到)。
+断点旁写 sidecar `<tsv>.meta.json` 记 task_digest + model,两者都对得上才复用;
+不匹配的断点移到 `.stale` 保留并从头翻。
+
 **作者合集完整性/新鲜度闸门(2026-07-14)**:`author_collection` 构建前必须确认每个 current ref 同时有
 本次要发的各 variant 的 rendered；缺任一输入即失败并保留旧合集,不再输出“少几章但命令成功”的部分成品。新整本先在
 临时目录构建并自校验,成功后才替换目标目录；`collection_manifest.json` 记录 schema version、完整 source-id/

@@ -300,6 +300,8 @@ class CheckpointResumeTest(unittest.TestCase):
             cp = _P(t) / "700001.zh.tsv"
             seg0 = bundle["segments"][0]
             cp.write_text(f"0\t{seg0['source_text'][:12]}\t已译好的第一段\n", encoding="utf-8")
+            # 真实的中途断点带 sidecar meta;没有 meta 的会被当成外来产物丢弃(见 CheckpointOwnershipTest)
+            ex._write_checkpoint_meta(cp, bundle, ex.DEFAULT_MODEL)
             result = ex.translate_bundle(bundle, counting, checkpoint_path=cp)
             self.assertEqual("已译好的第一段", result["candidates"][0]["text"])
             self.assertEqual(len(bundle["segments"]) - 1, len(calls))
@@ -424,3 +426,58 @@ class HonorificLockTest(unittest.TestCase):
         # 冲突译名被纠正回首次译法,不会全篇两种称呼并存
         self.assertIn("前辈", result["candidates"][1]["text"])
         self.assertNotIn("学长", result["candidates"][1]["text"])
+
+
+class CheckpointOwnershipTest(unittest.TestCase):
+    """断点与最终产物同名同格式 → 必须能分辨「本轮中途」和「上一轮完成品」。"""
+
+    @staticmethod
+    def _ok_call(messages):
+        line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+        return f"T\t{TR[line.split('] ', 1)[1]]}"
+
+    def test_previous_run_output_is_not_reused(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            # 上一轮的完整产物:src_echo 全对得上,只靠内容分辨不出来
+            cp.write_text("".join(f"{i}\t{s['source_text'][:12]}\t六月的旧译文\n"
+                                  for i, s in enumerate(bundle["segments"])), encoding="utf-8")
+            result = ex.translate_bundle(bundle, self._ok_call, checkpoint_path=cp)
+            self.assertNotIn("六月的旧译文", [c["text"] for c in result["candidates"]])
+            self.assertTrue(_P(f"{cp}.stale").is_file())     # 旧产物被移开保留,不是删掉
+
+    def test_own_checkpoint_is_resumed(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            ex.translate_bundle(bundle, self._ok_call, checkpoint_path=cp)
+
+            def boom(_m):
+                raise AssertionError("本轮断点应当被复用,不该再调模型")
+
+            second = ex.translate_bundle(bundle, boom, checkpoint_path=cp)
+            self.assertEqual(len(bundle["segments"]), len(second["candidates"]))
+
+    def test_model_change_invalidates_checkpoint(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            ex.translate_bundle(bundle, self._ok_call, checkpoint_path=cp, model="model-a")
+            calls = []
+
+            def counting(messages):
+                calls.append(1)
+                return self._ok_call(messages)
+
+            ex.translate_bundle(bundle, counting, checkpoint_path=cp, model="model-b")
+            self.assertEqual(len(bundle["segments"]), len(calls))   # 换模型 → 全部重翻

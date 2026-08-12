@@ -947,6 +947,11 @@ def main() -> int:
         print(json.dumps(m if failed else m["summary"], ensure_ascii=False, indent=2 if failed else None))
         return 1 if failed else 0
 
+    # TSV 与它的原始 job 必须成对:只有 TSV 时 `MODE=finish` 组装不了(报"从 tsv 组装需要 jobs_dir"),
+    # 只有 job 时留下没有译文的孤儿。auto 入口在这里拦住,不把这种组合留到 finish 才炸。
+    if bool(args.results_dir) != bool(args.jobs_dir):
+        parser.error("mode=auto 的 --results-dir 与 --jobs-dir 必须同时提供:"
+                     "TSV 要靠同一次 prepare 的 job 才能重新组装发布")
     translate_fn = make_translate_fn(args.executor, args.model, checkpoint_dir=args.results_dir,
                                      carry_previous_translation=args.carry_prev_zh)
     manifest = translate_user(

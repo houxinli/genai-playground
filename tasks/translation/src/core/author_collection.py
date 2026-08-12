@@ -101,6 +101,17 @@ def _guard_out_dir(out_dir: Path, workspaces_root: Path) -> None:
                     f"out_dir 已存在且含非合集内容({entry.name}),拒绝清空: {out_dir}")
 
 
+def _annotate_version(workspace: Path, provider: str, creator_id: str, sid: str) -> Optional[str]:
+    """注解通道(refs-annotate)的 current version;没有注解版本时返回 None。"""
+    ref = Path(workspace) / "store" / "refs-annotate" / provider / creator_id / f"{sid}.json"
+    if not ref.is_file():
+        return None
+    try:
+        return json.loads(ref.read_text(encoding="utf-8")).get("version_id")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -206,6 +217,15 @@ def verify_collection(
             errors.append(
                 f"{sid} current version 已变化: {expected.get('version_id')} -> {current['version_id']}"
             )
+        if "study" in variants:
+            current_annotate = _annotate_version(current["workspace"], provider, creator_id, sid)
+            expected_annotate = expected.get("annotate_version_id")
+            if current_annotate is None:
+                errors.append(f"{sid} 缺 annotate current ref(study 合集需要)")
+            elif expected_annotate is None:
+                errors.append(f"{sid} 合集未记录 annotate 版本，需重建")
+            elif expected_annotate != current_annotate:
+                errors.append(f"{sid} annotate 版本已变化: {expected_annotate} -> {current_annotate}")
         expected_hashes = expected.get("rendered_sha256", {})
         for variant in variants:
             source = current["workspace"] / "rendered" / f"{sid}.{variant}.txt"
@@ -288,6 +308,10 @@ def build_collection(
             src = ws / "rendered" / f"{sid}.{var}.txt"
             if not src.is_file():
                 missing.append(f"{sid}.{var}")
+        # study 还要求注解通道有 current ref:没有就说明这篇根本没做过陪读,
+        # 与缺 rendered 同等对待,拒绝出部分合集(而不是让自校验在 staging 之后才炸)。
+        if "study" in variants and _annotate_version(ws, provider, creator_id, sid) is None:
+            missing.append(f"{sid}.annotate-ref")
     if missing:
         raise ValueError(f"{len(missing)} 个已发布 rendered 缺失，拒绝生成部分合集: {missing[:10]}")
 
@@ -298,16 +322,22 @@ def build_collection(
         manifest_documents: List[Dict[str, Any]] = []
         for sid, document in documents.items():
             ws = document["workspace"]
+            annotate_version = _annotate_version(ws, provider, creator_id, sid) if "study" in variants else None
             rendered_hashes: Dict[str, str] = {}
             for var in variants:
                 src = ws / "rendered" / f"{sid}.{var}.txt"
                 rendered_hashes[var] = _sha256_file(src)
                 shutil.copy(src, staging / f"{sid}.{var}.txt")
-            manifest_documents.append({
+            entry = {
                 "source_id": sid,
                 "version_id": document["version_id"],
                 "rendered_sha256": rendered_hashes,
-            })
+            }
+            if annotate_version is not None:
+                # study 是「注解版本 + 当前翻译版本」渲染出来的,只记翻译版本不足以判新鲜度:
+                # 注解推进了但渲染失败、或目录里残留旧 study.txt,都会把过期内容当成已发布输入交付。
+                entry["annotate_version_id"] = annotate_version
+            manifest_documents.append(entry)
         if furigana and "bilingual" in variants:
             # 只注 bilingual:study 的源文行已由注解线加过注解,再叠 furigana 会变成全文注音版
             # (annotation-guide 的硬边界),zh 是纯中文更不能注。
