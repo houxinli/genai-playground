@@ -356,3 +356,71 @@ class PassthroughMarkerTest(unittest.TestCase):
         self.assertEqual("[newpage]", result["candidates"][0]["text"])
         self.assertNotIn("[newpage]", calls)          # 没为它调过模型
         self.assertEqual(len(bundle["segments"]) - 1, len(calls))
+
+
+class CarryPreviousTranslationTest(unittest.TestCase):
+    """A/B 用:把上一段已定稿译文当风格锚点注入,默认关闭。"""
+
+    def test_off_by_default(self):
+        msgs = ex.build_messages({"segment_id": "x", "source_text": "犬がいた。"}, {})
+        self.assertNotIn("上文译文", msgs[1]["content"])
+
+    def test_previous_translation_is_labelled_and_ordered_before_source(self):
+        msgs = ex.build_messages(
+            {"segment_id": "x", "source_text": "犬がいた。"},
+            {"neighbors": {"x": {"prev": "「おはよう」"}}},
+            previous_translation="「早上好」",
+        )
+        u = msgs[1]["content"]
+        self.assertIn("[上文译文,已定稿", u)
+        self.assertIn("禁止复述", u)
+        # 必须夹在 `[上文]` 源文与本段之间:与其源文相邻才构成「日→中」示范对
+        self.assertLess(u.index("[上文,"), u.index("[上文译文,"))
+        self.assertLess(u.index("[上文译文,"), u.index("[翻译这一段]"))
+
+    def test_bundle_carries_previous_output_when_enabled(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        seen = []
+
+        def fake_call(messages):
+            seen.append(messages[1]["content"])
+            line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+            return f"T\t{TR[line.split('] ', 1)[1]]}"
+
+        ex.translate_bundle(bundle, fake_call, carry_previous_translation=True)
+        self.assertNotIn("上文译文", seen[0])          # 第一段没有上文
+        self.assertIn("上文译文", seen[1])             # 之后带上前一段的译文
+        self.assertIn("「早上好」", seen[1])
+
+
+class HonorificLockTest(unittest.TestCase):
+    """称谓(先輩/お兄さん)必须全篇唯一,和人名同等对待——此前被"不要报告普通名词"排除在锁外,
+    实测 pixiv 16321738 的「先輩」在同一篇里既译「前辈」又译「学长」。"""
+
+    def test_system_prompt_asks_for_honorifics(self):
+        system = ex.build_messages({"segment_id": "x", "source_text": "犬がいた。"}, {})[0]["content"]
+        self.assertIn("称谓", system)
+        self.assertIn("先輩", system)
+        self.assertIn("不指人的普通名词", system)   # 仍然排除物件/概念
+
+    def test_honorific_first_use_is_locked_and_reused(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        bundle["segments"][0]["source_text"] = "先輩が笑った。"
+        bundle["segments"][1]["source_text"] = "先輩はもう帰った。"
+        seen = []
+
+        def fake_call(messages):
+            seen.append(messages[0]["content"])
+            src = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+            if "笑った" in src:
+                return "T\t前辈笑了。\nE\t先輩\t前辈"
+            return "T\t学长已经回去了。\nE\t先輩\t学长"      # 第二段想改译法
+
+        result = ex.translate_bundle(bundle, fake_call)
+        # 第二段的 system prompt 里必须带着第一段锁定的译法
+        self.assertIn("先輩 => 前辈", seen[-1])
+        # 冲突译名被纠正回首次译法,不会全篇两种称呼并存
+        self.assertIn("前辈", result["candidates"][1]["text"])
+        self.assertNotIn("学长", result["candidates"][1]["text"])

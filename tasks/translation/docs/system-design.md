@@ -1616,6 +1616,21 @@ version-id 集合、逐篇 rendered digest、章节数和整本输出 digest。`
 `[上文]` 邻句一起译进本段(实测约半数段落),而整段并不相同,`duplicate_translation`/`block_paste` 全漏检;
 拿 27417304 的原始产物回放,内联复检拦下 81/213 段、finish QA 报 39 段,修好后分别降到 4 段和 1 段。
 
+**cursor-agent 执行器 + 逐段粒度(2026-08-11)**:`make_translate_fn` 增加 `cursor-agent` 分支,
+与 `openrouter` 并列共用同一个 `translate_bundle`——逐段 prompt、T/E 协议、退档重试、断点续跑全部复用,
+新增的 `cursor_agent.py` 只是传输层(`cursor-agent -p --trust --model ...`)。动机是计费:Cursor 会员额度内免费。
+无头调用必须显式 `--trust`,否则卡在 workspace trust 交互提示上。
+
+**粒度是译文忠实度的主导变量**:同模型同 prompt,agent 路线按 3000–5000 字符批量翻 → 字数比 0.41–0.48(系统性缩写,
+语气词/终助词被砍);改成逐段(batch=1)→ 0.72。实测 pixiv 9425701 六月那批 111 篇有 67 篇(60%)欠译。
+据此:①skill 的批量指导改为 800–1200 字符;②`document_qa` 增加 `undertranslation`(整篇字数比 < 0.55,warning);
+③`E` 行报告范围从"人名或专名"扩到**含称谓**(先輩/お兄さん 这类)——逐段翻译每段是独立起点,
+称谓此前不入译名锁,实测同一篇里「先輩」既译「前辈」又译「学长」;扩范围后 46 段全部统一,漂移归零。
+
+**`--carry-prev-zh`(默认关)**:把上一段已定稿译文注入 prompt 作风格锚点,位置必须紧跟 `[上文]` 源文之后
+(与其源文相邻才构成「日→中」示范对;悬在最前面时模型只当孤立背景)。A/B 实测字数比/窜入/一致性均无差别,
+所以不作默认;跨段一致性靠译名锁解决,不靠它。
+
 **API 路线也落 zh.tsv(2026-07-28)**:`translate_user(results_dir=...)` 让自动路线与 agent 路线产出**同一个**
 `<sid>.zh.tsv`。此前自动路线只往 store 发布,workspace 没有可读可改的译文产物,review/fill 无处下手,
 改一段得写临时脚本从 store 反推 candidate。统一后 `MODE=finish RESULTS_DIR=...` 对两条路线都成立。

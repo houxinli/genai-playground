@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 _NORMALIZE_RE = re.compile(r"\s+")
 _CONTEXT_MARKER_RE = re.compile(r"\[(?:上文|下文|翻译这一段|tags|原词\s*/\s*中文)\]", re.IGNORECASE)
@@ -16,6 +16,14 @@ _CONTEXT_MARKER_RE = re.compile(r"\[(?:上文|下文|翻译这一段|tags|原词
 # REPORT 档给 finish QA 用——要进 findings 给人看,必须窄,否则连续拟声词/承接省略句会刷屏。
 NEIGHBOR_OVERLAP_EXECUTOR = 0.35
 NEIGHBOR_OVERLAP_REPORT = 0.55
+
+# 欠译:逐段都"翻了",但系统性缩写——语气词、终助词、口吻被砍掉,只剩骨架。
+# 日译中的正常字数比在 0.6–0.9;整篇均值低于此线说明执行器在压缩,而不是这篇本来就简洁。
+# 这类问题不会触发 same_as_source / kana_residue / neighbor_overlap 中的任何一条,
+# 实测 pixiv 9425701 六月那批(整批 0.41–0.48)因此一段都没报警。
+UNDERTRANSLATION_RATIO = 0.55
+# 整篇均值才有统计意义:单段短译可能只是原文短。低于这个段数不判。
+UNDERTRANSLATION_MIN_SEGMENTS = 30
 
 
 def _norm(text: str) -> str:
@@ -81,6 +89,33 @@ def _neighbor_overlap_findings(
     }]
 
 
+def translation_length_ratio(segments: Sequence[Dict[str, Any]], translations_by_segment: Dict[str, str]) -> Optional[float]:
+    """整篇 body 段的 译文字数/源文字数。段数不足以判断时返回 None。"""
+    body = [s for s in segments
+            if s.get("kind") == "body" and translations_by_segment.get(s["segment_id"], "").strip()]
+    if len(body) < UNDERTRANSLATION_MIN_SEGMENTS:
+        return None
+    source = sum(len(_norm(s["source_text"])) for s in body)
+    target = sum(len(_norm(translations_by_segment[s["segment_id"]])) for s in body)
+    return target / source if source else None
+
+
+def _undertranslation_findings(
+    segments: Sequence[Dict[str, Any]], translations_by_segment: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    ratio = translation_length_ratio(segments, translations_by_segment)
+    if ratio is None or ratio >= UNDERTRANSLATION_RATIO:
+        return []
+    return [{
+        "code": "undertranslation",
+        "severity": "warning",
+        "message": (f"整篇译文/源文字数比 {ratio:.2f} 低于 {UNDERTRANSLATION_RATIO}"
+                    "，疑似系统性缩写(语气词/终助词被砍)"),
+        "segments": [],
+        "indices": [],
+    }]
+
+
 def audit_document_translations(
     segments: Sequence[Dict[str, Any]], translations_by_segment: Dict[str, str], *, min_run: int = 3
 ) -> List[Dict[str, Any]]:
@@ -90,7 +125,8 @@ def audit_document_translations(
     duplicate_findings = _duplicate_translation_findings(ordered, translations_by_segment)
     block_findings = _block_paste_findings(ordered, translations_by_segment, min_run=min_run)
     neighbor_findings = _neighbor_overlap_findings(ordered, translations_by_segment)
-    return shape_findings + duplicate_findings + block_findings + neighbor_findings
+    under_findings = _undertranslation_findings(ordered, translations_by_segment)
+    return shape_findings + duplicate_findings + block_findings + neighbor_findings + under_findings
 
 
 def translation_shape_errors(text: str) -> List[str]:

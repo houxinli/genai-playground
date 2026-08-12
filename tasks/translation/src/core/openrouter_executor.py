@@ -41,10 +41,13 @@ _SYSTEM_BASE = (
     "译文必须只有一个物理行,禁止换行。译文不得残留日文假名。"
     "tags 段译成 `原词 / 中文` 并保留 `[]` 与逗号。"
     "严格使用简单行协议:第一行是 `T` + ASCII 制表符(TAB,U+0009) + 中文译文;"
-    "之后把本段实际使用的每个人名或专名各写一行"
+    "之后把本段实际使用的每个人名、专名**或称谓**各写一行"
     " `E` + TAB + 日文原写法 + TAB + 本段实际中文译名;"
-    "分隔符必须是 TAB,禁止用空格代替。没有人名就只写 T 行。不要报告普通名词,"
-    "也不要报告本段源文或译文中没有实际出现的名字。"
+    "分隔符必须是 TAB,禁止用空格代替。没有可报告的就只写 T 行。"
+    "**称谓指用来称呼人的词**(先輩/後輩/お兄さん/お姉ちゃん/センセイ/ママ 这类),"
+    "它们和人名一样必须全篇唯一,所以要报告;"
+    "不指人的普通名词(物件、身体部位、概念)不要报告,"
+    "也不要报告本段源文或译文中没有实际出现的词。"
 )
 
 
@@ -76,6 +79,7 @@ def build_messages(
     document_targets: Optional[Dict[str, str]] = None,
     *,
     neighbors_mode: str = "both",
+    previous_translation: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     """单段 → chat messages。注入硬约束 + 邻句上下文(邻句只供参考,不翻译/不输出)。
 
@@ -93,6 +97,12 @@ def build_messages(
     parts: List[str] = []
     if neighbors.get("prev") and neighbors_mode == "both":
         parts.append(f"[上文,仅供理解,勿翻译] {neighbors['prev']}")
+    if previous_translation and neighbors_mode == "both":
+        # 跨段传递的此前只有译名映射,模型看不到自己译出的中文 → 文风/口吻/称谓逐段漂移。
+        # **必须紧跟 `[上文]` 之后**:与其源文相邻才构成一个「日→中」示范对;
+        # 悬在最前面时它是一句无来源的孤立中文,模型只当背景噪声(实测两条臂指标无差别)。
+        # 措辞强调"已定稿、禁止复述",否则会重蹈邻段窜入——内联复检仍然兜底。
+        parts.append(f"[上文译文,已定稿,只用于衔接语气与称谓,禁止复述或改写] {previous_translation}")
     parts.append(f"[翻译这一段] {segment['source_text']}")
     if neighbors.get("next") and neighbors_mode in ("both", "next"):
         parts.append(f"[下文,仅供理解,勿翻译] {neighbors['next']}")
@@ -146,6 +156,8 @@ def _translate_segment(
     document_targets: Dict[str, str],
     previous_text: str,
     call_fn: Callable[[List[Dict[str, str]]], str],
+    *,
+    carry_previous_translation: bool = False,
 ):
     """一段的三档重试:正常 → 带纠正指令重问 → 拿掉 `[上文]` 重问。返回 (译文, 观察, 剩余问题码)。
 
@@ -160,7 +172,10 @@ def _translate_segment(
     ]
     best: Optional[tuple] = None
     for neighbors_mode, correction in attempts:
-        messages = build_messages(seg, context_pack, document_targets, neighbors_mode=neighbors_mode)
+        messages = build_messages(
+            seg, context_pack, document_targets, neighbors_mode=neighbors_mode,
+            previous_translation=previous_text if carry_previous_translation else None,
+        )
         if correction is not None:
             messages = messages + [{"role": "user", "content": correction}]
         response = call_fn(messages)
@@ -213,6 +228,7 @@ def translate_bundle(
     candidate_key: str = "grok",
     completed_at: Optional[str] = None,
     checkpoint_path: Optional[Path] = None,
+    carry_previous_translation: bool = False,
 ) -> Dict[str, Any]:
     """逐段调 call_fn 翻译；本篇首次译名锁定并只把 canonical target 传给下一段。
 
@@ -263,7 +279,8 @@ def translate_bundle(
             previous_text = text
             continue
         text, observations, seg_errors = _translate_segment(
-            seg, context_pack, document_targets, previous_text, call_fn
+            seg, context_pack, document_targets, previous_text, call_fn,
+            carry_previous_translation=carry_previous_translation,
         )
         if seg_errors:
             # 退无可退:结构错(进不了 TSV)仍然中断整篇;质量错(邻段窜入/超长)照常发布并记 finding,

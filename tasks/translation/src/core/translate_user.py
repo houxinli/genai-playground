@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 try:
-    from . import annotate_eval, candidate_eval, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
+    from . import annotate_eval, candidate_eval, cursor_agent, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from .artifact_store import ArtifactStore
     from .pipeline_ingest import merge_author
     from .renderer import render_bilingual, render_zh
@@ -26,7 +26,7 @@ try:
     from .task_export import export_job, ingest_revision, resolve_entities_for_revision
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core import annotate_eval, candidate_eval, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
+    from core import annotate_eval, candidate_eval, cursor_agent, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from core.artifact_store import ArtifactStore
     from core.pipeline_ingest import merge_author
     from core.renderer import render_bilingual, render_zh
@@ -55,12 +55,30 @@ def _openrouter_fn(model: str = ox.DEFAULT_MODEL, checkpoint_dir: Optional[Path]
     )
 
 
+def _cursor_agent_fn(model: str = cursor_agent.DEFAULT_MODEL,
+                     checkpoint_dir: Optional[Path] = None,
+                     carry_previous_translation: bool = False) -> TranslateFn:
+    """与 _openrouter_fn 唯一的差别是传输层:同一个 translate_bundle、同一套逐段 prompt 与重试阶梯。
+
+    Cursor 会员额度内免费,所以长篇重译优先走这条;OpenRouter 那条留作额度耗尽时的兜底。
+    """
+    return lambda bundle: ox.translate_bundle(
+        bundle, lambda m: cursor_agent.cursor_agent_call(m, model), model=model,
+        checkpoint_path=_checkpoint_path(checkpoint_dir, bundle),
+        carry_previous_translation=carry_previous_translation,
+    )
+
+
 def make_translate_fn(executor: str, model: Optional[str] = None,
-                      checkpoint_dir: Optional[Path] = None) -> TranslateFn:
-    """executor 名 → translate_fn(bundle)->result。自动路线在此实现;agent 路线(cursor/claude)
-    不在此(由 skill 薄壳调 prepare/finish 自己翻),CLI 不接受。"""
+                      checkpoint_dir: Optional[Path] = None,
+                      carry_previous_translation: bool = False) -> TranslateFn:
+    """executor 名 → translate_fn(bundle)->result。IDE 里人工驱动的 agent 路线不在此
+    (由 skill 薄壳调 prepare/finish 自己翻);cursor-agent 是它的无头 CLI 形态,可自动编排。"""
     if executor == "openrouter":
         return _openrouter_fn(model or ox.DEFAULT_MODEL, checkpoint_dir)
+    if executor == "cursor-agent":
+        return _cursor_agent_fn(model or cursor_agent.DEFAULT_MODEL, checkpoint_dir,
+                                carry_previous_translation)
     raise ValueError(f"未知/不可自动执行的 executor: {executor!r}(cursor/claude 走 skill 薄壳)")
 
 
@@ -866,7 +884,9 @@ def main() -> int:
                         help="本篇首次译名提案的 review 队列根目录(auto/finish 共用)")
     parser.add_argument("--results-dir", type=Path, default=None, help="mode=finish 的 agent result 目录")
     parser.add_argument("--bilingual-dir", type=Path, default=None, help="可选:已有 legacy 译文作 incumbent")
-    parser.add_argument("--executor", default="openrouter", help="mode=auto 的执行器(openrouter)")
+    parser.add_argument("--executor", default="openrouter", help="mode=auto 的执行器(openrouter/cursor-agent)")
+    parser.add_argument("--carry-prev-zh", action="store_true",
+                        help="把上一段已定稿译文也注入 prompt(风格锚点;A/B 验证中)")
     parser.add_argument("--producer", default=None, help="mode=finish 从 TSV 组装 result 时记录的 producer 名")
     parser.add_argument("--model", default=None)
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 篇(控成本)")
@@ -927,7 +947,8 @@ def main() -> int:
         print(json.dumps(m if failed else m["summary"], ensure_ascii=False, indent=2 if failed else None))
         return 1 if failed else 0
 
-    translate_fn = make_translate_fn(args.executor, args.model, checkpoint_dir=args.results_dir)
+    translate_fn = make_translate_fn(args.executor, args.model, checkpoint_dir=args.results_dir,
+                                     carry_previous_translation=args.carry_prev_zh)
     manifest = translate_user(
         args.provider, args.source_dir, args.store, args.render_dir, translate_fn,
         bilingual_dir=args.bilingual_dir, entity_store=args.entity_store,

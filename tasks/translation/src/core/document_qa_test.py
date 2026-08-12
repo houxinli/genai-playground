@@ -57,3 +57,39 @@ class DocumentQATest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UndertranslationTest(unittest.TestCase):
+    """系统性缩写:每段都翻了、没有假名/照抄/窜入,但整篇被砍掉一半——现有判据全部漏检。"""
+
+    @staticmethod
+    def _doc(ratio: float, n: int = 40):
+        segs, tr = [], {}
+        for i in range(n):
+            sid = f"rev:{i:06d}:x"
+            src = "友達とLINEしてただけよ、そんなに楽しそうに見えたの？"
+            segs.append({"segment_id": sid, "kind": "body", "source_text": src})
+            tr[sid] = "译" * max(1, int(len(src) * ratio))
+        return segs, tr
+
+    def test_flags_systematic_compression(self):
+        segs, tr = self._doc(0.45)
+        codes = [f["code"] for f in document_qa.audit_document_translations(segs, tr)]
+        self.assertIn("undertranslation", codes)
+        self.assertNotIn("same_as_source", codes)   # 旧判据确实抓不到
+
+    def test_normal_ratio_is_clean(self):
+        segs, tr = self._doc(0.72)
+        self.assertEqual([], [f for f in document_qa.audit_document_translations(segs, tr)
+                              if f["code"] == "undertranslation"])
+
+    def test_short_document_is_not_judged(self):
+        segs, tr = self._doc(0.30, n=5)     # 段数太少,均值没有统计意义
+        self.assertIsNone(document_qa.translation_length_ratio(segs, tr))
+        self.assertEqual([], [f for f in document_qa.audit_document_translations(segs, tr)
+                              if f["code"] == "undertranslation"])
+
+    def test_severity_is_warning_not_blocking(self):
+        segs, tr = self._doc(0.30)
+        f = [x for x in document_qa.audit_document_translations(segs, tr) if x["code"] == "undertranslation"][0]
+        self.assertEqual("warning", f["severity"])   # 质量问题不阻断发布
