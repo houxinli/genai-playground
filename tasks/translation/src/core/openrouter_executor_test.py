@@ -558,7 +558,9 @@ class CodexReviewFixesTest(unittest.TestCase):
             # 造一个"中断前已发现实体"的断点:首段译文 + names sidecar,meta 未完成
             cp.write_text(f"0\t{bundle['segments'][0]['source_text'][:12]}\t小雪来了。\n", encoding="utf-8")
             (_P(t) / "700001.names.tsv").write_text("ユキ\t小雪\n", encoding="utf-8")
-            ex._write_checkpoint_meta(cp, ex._checkpoint_identity(bundle, ex.DEFAULT_MODEL, 'openrouter', False))
+            # 名字与它所属的段号一起持久化(段 0 已落盘)
+            ex._write_checkpoint_meta(cp, ex._checkpoint_identity(bundle, ex.DEFAULT_MODEL, 'openrouter', False),
+                                      names={"ユキ": 0})
             result = ex.translate_bundle(bundle, self._ok, checkpoint_path=cp)
             ents = [f for f in result["findings"] if f["code"] == "entity_first_use"]
             self.assertTrue(any("ユキ" in f["message"] for f in ents),
@@ -651,3 +653,32 @@ class CheckpointIdentityTest(unittest.TestCase):
             result = ex.translate_bundle(bundle, self._ok, checkpoint_path=cp, model="m",
                                          producer_name="cursor-agent")
             self.assertNotIn("别的执行器译的", [c["text"] for c in result["candidates"]])
+
+
+class NamesCheckpointAtomicityTest(unittest.TestCase):
+    """名字表与段断点不是同一次写入 → 中间崩溃时不能把"孤儿名字"当已锁定(Codex #194 复审)。"""
+
+    @staticmethod
+    def _with_entity(messages):
+        src = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0].split("] ", 1)[1]
+        if "ユキ" in src:
+            return "T\t小雪来了。\nE\tユキ\t小雪"
+        return f"T\t{TR[src]}"
+
+    def test_orphan_name_is_not_preloaded_so_entity_is_rediscovered(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        bundle["segments"][0]["source_text"] = "ユキが来た。"
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            # 崩在"写完名字表"与"写段断点"之间:名字在表里,段 0 却没落盘
+            cp.write_text("", encoding="utf-8")
+            (_P(t) / "700001.names.tsv").write_text("ユキ\t小雪\n", encoding="utf-8")
+            ex._write_checkpoint_meta(cp, ex._checkpoint_identity(bundle, ex.DEFAULT_MODEL, "openrouter", False),
+                                      names={"ユキ": 0})
+            result = ex.translate_bundle(bundle, self._with_entity, checkpoint_path=cp)
+            ents = [f for f in result["findings"] if f["code"] == "entity_first_use"]
+            self.assertTrue(any("ユキ" in f["message"] for f in ents),
+                            "段未落盘时名字必须重新被发现,否则永久缺席 entity-review")

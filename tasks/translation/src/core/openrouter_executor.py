@@ -224,6 +224,17 @@ def _checkpoint_identity(bundle: Dict[str, Any], model: str, producer_name: str,
             "producer": producer_name, "carry_prev_zh": bool(carry_previous_translation)}
 
 
+def _read_checkpoint_names(path: Path) -> Dict[str, int]:
+    """meta 里记录的 首次译名 → 所属段号。"""
+    meta_path = _checkpoint_meta_path(path)
+    if not meta_path.is_file():
+        return {}
+    try:
+        return {k: int(v) for k, v in (json.loads(meta_path.read_text(encoding="utf-8")).get("names") or {}).items()}
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return {}
+
+
 def _checkpoint_is_ours(path: Path, identity: Dict[str, Any]) -> bool:
     """断点是否属于**本次**翻译(同一 job、同一模型)。
 
@@ -246,10 +257,13 @@ def _checkpoint_is_ours(path: Path, identity: Dict[str, Any]) -> bool:
     return all(meta.get(k) == v for k, v in identity.items())
 
 
-def _write_checkpoint_meta(path: Path, identity: Dict[str, Any], *, completed: bool = False) -> None:
+def _write_checkpoint_meta(path: Path, identity: Dict[str, Any], *, completed: bool = False,
+                           names: Optional[Dict[str, int]] = None) -> None:
+    payload: Dict[str, Any] = {**identity, "completed": completed}
+    if names:
+        payload["names"] = names
     _checkpoint_meta_path(path).write_text(
-        json.dumps({**identity, "completed": completed}, ensure_ascii=False, sort_keys=True) + "\n",
-        encoding="utf-8")
+        json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _load_checkpoint(path: Optional[Path], bundle: Dict[str, Any]) -> Dict[int, str]:
@@ -312,12 +326,21 @@ def translate_bundle(
     # finish_user 读的是 `<sid>.names.tsv`(translate_user.py),此前写成 `<sid>.zh.tsv.names.tsv`,
     # 于是人工改完 TSV 再 finish 时首次译名 findings 全部丢失(Codex #194 P2)。
     names_path = _names_sidecar_path(Path(checkpoint_path)) if checkpoint_path is not None else None
+    name_segments = _read_checkpoint_names(Path(checkpoint_path)) if checkpoint_path is not None else {}
     if done and names_path is not None and names_path.is_file():
         for line in names_path.read_text(encoding="utf-8").splitlines():
             source, _, target = line.partition("\t")
-            if source and target:
-                document_targets[source] = target
-                locked_targets.setdefault(source, target)
+            if not source or not target:
+                continue
+            # **只预载所属段已落盘的名字**:若进程在"写名字表"与"写段断点"之间中断,
+            # 这条名字对应的段并不在 done 里。预载会把它当成已锁定 → 重译该段时
+            # apply_observations 不再产生 first_use → 该实体永久缺席 entity_first_use
+            # 与 entity-review(Codex #194 复审)。段号未知的一律不预载,让它重新被发现。
+            index = name_segments.get(source)
+            if index is None or index not in done:
+                continue
+            document_targets[source] = target
+            locked_targets.setdefault(source, target)
     if done:
         print(f"openrouter resume: 复用断点 {len(done)}/{len(bundle['segments'])} 段", flush=True)
         # 只恢复 candidate 不够:中断前发现的首次译名若不重建 finding,就进不了 entity-review,
@@ -388,6 +411,9 @@ def translate_bundle(
             if names_path is not None:
                 with names_path.open("a", encoding="utf-8") as fh:
                     fh.write(f"{entity['source']}\t{entity['target']}\n")
+                name_segments[entity["source"]] = index
+                if checkpoint_path is not None:
+                    _write_checkpoint_meta(Path(checkpoint_path), identity, names=name_segments)
         previous_text = text
         candidates.append({
             "result_candidate_key": candidate_key,
@@ -401,7 +427,7 @@ def translate_bundle(
         if (index + 1) % 10 == 0 or index + 1 == len(bundle["segments"]):
             print(f"openrouter translated {index + 1}/{len(bundle['segments'])}", flush=True)
     if checkpoint_path is not None:
-        _write_checkpoint_meta(Path(checkpoint_path), identity, completed=True)
+        _write_checkpoint_meta(Path(checkpoint_path), identity, completed=True, names=name_segments)
     return {
         "schema_version": 1,
         "task_id": task["task_id"],
