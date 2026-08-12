@@ -98,6 +98,10 @@ def parse_executor_response(response: str) -> Tuple[str, List[Dict[str, str]]]:
     if "\t" in translation:
         raise ValueError("译文含 TAB,疑似整条 T/E 协议被塞进了同一物理行")
     for line_number, line in enumerate(lines[cursor:], cursor + 1):
+        if line.startswith("T\t"):
+            # 第二条 T = 模型把上文和本段各译了一条。此前只是"停止合并"再静默跳过,
+            # 结果发布的是**第一条**(上一段的译文)。必须显式拒绝,交给调用方走格式重写。
+            raise ValueError("响应含多条 T 记录,无法判断哪条是本段译文")
         if not line.startswith("E"):
             # 协议后的解释/空话忽略,避免小模型偶发尾注拖垮整篇。
             continue

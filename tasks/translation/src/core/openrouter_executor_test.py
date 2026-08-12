@@ -275,13 +275,9 @@ class CheckpointResumeTest(unittest.TestCase):
             first = ex.translate_bundle(bundle, ok_call, checkpoint_path=cp)
             rows = cp.read_text(encoding="utf-8").rstrip("\n").split("\n")
             self.assertEqual(len(bundle["segments"]), len(rows))
-
-            def boom(_messages):
-                raise AssertionError("续跑不应重新调用模型")
-
-            second = ex.translate_bundle(bundle, boom, checkpoint_path=cp)
-            self.assertEqual([c["text"] for c in first["candidates"]],
-                             [c["text"] for c in second["candidates"]])
+            # 跑完即产物:meta 记 completed,重跑不会把它当断点复用(Codex #194 P1)
+            import json as _json
+            self.assertTrue(_json.loads((cp.parent / f"{cp.name}.meta.json").read_text(encoding="utf-8"))["completed"])
 
     def test_partial_checkpoint_only_translates_remaining(self):
         import tempfile
@@ -450,20 +446,26 @@ class CheckpointOwnershipTest(unittest.TestCase):
             self.assertNotIn("六月的旧译文", [c["text"] for c in result["candidates"]])
             self.assertTrue(_P(f"{cp}.stale").is_file())     # 旧产物被移开保留,不是删掉
 
-    def test_own_checkpoint_is_resumed(self):
+    def test_interrupted_checkpoint_is_resumed(self):
+        """能续的是**中断**的断点(meta 无 completed),不是上一轮的完成品。"""
         import tempfile
         from pathlib import Path as _P
         rev = _rev()
         bundle = te.export_job(rev, _body_ids(rev))
         with tempfile.TemporaryDirectory() as t:
             cp = _P(t) / "700001.zh.tsv"
-            ex.translate_bundle(bundle, self._ok_call, checkpoint_path=cp)
+            seg0 = bundle["segments"][0]
+            cp.write_text(f"0\t{seg0['source_text'][:12]}\t中断前译好的\n", encoding="utf-8")
+            ex._write_checkpoint_meta(cp, bundle, ex.DEFAULT_MODEL)     # completed=False
+            calls = []
 
-            def boom(_m):
-                raise AssertionError("本轮断点应当被复用,不该再调模型")
+            def counting(messages):
+                calls.append(1)
+                return self._ok_call(messages)
 
-            second = ex.translate_bundle(bundle, boom, checkpoint_path=cp)
-            self.assertEqual(len(bundle["segments"]), len(second["candidates"]))
+            result = ex.translate_bundle(bundle, counting, checkpoint_path=cp)
+            self.assertEqual("中断前译好的", result["candidates"][0]["text"])
+            self.assertEqual(len(bundle["segments"]) - 1, len(calls))
 
     def test_model_change_invalidates_checkpoint(self):
         import tempfile
@@ -481,3 +483,83 @@ class CheckpointOwnershipTest(unittest.TestCase):
 
             ex.translate_bundle(bundle, counting, checkpoint_path=cp, model="model-b")
             self.assertEqual(len(bundle["segments"]), len(calls))   # 换模型 → 全部重翻
+
+
+class CodexReviewFixesTest(unittest.TestCase):
+    """Codex 对 #194 的复审:两条 P1 + 两条小 P2。"""
+
+    @staticmethod
+    def _ok(messages):
+        line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+        return f"T\t{TR[line.split('] ', 1)[1]]}"
+
+    def test_second_t_record_selects_correct_segment_after_rewrite(self):
+        # 旧测试只断言结果不含 `T\t`,没断言选中的是**本段**译文 → 回归没被覆盖(Codex 指出)
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        tries = {"n": 0}
+
+        def two_then_ok(messages):
+            src = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0].split("] ", 1)[1]
+            tries["n"] += 1
+            if tries["n"] == 1:
+                return f"T\t上一段的译文\nT\t{TR[src]}"     # 两条 T,首条是上一段
+            return f"T\t{TR[src]}"
+
+        result = ex.translate_bundle(bundle, two_then_ok)
+        self.assertNotIn("上一段的译文", [c["text"] for c in result["candidates"]])
+        self.assertIn(TR["「おはよう」"], result["candidates"][0]["text"])
+
+    def test_completed_output_is_not_reused_on_same_model_rerun(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            ex.translate_bundle(bundle, self._ok, checkpoint_path=cp, model="m")
+            calls = []
+
+            def counting(messages):
+                calls.append(1)
+                return self._ok(messages)
+
+            # 同源、同 job、同模型重跑(改进 prompt 后重译正是这种)必须真的重翻
+            ex.translate_bundle(bundle, counting, checkpoint_path=cp, model="m")
+            self.assertEqual(len(bundle["segments"]), len(calls))
+
+    def test_names_sidecar_uses_finish_filename(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        bundle["segments"][0]["source_text"] = "ユキが来た。"
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+
+            def with_entity(messages):
+                src = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0].split("] ", 1)[1]
+                if "ユキ" in src:
+                    return "T\t小雪来了。\nE\tユキ\t小雪"
+                return f"T\t{TR[src]}"
+
+            ex.translate_bundle(bundle, with_entity, checkpoint_path=cp)
+            self.assertTrue((_P(t) / "700001.names.tsv").is_file())      # finish_user 读的名字
+            self.assertFalse((_P(t) / "700001.zh.tsv.names.tsv").is_file())
+
+    def test_resumed_segments_rebuild_entity_findings(self):
+        import tempfile
+        from pathlib import Path as _P
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        bundle["segments"][0]["source_text"] = "ユキが来た。"
+        with tempfile.TemporaryDirectory() as t:
+            cp = _P(t) / "700001.zh.tsv"
+            # 造一个"中断前已发现实体"的断点:首段译文 + names sidecar,meta 未完成
+            cp.write_text(f"0\t{bundle['segments'][0]['source_text'][:12]}\t小雪来了。\n", encoding="utf-8")
+            (_P(t) / "700001.names.tsv").write_text("ユキ\t小雪\n", encoding="utf-8")
+            ex._write_checkpoint_meta(cp, bundle, ex.DEFAULT_MODEL)
+            result = ex.translate_bundle(bundle, self._ok, checkpoint_path=cp)
+            ents = [f for f in result["findings"] if f["code"] == "entity_first_use"]
+            self.assertTrue(any("ユキ" in f["message"] for f in ents),
+                            "中断前发现的名字必须重建 finding,否则进不了 entity-review")

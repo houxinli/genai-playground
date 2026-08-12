@@ -201,6 +201,14 @@ def _translate_segment(
     return best
 
 
+def _names_sidecar_path(checkpoint_path: Path) -> Path:
+    """`<sid>.zh.tsv` → `<sid>.names.tsv`(finish 认的名字);其它文件名则直接追加后缀。"""
+    name = checkpoint_path.name
+    if name.endswith(".zh.tsv"):
+        return checkpoint_path.with_name(name[: -len(".zh.tsv")] + ".names.tsv")
+    return Path(f"{checkpoint_path}.names.tsv")
+
+
 def _checkpoint_meta_path(path: Path) -> Path:
     return Path(f"{path}.meta.json")
 
@@ -220,12 +228,16 @@ def _checkpoint_is_ours(path: Path, bundle: Dict[str, Any], model: str) -> bool:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
+    if meta.get("completed"):
+        # 上一轮已成功跑完 → 这是**产物**不是断点。同源同模型重跑(改进 prompt 后重译正是这种)
+        # 若当断点复用,会整篇跳过、旧译文原样重发且 published=1 看不出异常(Codex #194 P1)。
+        return False
     return meta.get("task_digest") == bundle.get("task_digest") and meta.get("model") == model
 
 
-def _write_checkpoint_meta(path: Path, bundle: Dict[str, Any], model: str) -> None:
+def _write_checkpoint_meta(path: Path, bundle: Dict[str, Any], model: str, *, completed: bool = False) -> None:
     _checkpoint_meta_path(path).write_text(
-        json.dumps({"task_digest": bundle.get("task_digest"), "model": model},
+        json.dumps({"task_digest": bundle.get("task_digest"), "model": model, "completed": completed},
                    ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
 
 
@@ -279,7 +291,9 @@ def translate_bundle(
             print(f"openrouter: 断点不属于本轮(已移至 {stale.name}),从头翻译", flush=True)
         _write_checkpoint_meta(Path(checkpoint_path), bundle, model)
     done = _load_checkpoint(checkpoint_path, bundle)
-    names_path = Path(f"{checkpoint_path}.names.tsv") if checkpoint_path is not None else None
+    # finish_user 读的是 `<sid>.names.tsv`(translate_user.py),此前写成 `<sid>.zh.tsv.names.tsv`,
+    # 于是人工改完 TSV 再 finish 时首次译名 findings 全部丢失(Codex #194 P2)。
+    names_path = _names_sidecar_path(Path(checkpoint_path)) if checkpoint_path is not None else None
     if done and names_path is not None and names_path.is_file():
         for line in names_path.read_text(encoding="utf-8").splitlines():
             source, _, target = line.partition("\t")
@@ -288,6 +302,14 @@ def translate_bundle(
                 locked_targets.setdefault(source, target)
     if done:
         print(f"openrouter resume: 复用断点 {len(done)}/{len(bundle['segments'])} 段", flush=True)
+        # 只恢复 candidate 不够:中断前发现的首次译名若不重建 finding,就进不了 entity-review,
+        # 后续作品也拿不到这些实体约束(Codex #194 P2)。按 sidecar 里的译名回扫已恢复段,
+        # 归到它**实际首次出现**的那一段。
+        for source, target in document_targets.items():
+            for index, seg in enumerate(bundle["segments"]):
+                if index in done and source in seg["source_text"] and target in done[index]:
+                    findings.append(entity_harvest.entity_finding(source, target, seg["segment_id"], index + 1))
+                    break
     previous_text = ""
     for index, seg in enumerate(bundle["segments"]):
         marker = seg["source_text"].strip()
@@ -360,6 +382,8 @@ def translate_bundle(
                 fh.write(f"{index}\t{seg['source_text'][:12]}\t{text}\n")
         if (index + 1) % 10 == 0 or index + 1 == len(bundle["segments"]):
             print(f"openrouter translated {index + 1}/{len(bundle['segments'])}", flush=True)
+    if checkpoint_path is not None:
+        _write_checkpoint_meta(Path(checkpoint_path), bundle, model, completed=True)
     return {
         "schema_version": 1,
         "task_id": task["task_id"],

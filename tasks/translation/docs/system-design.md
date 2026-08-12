@@ -1604,6 +1604,13 @@ manifest 记 `variants`,`verify_collection` **以 manifest 为准**核对(旧 ma
 都会把过期内容当成已发布输入交付。manifest 增记 `annotate_version_id`,verify 一并核对;
 缺 annotate current ref 与缺 rendered 同等对待,拒绝出部分合集。
 
+**断点=中断态,产物=完成态(2026-08-12,Codex #194 复审)**:sidecar meta 记 `completed`。
+跑完即写 completed=true,此后同源同 job **同模型**重跑也不复用——改进 prompt 后重译正是这种,
+若当断点会整篇跳过、旧译文原样重发且 published=1 看不出异常。能续的只有 completed=false 的中断态。
+续跑时还要按 names sidecar 回扫已恢复段,重建 `entity_first_use` findings,
+否则中断前发现的名字进不了 entity-review。names sidecar 用 `<sid>.names.tsv`(finish 认的名字),
+不是 `<sid>.zh.tsv.names.tsv`。
+
 **断点归属校验(2026-08-12)**:断点文件与最终产物同名同格式,所以「上一轮完成品」和「本轮中途断点」
 长得一样,只靠 src_echo 分不出——重译时旧产物会通过校验、整篇被跳过、旧译文原样重新发布,
 而且 `published=1` 从输出上看不出没翻(重译 pixiv 9425701 时实测踩到)。
