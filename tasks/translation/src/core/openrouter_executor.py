@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -209,6 +210,25 @@ def _names_sidecar_path(checkpoint_path: Path) -> Path:
     return Path(f"{checkpoint_path}.names.tsv")
 
 
+def _atomic_write_text(path: Path, body: str) -> None:
+    """同目录临时文件 + fsync + rename。
+
+    修孤儿记录时用 write_text 会先截断原文件:崩在写回期间会只剩部分甚至零条名字,
+    而断点 TSV 与 meta 仍声称那些段已完成 → 续跑不重译、丢失的名字再也建不回来,
+    等于修复动作本身破坏了已提交记录(Codex #194 复审)。与 entity_review 的写法一致。
+    """
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(body)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
 def _checkpoint_meta_path(path: Path) -> Path:
     return Path(f"{path}.meta.json")
 
@@ -262,8 +282,8 @@ def _write_checkpoint_meta(path: Path, identity: Dict[str, Any], *, completed: b
     payload: Dict[str, Any] = {**identity, "completed": completed}
     if names:
         payload["names"] = names
-    _checkpoint_meta_path(path).write_text(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    _atomic_write_text(_checkpoint_meta_path(path),
+                       json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def _load_checkpoint(path: Optional[Path], bundle: Dict[str, Any]) -> Dict[int, str]:
@@ -350,7 +370,7 @@ def translate_bundle(
             kept.append(f"{source}\t{target}")
             document_targets[source] = target
             locked_targets.setdefault(source, target)
-        names_path.write_text("".join(f"{l}\n" for l in kept), encoding="utf-8")
+        _atomic_write_text(names_path, "".join(f"{l}\n" for l in kept))
         if checkpoint_path is not None:
             _write_checkpoint_meta(Path(checkpoint_path), identity, names=name_segments)
     if done:

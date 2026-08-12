@@ -744,3 +744,17 @@ class NamesCheckpointAtomicityTest(unittest.TestCase):
             body = names.read_text(encoding="utf-8")
             self.assertNotIn("旧孤儿译名", body)
             eh.parse_locked_names_tsv(body)                        # 不违反 first-wins
+
+    def test_names_cleanup_is_atomic(self):
+        """写回期间被杀不能留下截断的名字表:临时文件 + rename,原文件要么旧要么新。"""
+        import tempfile
+        from pathlib import Path as _P
+        with tempfile.TemporaryDirectory() as t:
+            names = _P(t) / "700001.names.tsv"
+            names.write_text("ユキ\t小雪\nマホ\t真秀\n", encoding="utf-8")
+            original = names.read_text(encoding="utf-8")
+            with unittest.mock.patch.object(ex.os, "replace", side_effect=RuntimeError("kill")):
+                with self.assertRaises(RuntimeError):
+                    ex._atomic_write_text(names, "只写了一半")
+            self.assertEqual(original, names.read_text(encoding="utf-8"))   # 原文件未被截断
+            self.assertEqual([], list(_P(t).glob("*.tmp")))                 # 临时文件已清理
