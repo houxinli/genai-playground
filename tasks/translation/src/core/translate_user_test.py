@@ -688,3 +688,17 @@ class AutoRouteArtifactsTest(unittest.TestCase):
             self.assertEqual(0, manifest["summary"]["quarantined"])
             self.assertEqual(1, manifest["summary"]["published"])
             self.assertIn("改过的译文", (tmp / "rendered" / "700001.zh.txt").read_text(encoding="utf-8"))
+
+
+class CarryPrevZhWiringTest(unittest.TestCase):
+    """--carry-prev-zh 若只接到 cursor-agent 分支,openrouter 的 A/B 两组会用完全相同的 prompt。"""
+
+    def test_openrouter_branch_receives_the_flag(self):
+        import os
+        from unittest.mock import patch
+        seen = {}
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "k"}):
+            with patch.object(tu.ox, "translate_bundle",
+                              side_effect=lambda b, c, **kw: seen.update(kw) or {"candidates": []}):
+                tu.make_translate_fn("openrouter", "m", carry_previous_translation=True)({"task": {}, "segments": []})
+        self.assertTrue(seen.get("carry_previous_translation"))

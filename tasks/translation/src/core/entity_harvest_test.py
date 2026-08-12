@@ -234,3 +234,16 @@ class TrailingAnnotationVariantsTest(unittest.TestCase):
         text, obs = eh.parse_executor_response(f"T\t{tags}")
         self.assertEqual(tags, text)
         self.assertEqual([], obs)
+
+
+class TrailingTagsNarrowingTest(unittest.TestCase):
+    """尾随 tags 判据必须窄:只认 `X / Y`(斜杠两侧有空格)这种 tags 渲染特征。"""
+
+    def test_legit_bracket_choice_is_kept(self):
+        for good in ("请选择[是/否]", "格式为[年/月/日]", "标注[A/B]测试"):
+            with self.subTest(good=good):
+                self.assertEqual(good, eh.parse_executor_response(f"T\t{good}")[0])
+
+    def test_tags_style_leak_is_still_stripped(self):
+        self.assertEqual("好想揉捏……♡）",
+                         eh.parse_executor_response("T\t好想揉捏……♡）[乳交 / 乳交]")[0])

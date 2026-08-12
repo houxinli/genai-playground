@@ -373,3 +373,30 @@ class StudyAnnotateFreshnessTest(unittest.TestCase):
                 ac.build_collection("作者P", "700000", variants=("zh", "study"),
                                     workspaces_root=ws, out_dir=Path(t) / "coll")
             self.assertIn("700002.annotate-ref", str(ctx.exception))
+
+
+class StudyWorkspaceSelectionTest(unittest.TestCase):
+    """同一篇存在于两个 workspace、rendered 打平时,应选有 annotate ref 的那个。"""
+
+    def test_workspace_with_annotate_ref_wins_tie(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws = Path(t) / "workspaces"
+            # 两个 workspace 都有 zh+study rendered,只有后者有 annotate ref
+            _make_work(ws, "700001", title="无注解", variants=("zh", "study"), annotate_version=None)
+            second = ws / "pixiv-alt"
+            (second / "store" / "refs" / "pixiv" / "700000").mkdir(parents=True)
+            (second / "store" / "refs" / "pixiv" / "700000" / "700001.json").write_text(
+                '{"version_id":"v1"}', encoding="utf-8")
+            aref = second / "store" / "refs-annotate" / "pixiv" / "700000"
+            aref.mkdir(parents=True)
+            (aref / "700001.json").write_text(json.dumps({"version_id": "av9"}), encoding="utf-8")
+            rd = second / "rendered"; rd.mkdir()
+            for var in ("zh", "study"):
+                (rd / f"700001.{var}.txt").write_text(
+                    f"---\nID: 700001\ntitle: 有注解\n---\n\n正文 {var}\n", encoding="utf-8")
+            out = Path(t) / "coll"
+            res = ac.build_collection("作者W", "700000", variants=("zh", "study"),
+                                      workspaces_root=ws, out_dir=out)
+            self.assertTrue(res["verification"]["ok"])
+            m = json.loads((out / "collection_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual("av9", m["documents"][0]["annotate_version_id"])

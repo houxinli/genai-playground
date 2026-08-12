@@ -143,14 +143,17 @@ def _published_documents(workspaces_root: Path, provider: str, creator_id: str,
         if previous is None:
             documents[sid] = candidate
             continue
-        previous_score = sum(
-            (previous["workspace"] / "rendered" / f"{sid}.{variant}.txt").is_file()
-            for variant in variants
-        )
-        candidate_score = sum(
-            (candidate["workspace"] / "rendered" / f"{sid}.{variant}.txt").is_file()
-            for variant in variants
-        )
+        def _score(entry: Dict[str, Any]) -> int:
+            score = sum((entry["workspace"] / "rendered" / f"{sid}.{variant}.txt").is_file()
+                        for variant in variants)
+            # study 还需要注解通道的 current ref:两个 workspace 的 rendered 数量打平时,
+            # 若先出现的那个没有 annotate ref,构建会报缺失,即便另一个副本的 study 输入是齐的。
+            if "study" in variants and _annotate_version(entry["workspace"], provider, creator_id, sid):
+                score += 1
+            return score
+
+        previous_score = _score(previous)
+        candidate_score = _score(candidate)
         if candidate_score > previous_score:
             documents[sid] = candidate
     return dict(sorted(

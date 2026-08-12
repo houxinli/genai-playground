@@ -32,8 +32,10 @@ _TRAILING_ENTITY_RE = re.compile(
 # `[E] なし`(模型报"本段没有实体")这类只有源名没有译名的残留,同样得从译文里摘掉。
 _TRAILING_EMPTY_ENTITY_RE = re.compile(r"\[?E\]?[ \t]+[^\s]*[ぁ-んァ-ヶ][^\s]*\s*$")
 # tags 段的 `原词 / 中文` 样式漏进正文段尾(实测 `……好想揉捏……♡）[乳交 / 乳交]`)。
-# 要求方括号前有非空白内容 → 整段就是括号列表的 tags 段本身不受影响。
-_TRAILING_TAGS_RE = re.compile(r"(?<=\S)\s*\[[^\[\]]+/[^\[\]]+\]\s*$")
+# 判据必须窄:**斜杠两侧要有空格**,这是 tags 渲染格式的特征。只要求"括号内含 /"会误伤
+# 合法译文,例如 `请选择[是/否]` 会被静默截成 `请选择`(Codex #194 复审)。
+# 另要求方括号前有非空白内容 → 整段就是括号列表的 tags 段本身不受影响。
+_TRAILING_TAGS_RE = re.compile(r"(?<=\S)\s*\[[^\[\]]+ / [^\[\]]+\]\s*$")
 
 
 def normalize_executor_response(response: str) -> str:

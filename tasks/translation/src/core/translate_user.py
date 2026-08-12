@@ -45,13 +45,15 @@ def _checkpoint_path(checkpoint_dir: Optional[Path], bundle: Dict[str, Any]) -> 
     return checkpoint_dir / f"{bundle['task']['document_id'].rsplit(':', 1)[-1]}.zh.tsv"
 
 
-def _openrouter_fn(model: str = ox.DEFAULT_MODEL, checkpoint_dir: Optional[Path] = None) -> TranslateFn:
+def _openrouter_fn(model: str = ox.DEFAULT_MODEL, checkpoint_dir: Optional[Path] = None,
+                   carry_previous_translation: bool = False) -> TranslateFn:
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         raise RuntimeError("executor=openrouter 需要环境变量 OPENROUTER_API_KEY")
     return lambda bundle: ox.translate_bundle(
         bundle, lambda m: ox.openrouter_call(m, model, key), model=model,
         checkpoint_path=_checkpoint_path(checkpoint_dir, bundle),
+        carry_previous_translation=carry_previous_translation,
     )
 
 
@@ -76,7 +78,7 @@ def make_translate_fn(executor: str, model: Optional[str] = None,
     """executor 名 → translate_fn(bundle)->result。IDE 里人工驱动的 agent 路线不在此
     (由 skill 薄壳调 prepare/finish 自己翻);cursor-agent 是它的无头 CLI 形态,可自动编排。"""
     if executor == "openrouter":
-        return _openrouter_fn(model or ox.DEFAULT_MODEL, checkpoint_dir)
+        return _openrouter_fn(model or ox.DEFAULT_MODEL, checkpoint_dir, carry_previous_translation)
     if executor == "cursor-agent":
         return _cursor_agent_fn(model or cursor_agent.DEFAULT_MODEL, checkpoint_dir,
                                 carry_previous_translation)
