@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -21,25 +22,106 @@ except ImportError:
 
 ENTITY_FINDING_CODE = "entity_first_use"
 
+# 尾随的 E 记录:模型把实体行续在 T 行末尾。实测过的写法(pixiv 9425701 那批):
+#   `……绝对。E ペニス 肉棒`  `……乳沟中。[E]ルーナ,露娜`  `……夹住。[E] なし`
+# 分隔符可能是空格/TAB/逗号,E 可能被方括号包起来,E 前可能连空格都没有。
+# 要求源名含假名才拆——合格译文本就不该有假名,既能认出漏出的 E 记录又不误伤正常中文句尾。
+# 源名可以全是汉字(`E 王都 王都`),所以不能只靠"含假名"作判据——那样这类记录会当正文发布。
+# 改为三选一的**明确 E 标记**证据:①方括号形态 `[E]`;②E 前是句末标点/空白;③源名含假名(兜底)。
+# 三者都要求 E 后跟分隔符 + 两个不含空格的短 token,且位于串尾。
+_TRAILING_ENTITY_RE = re.compile(
+    # 非 `[E]` 形态必须 **E 后至少一个分隔符**:允许零个会把 `请启动 Easy Mode` 里的
+    # `asy`/`Mode` 当成实体两列、正文被截成"请启动"(Codex #194 复审)。
+    r"(?:\[E\][ \t]*|(?<=[。！？!?…♡」』】\s])E[ \t]+|(?<=[^\s])E(?=[ \t]+[^\s,，]*[ぁ-んァ-ヶ])[ \t]+)"
+    r"([^\s,，]{1,24})[ \t,，]+([^\s,，]{1,24})\s*$"
+)
+# `[E] なし`(模型报"本段没有实体")这类只有源名没有译名的残留,同样得从译文里摘掉。
+_TRAILING_EMPTY_ENTITY_RE = re.compile(r"\[?E\]?[ \t]+[^\s]*[ぁ-んァ-ヶ][^\s]*\s*$")
+# tags 段的 `原词 / 中文` 样式漏进正文段尾(实测 `……好想揉捏……♡）[乳交 / 乳交]`)。
+# 判据必须窄:**斜杠两侧要有空格**,这是 tags 渲染格式的特征。只要求"括号内含 /"会误伤
+# 合法译文,例如 `请选择[是/否]` 会被静默截成 `请选择`(Codex #194 复审)。
+# 另要求方括号前有非空白内容 → 整段就是括号列表的 tags 段本身不受影响。
+_TRAILING_TAGS_RE = re.compile(r"(?<=\S)\s*\[[^\[\]]+ / [^\[\]]+\]\s*$")
+
+
+def normalize_executor_response(response: str) -> str:
+    """把空格塌缩的 T/E 行还原成 TAB 分隔（部分模型如 deepseek 会把 TAB 写成空格）。"""
+    lines = response.strip("\r\n").splitlines()
+    if not lines:
+        return response
+    out: List[str] = []
+    for index, line in enumerate(lines):
+        if line.startswith("T\t") or line.startswith("E\t"):
+            out.append(line)
+            continue
+        if line.startswith("T "):
+            # **任意行**都要归一化,不只首行:第二条 T 若停留在空格形态,就不匹配"多条 T"判据,
+            # 反而被折行循环拼进第一条译文(Codex #194 复审)。归一化后由下游统一拒绝。
+            out.append("T\t" + line[2:])
+            continue
+        if line.startswith("E "):
+            rest = line[2:]
+            if "\t" in rest:
+                source, target = rest.split("\t", 1)
+                out.append(f"E\t{source.strip()}\t{target.strip()}")
+            else:
+                parts = rest.split(None, 1)
+                if len(parts) == 2:
+                    out.append(f"E\t{parts[0]}\t{parts[1]}")
+                else:
+                    out.append(line)
+            continue
+        out.append(line)
+    return "\n".join(out)
+
 
 def parse_executor_response(response: str) -> Tuple[str, List[Dict[str, str]]]:
     """解析 API 的简单行协议：首行 ``T<TAB>译文``，随后零到多行 ``E<TAB>源名<TAB>译名``。
 
     所有响应都必须使用 T/E 协议，避免 API 路线静默跳过篇内名字记忆。
     """
-    content = response.strip("\r\n")
-    lines = content.splitlines()
+    content = normalize_executor_response(response)
+    lines = [line for line in content.splitlines() if line.strip()]
     if not lines or not lines[0].startswith("T\t"):
         raise ValueError("响应首行必须是 `T<TAB>译文`")
     translation = lines[0].split("\t", 1)[1].strip()
+    # 译文偶发被模型折行:把紧随 T 行、不以 E 开头的续行并回译文,直到遇到 E 或结束。
+    # **但另起一条 T 记录不是"折行"**——那是模型把两段(通常是上文+本段)分别译了。原样并回去会把
+    # `T<TAB>…` 原封不动粘进译文(实测 pixiv 27417304 的 34/100/103 段就是这么发布出去的);
+    # 这里改成中断合并,让残留的协议行留给下面的 TAB 检查判成协议漂移 → 走调用方的重写重试。
+    cursor = 1
+    while cursor < len(lines) and not lines[cursor].startswith("E") and not lines[cursor].startswith("T\t"):
+        translation = f"{translation}{lines[cursor].strip()}"
+        cursor += 1
     observations: List[Dict[str, str]] = []
-    for line_number, line in enumerate(lines[1:], 2):
+    # 模型偶发把 E 记录直接续在 T 行末尾且用空格分隔(`……不会改变。E ペニス 肉棒`)。
+    # 它确实是想报一个实体,只是分隔符和换行都丢了 → 在解析层拆回来:译文去掉尾巴,观察照收。
+    trailing = _TRAILING_ENTITY_RE.search(translation)
+    if trailing:
+        translation = translation[: trailing.start()].rstrip()
+        observations.append({"source": trailing.group(1), "target": trailing.group(2)})
+    else:
+        empty_entity = _TRAILING_EMPTY_ENTITY_RE.search(translation)
+        if empty_entity:
+            translation = translation[: empty_entity.start()].rstrip()
+    translation = _TRAILING_TAGS_RE.sub("", translation).rstrip()
+    if "\t" in translation:
+        raise ValueError("译文含 TAB,疑似整条 T/E 协议被塞进了同一物理行")
+    for line_number, line in enumerate(lines[cursor:], cursor + 1):
+        if line.startswith("T\t"):
+            # 第二条 T = 模型把上文和本段各译了一条。此前只是"停止合并"再静默跳过,
+            # 结果发布的是**第一条**(上一段的译文)。必须显式拒绝,交给调用方走格式重写。
+            raise ValueError("响应含多条 T 记录,无法判断哪条是本段译文")
+        if not line.startswith("E"):
+            # 协议后的解释/空话忽略,避免小模型偶发尾注拖垮整篇。
+            continue
         parts = line.split("\t")
-        if len(parts) != 3 or parts[0] != "E":
-            raise ValueError(f"响应第 {line_number} 行必须是 `E<TAB>日文名<TAB>中文名`")
-        source, target = parts[1].strip(), parts[2].strip()
+        # 允许多余列(如 E<source><读音><译名>),取首列为源名、末列为译名。
+        if len(parts) < 3:
+            continue
+        source, target = parts[1].strip(), parts[-1].strip()
         if not source or not target:
-            raise ValueError(f"响应第 {line_number} 行实体 source/target 不得为空")
+            continue
         observations.append({"source": source, "target": target})
     return translation, observations
 

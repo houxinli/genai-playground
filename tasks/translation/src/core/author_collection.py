@@ -32,6 +32,19 @@ except ImportError:
     from core.renderer import add_furigana
 
 VARIANTS = ("zh", "bilingual")
+# 可发布的整本 variant:zh/bilingual 来自翻译线,study(陪读)来自注解线(#174),渲染文件同为
+# `<sid>.<variant>.txt`,所以收集/合并/打包逻辑完全共用,只需选择要发哪几个。
+KNOWN_VARIANTS = ("zh", "bilingual", "study")
+
+
+def _normalize_variants(variants) -> tuple:
+    """按 KNOWN_VARIANTS 固定顺序归一化;None/空 → 默认 VARIANTS。"""
+    if not variants:
+        return VARIANTS
+    unknown = sorted(set(variants) - set(KNOWN_VARIANTS))
+    if unknown:
+        raise ValueError(f"未知 variant: {unknown};可选 {list(KNOWN_VARIANTS)}")
+    return tuple(v for v in KNOWN_VARIANTS if v in set(variants))
 
 # 日文假名(平/片)——真源文行含假名;中文译文行原则上不含(deepseek 偶有假名残留另算)。
 _KANA = re.compile(r"[぀-ゟ゠-ヿ]")
@@ -88,12 +101,38 @@ def _guard_out_dir(out_dir: Path, workspaces_root: Path) -> None:
                     f"out_dir 已存在且含非合集内容({entry.name}),拒绝清空: {out_dir}")
 
 
+def _study_render_provenance(workspace: Path, sid: str) -> Optional[Dict[str, Any]]:
+    """study 渲染产物自带的版本 sidecar(annotate finish 写)。"""
+    meta = Path(workspace) / "rendered" / f"{sid}.study.meta.json"
+    if not meta.is_file():
+        return None
+    try:
+        return json.loads(meta.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _annotate_version(workspace: Path, provider: str, creator_id: str, sid: str) -> Optional[str]:
+    """注解通道(refs-annotate)的 current version;没有注解版本时返回 None。"""
+    ref = Path(workspace) / "store" / "refs-annotate" / provider / creator_id / f"{sid}.json"
+    if not ref.is_file():
+        return None
+    try:
+        return json.loads(ref.read_text(encoding="utf-8")).get("version_id")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _published_documents(workspaces_root: Path, provider: str, creator_id: str) -> Dict[str, Dict[str, Any]]:
-    """已发布 sid → workspace/version；同时兼容 per-work 与 per-creator 布局。"""
+def _published_documents(workspaces_root: Path, provider: str, creator_id: str,
+                         variants=VARIANTS) -> Dict[str, Dict[str, Any]]:
+    """已发布 sid → workspace/version；同时兼容 per-work 与 per-creator 布局。
+
+    同一篇出现在多个 workspace 时,按**本次要发的 variants** 的 rendered 齐全度择优。"""
+    variants = _normalize_variants(variants)
     refs = sorted(glob.glob(
         str(workspaces_root / "*" / "store" / "refs" / provider / creator_id / "*.json")
     ))
@@ -115,14 +154,27 @@ def _published_documents(workspaces_root: Path, provider: str, creator_id: str) 
         if previous is None:
             documents[sid] = candidate
             continue
-        previous_score = sum(
-            (previous["workspace"] / "rendered" / f"{sid}.{variant}.txt").is_file()
-            for variant in VARIANTS
-        )
-        candidate_score = sum(
-            (candidate["workspace"] / "rendered" / f"{sid}.{variant}.txt").is_file()
-            for variant in VARIANTS
-        )
+        def _score(entry: Dict[str, Any]) -> int:
+            score = sum((entry["workspace"] / "rendered" / f"{sid}.{variant}.txt").is_file()
+                        for variant in variants)
+            # study 还需要注解通道的 current ref:两个 workspace 的 rendered 数量打平时,
+            # 若先出现的那个没有 annotate ref,构建会报缺失,即便另一个副本的 study 输入是齐的。
+            if "study" in variants and _annotate_version(entry["workspace"], provider, creator_id, sid):
+                score += 1
+            return score
+
+        previous_score = _score(previous)
+        candidate_score = _score(candidate)
+        if "study" in variants:
+            # 注解版本冲突要像翻译 version 冲突一样显式拒绝:两个 workspace 的 annotate ref
+            # 指向不同版本时,按 glob 顺序静默选一个会发布旧 study,而 manifest/verify 全绿。
+            previous_annotate = _annotate_version(previous["workspace"], provider, creator_id, sid)
+            candidate_annotate = _annotate_version(candidate["workspace"], provider, creator_id, sid)
+            if previous_annotate and candidate_annotate and previous_annotate != candidate_annotate:
+                raise ValueError(
+                    f"{provider}:{creator_id}:{sid} 在多个 workspace 指向不同注解版本: "
+                    f"{previous_annotate} != {candidate_annotate}"
+                )
         if candidate_score > previous_score:
             documents[sid] = candidate
     return dict(sorted(
@@ -152,6 +204,13 @@ def verify_collection(
     except (OSError, json.JSONDecodeError) as exc:
         return {"ok": False, "documents": 0, "errors": [f"合集 manifest 无法读取: {exc}"]}
     errors: List[str] = []
+    # 核对用哪几个 variant **以 manifest 为准**:合集发的是什么就核对什么,
+    # 否则改过默认值(或用 --variants 建的合集)会被误报成缺 rendered/输出不完整。
+    # 旧 manifest 无该字段 → 默认 VARIANTS(向后兼容)。
+    try:
+        variants = _normalize_variants(manifest.get("variants"))
+    except ValueError as exc:
+        return {"ok": False, "documents": 0, "errors": [f"合集 manifest.variants 非法: {exc}"]}
     if manifest.get("schema_version") != 1:
         errors.append(f"不支持的 collection manifest schema_version: {manifest.get('schema_version')}")
     if manifest.get("provider") != provider or manifest.get("creator_id") != creator_id:
@@ -165,7 +224,7 @@ def verify_collection(
         if isinstance(document, dict) and isinstance(document.get("source_id"), str)
     }
     try:
-        current_documents = _published_documents(workspaces_root, provider, creator_id)
+        current_documents = _published_documents(workspaces_root, provider, creator_id, variants)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         errors.append(f"current refs 无法核对: {exc}")
         current_documents = {}
@@ -182,8 +241,17 @@ def verify_collection(
             errors.append(
                 f"{sid} current version 已变化: {expected.get('version_id')} -> {current['version_id']}"
             )
+        if "study" in variants:
+            current_annotate = _annotate_version(current["workspace"], provider, creator_id, sid)
+            expected_annotate = expected.get("annotate_version_id")
+            if current_annotate is None:
+                errors.append(f"{sid} 缺 annotate current ref(study 合集需要)")
+            elif expected_annotate is None:
+                errors.append(f"{sid} 合集未记录 annotate 版本，需重建")
+            elif expected_annotate != current_annotate:
+                errors.append(f"{sid} annotate 版本已变化: {expected_annotate} -> {current_annotate}")
         expected_hashes = expected.get("rendered_sha256", {})
-        for variant in VARIANTS:
+        for variant in variants:
             source = current["workspace"] / "rendered" / f"{sid}.{variant}.txt"
             if not source.is_file():
                 errors.append(f"{sid} 缺 {variant} rendered: {source}")
@@ -195,7 +263,7 @@ def verify_collection(
     outputs = manifest.get("outputs", {})
     required_outputs = {
         f"{author_name}_{variant}.{suffix}"
-        for variant in VARIANTS
+        for variant in variants
         for suffix in manifest_formats
     } if isinstance(author_name, str) and author_name else set()
     if not isinstance(outputs, dict):
@@ -218,7 +286,7 @@ def verify_collection(
         if fmt not in manifest_formats:
             continue
         counts = manifest.get(field, {})
-        for variant in VARIANTS:
+        for variant in variants:
             if counts.get(variant) != expected_count:
                 errors.append(
                     f"manifest {field}.{variant}={counts.get(variant)}，应为 {expected_count}"
@@ -239,18 +307,20 @@ def _normalize_formats(formats) -> tuple:
 def build_collection(
     author_name: str, creator_id: str, *, workspaces_root: Path, out_dir: Path,
     provider: str = "pixiv", gdrive_dir: Optional[Path] = None, furigana: bool = True,
-    formats=DEFAULT_FORMATS,
+    formats=DEFAULT_FORMATS, variants=VARIANTS,
 ) -> Dict[str, Any]:
     """收集 creator 已发布篇 → 完整合并成整本；缺任一 variant 时不替换旧合集。
 
     formats:发布哪些整本格式(('epub',) / ('txt',) / ('txt','epub')),默认只 epub。
-    只影响作者级整本产物与 GDrive 同步;逐篇 rendered 不受影响。"""
+    variants:发哪几本(zh/bilingual/study),默认 ('zh','bilingual');study=注解线(#174)的陪读版。
+    两者都只影响作者级整本产物与 GDrive 同步;逐篇 rendered 不受影响。"""
     if not author_name.strip():
         raise ValueError("author_name 不能为空")
     formats = _normalize_formats(formats)
+    variants = _normalize_variants(variants)
     workspaces_root = Path(workspaces_root)
     out_dir = Path(out_dir)
-    documents = _published_documents(workspaces_root, provider, creator_id)
+    documents = _published_documents(workspaces_root, provider, creator_id, variants)
     sids = list(documents)
     if not sids:
         raise ValueError(f"{provider}:{creator_id} 没有已发布篇(workspaces 下无 refs)")
@@ -258,10 +328,24 @@ def build_collection(
     missing: List[str] = []
     for sid, document in documents.items():
         ws = document["workspace"]
-        for var in VARIANTS:
+        for var in variants:
             src = ws / "rendered" / f"{sid}.{var}.txt"
             if not src.is_file():
                 missing.append(f"{sid}.{var}")
+        # study 还要求注解通道有 current ref:没有就说明这篇根本没做过陪读,
+        # 与缺 rendered 同等对待,拒绝出部分合集(而不是让自校验在 staging 之后才炸)。
+        if "study" in variants:
+            current_annotate = _annotate_version(ws, provider, creator_id, sid)
+            if current_annotate is None:
+                missing.append(f"{sid}.annotate-ref")
+            else:
+                # 只读 ref 的版本号证明不了"这个 study.txt 是那个版本渲染的":注解推进后
+                # 渲染失败时旧文件仍在,会被绑上新版本号。渲染产物自带 provenance,在此核对。
+                prov = _study_render_provenance(ws, sid)
+                if prov is None:
+                    missing.append(f"{sid}.study-provenance")
+                elif prov.get("annotate_version_id") != current_annotate:
+                    missing.append(f"{sid}.study-stale(渲染于 {prov.get('annotate_version_id')})")
     if missing:
         raise ValueError(f"{len(missing)} 个已发布 rendered 缺失，拒绝生成部分合集: {missing[:10]}")
 
@@ -272,24 +356,32 @@ def build_collection(
         manifest_documents: List[Dict[str, Any]] = []
         for sid, document in documents.items():
             ws = document["workspace"]
+            annotate_version = _annotate_version(ws, provider, creator_id, sid) if "study" in variants else None
             rendered_hashes: Dict[str, str] = {}
-            for var in VARIANTS:
+            for var in variants:
                 src = ws / "rendered" / f"{sid}.{var}.txt"
                 rendered_hashes[var] = _sha256_file(src)
                 shutil.copy(src, staging / f"{sid}.{var}.txt")
-            manifest_documents.append({
+            entry = {
                 "source_id": sid,
                 "version_id": document["version_id"],
                 "rendered_sha256": rendered_hashes,
-            })
-        if furigana:
+            }
+            if annotate_version is not None:
+                # study 是「注解版本 + 当前翻译版本」渲染出来的,只记翻译版本不足以判新鲜度:
+                # 注解推进了但渲染失败、或目录里残留旧 study.txt,都会把过期内容当成已发布输入交付。
+                entry["annotate_version_id"] = annotate_version
+            manifest_documents.append(entry)
+        if furigana and "bilingual" in variants:
+            # 只注 bilingual:study 的源文行已由注解线加过注解,再叠 furigana 会变成全文注音版
+            # (annotation-guide 的硬边界),zh 是纯中文更不能注。
             for sid in sids:
                 _annotate_furigana_file(staging / f"{sid}.bilingual.txt")
-        merged = merge_author(staging, author_name, sids) if "txt" in formats else {}
-        epubs = _build_epubs(staging, author_name, sids) if "epub" in formats else {}
+        merged = merge_author(staging, author_name, sids, variants=variants) if "txt" in formats else {}
+        epubs = _build_epubs(staging, author_name, sids, variants) if "epub" in formats else {}
         output_names = [
             f"{author_name}_{var}.{suffix}"
-            for var in VARIANTS
+            for var in variants
             for suffix in formats
         ]
         output_hashes = {
@@ -303,6 +395,7 @@ def build_collection(
             "creator_id": creator_id,
             "author_name": author_name,
             "formats": list(formats),
+            "variants": list(variants),
             "documents": manifest_documents,
             "chapters": {key: value.get("chapters") for key, value in merged.items()},
             "epub_chapters": epubs,
@@ -344,8 +437,8 @@ def build_collection(
     }
 
 
-# variant → 书名/文件名后缀:让 zh 与 bilingual 两本 epub 书名不同,阅读器(微信读书等)才能区分。
-_VARIANT_TITLE = {"zh": "中文", "bilingual": "日中对照"}
+# variant → 书名/文件名后缀:让各本 epub 书名不同,阅读器(微信读书等)才能区分。
+_VARIANT_TITLE = {"zh": "中文", "bilingual": "日中对照", "study": "陪读"}
 
 
 def _gdrive_display_name(author_name: str, output_name: str) -> str:
@@ -358,12 +451,12 @@ def _gdrive_display_name(author_name: str, output_name: str) -> str:
     return output_name
 
 
-def _build_epubs(out_dir: Path, author_name: str, sids: List[str]) -> Dict[str, int]:
+def _build_epubs(out_dir: Path, author_name: str, sids: List[str], variants=VARIANTS) -> Dict[str, int]:
     """每个 variant 产 `<author>_<var>.epub`(显式 TOC,阅读器不再从 txt 猜章节)。
     章节与 merge_author 同源:按 source_id 升序,标题取渲染文件的中文 title。
-    **书名含 variant**(`<author>·中文` / `<author>·日中对照`):否则两本同名、阅读器区分不开。"""
+    **书名含 variant**(`<author>·中文` / `<author>·日中对照` / `<author>·陪读`):否则各本同名、阅读器区分不开。"""
     out: Dict[str, int] = {}
-    for var in VARIANTS:
+    for var in variants:
         chapters = []
         for sid in sorted(set(sids), key=_sid_sort_key):
             f = out_dir / f"{sid}.{var}.txt"
@@ -391,8 +484,11 @@ def main() -> int:
                    help="不给 bilingual 合集的日文源文加汉字注音(默认加)")
     p.add_argument("--verify-only", action="store_true", help="只核对现有合集是否与 current refs/rendered 一致")
     p.add_argument("--formats", default="epub", help="发布哪些整本格式,逗号分隔(epub/txt/txt,epub);默认 epub")
+    p.add_argument("--variants", default=None,
+                   help="发哪几本,逗号分隔(zh/bilingual/study);默认 zh,bilingual。study=陪读注解版")
     args = p.parse_args()
     formats = tuple(f.strip() for f in args.formats.split(",") if f.strip())
+    variants = tuple(v.strip() for v in args.variants.split(",") if v.strip()) if args.variants else VARIANTS
     out = args.out or (args.workspaces_root / f"_collection-{args.creator}")
     if args.verify_only:
         res = verify_collection(args.creator, workspaces_root=args.workspaces_root,
@@ -403,7 +499,7 @@ def main() -> int:
         p.error("构建模式需要非空 --author 与 --creator")
     res = build_collection(args.author, args.creator, workspaces_root=args.workspaces_root,
                            out_dir=out, provider=args.provider, gdrive_dir=args.gdrive,
-                           furigana=args.furigana, formats=formats)
+                           furigana=args.furigana, formats=formats, variants=variants)
     print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0
 

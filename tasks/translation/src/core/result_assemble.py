@@ -75,6 +75,7 @@ def parse_translations_tsv(content: str, bundle: Optional[Dict[str, Any]] = None
 def assemble_result(
     bundle: Dict[str, Any], translations: Dict[int, str], *,
     producer_name: str = "agent", model: Optional[str] = None, completed_at: Optional[str] = None,
+    producer_type: str = "harness",
     findings: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """从 bundle + {段号:译文} 组装 schema 合法 result。逐段回填 segment_id/source_hash,agent 不碰这些。"""
@@ -100,7 +101,9 @@ def assemble_result(
         "schema_version": 1,
         "task_id": task["task_id"],
         "task_digest": bundle["task_digest"],
-        "producer": {"type": "harness", "name": producer_name, "model": model},
+        # type 不能固定 harness:auto 路线产的是 api/openrouter,重组时固定写 harness 会把它
+        # 覆盖成 harness/openrouter,并落下一条"OpenRouter 是 harness"的错误 Attestation。
+        "producer": {"type": producer_type, "name": producer_name, "model": model},
         "candidates": candidates,
         "findings": list(findings or []),
         "recommended_candidate_keys": [producer_name],

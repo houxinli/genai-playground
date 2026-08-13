@@ -63,6 +63,9 @@ revision shard 已存在,否则整份 quarantine。对全新文档也因此一�
 - **只输出译文**:不要加解释、注释、Markdown 包裹或额外空行。
 - **假名残留**:译文不得残留日文假名(被翻成语气词/拟声词或删去);单独的 っ、ん 等同理。
 - **不要把原文当译文**:逐段确认是中文译文,不是照抄日文(否则会被 QA 判 `same_as_source`)。
+- **不要缩写**:语气词、终助词、口吻(「〜けどな」「〜わ」「〜のよ」)都要译出来,不是可省项。
+  日译中的正常字数比在 0.6–0.9,整篇低于 0.55 会被 QA 判 `undertranslation`。
+  批量越大越容易触发这个毛病——见 skill 的「小批量」一条。
 
 ## 输出:zh.tsv(执行器唯一手写产物)
 
@@ -86,7 +89,12 @@ revision shard 已存在,否则整份 quarantine。对全新文档也因此一�
 Agent/harness 路线直接维护纯 `zh.tsv` 与可选两列 `names.tsv`。API adapter 为了在一次模型调用里同时取得
 译文与本段实际名字，使用临时行协议：首行 `T<TAB>中文译文`，随后零到多行
 `E<TAB>日文原写法<TAB>本段实际中文译名`。adapter 会把 T 行变成 candidate、按 first-wins 合并 E 行；
-下一次调用只注入合并后的 canonical target，不注入冲突译名。该 T/E envelope 不直接落进 `zh.tsv`。
+下一次调用只注入合并后的 canonical target，不注入冲突译名。该 T/E envelope 不直接落进 `zh.tsv`——
+但 adapter 会把最终译文**也写一份 `zh.tsv`** 到 `results_dir`，所以两条路线的可改产物是同一个文件，
+review/fill 都在 TSV 上做，不需要从 store 反推。
+
+协议只允许**一条 T 记录**：把两段（常见是上文 + 本段）分别译成两条 T 行，或把 T 行和 E 行挤在同一物理行，
+都算协议漂移，adapter 会要求重写而不是把残留当正文。译文里出现 TAB 一律视为漂移。
 
 ## 派生:result.json
 

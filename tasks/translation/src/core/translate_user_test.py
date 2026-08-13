@@ -618,3 +618,138 @@ class TranslateUserTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AutoRouteArtifactsTest(unittest.TestCase):
+    """自动路线要落下与 agent 路线同款的可改产物:tsv + 本次 prepare 的原始 job。"""
+
+    def _run(self, tmp: Path):
+        src_dir = Path(__file__).resolve().parent / "testdata" / "fixtures" / "pixiv" / "700001"
+
+        def fake_translate(bundle):
+            return {
+                "schema_version": 1,
+                "task_id": bundle["task"]["task_id"],
+                "task_digest": bundle["task_digest"],
+                "producer": {"type": "api", "name": "openrouter", "model": "fake"},
+                "candidates": [{
+                    "result_candidate_key": "grok",
+                    "segment_id": s["segment_id"],
+                    "source_hash": bundle["task"]["source_hashes"][s["segment_id"]],
+                    "text": f"译文{index}",
+                } for index, s in enumerate(bundle["segments"])],
+                "findings": [],
+                "recommended_candidate_keys": ["grok"],
+                "completed_at": "2026-07-28T00:00:00+00:00",
+            }
+
+        return tu.translate_user(
+            "pixiv", src_dir, tmp / "store", tmp / "rendered", fake_translate,
+            results_dir=tmp / "results", jobs_dir=tmp / "jobs",
+        )
+
+    def test_writes_zh_tsv_and_matching_job(self):
+        src_dir = Path(__file__).resolve().parent / "testdata" / "fixtures" / "pixiv" / "700001"
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            manifest = self._run(tmp)
+            self.assertEqual(1, manifest["summary"]["published"])
+            tsv = tmp / "results" / "700001.zh.tsv"
+            job = tmp / "jobs" / "700001.job.json"
+            self.assertTrue(tsv.is_file())
+            self.assertTrue(job.is_file())
+            # result.json 是 verify 的硬条件,auto 路线也必须落
+            self.assertTrue((tmp / "results" / "700001.result.json").is_file())
+            verification = tu.verify_user("pixiv", src_dir, tmp / "store", tmp / "rendered",
+                                          tmp / "results")
+            self.assertTrue(verification["ok"], verification)
+            bundle = json.loads(job.read_text(encoding="utf-8"))
+            rows = [l.split("\t", 2) for l in tsv.read_text(encoding="utf-8").rstrip("\n").split("\n")]
+            self.assertEqual(len(bundle["segments"]), len(rows))
+            for index, (idx, echo, text) in enumerate(rows):
+                self.assertEqual(str(index), idx)
+                self.assertTrue(bundle["segments"][index]["source_text"].startswith(echo))
+                self.assertEqual(f"译文{index}", text)
+
+    def test_tsv_and_job_round_trip_through_finish(self):
+        # 改一行 tsv → 用同一份 job 重跑 finish 应当发布成功,而不是 stale quarantine。
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            self._run(tmp)
+            tsv = tmp / "results" / "700001.zh.tsv"
+            rows = [l.split("\t", 2) for l in tsv.read_text(encoding="utf-8").rstrip("\n").split("\n")]
+            rows[-1][2] = "改过的译文"
+            tsv.write_text("\n".join("\t".join(r) for r in rows) + "\n", encoding="utf-8")
+            manifest = tu.finish_user(
+                "pixiv", Path(__file__).resolve().parent / "testdata" / "fixtures" / "pixiv" / "700001",
+                tmp / "store", tmp / "rendered", tmp / "results", jobs_dir=tmp / "jobs",
+                producer_name="openrouter",
+            )
+            self.assertEqual(0, manifest["summary"]["quarantined"])
+            self.assertEqual(1, manifest["summary"]["published"])
+            self.assertIn("改过的译文", (tmp / "rendered" / "700001.zh.txt").read_text(encoding="utf-8"))
+
+
+class CarryPrevZhWiringTest(unittest.TestCase):
+    """--carry-prev-zh 若只接到 cursor-agent 分支,openrouter 的 A/B 两组会用完全相同的 prompt。"""
+
+    def test_openrouter_branch_receives_the_flag(self):
+        import os
+        from unittest.mock import patch
+        seen = {}
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "k"}):
+            with patch.object(tu.ox, "translate_bundle",
+                              side_effect=lambda b, c, **kw: seen.update(kw) or {"candidates": []}):
+                tu.make_translate_fn("openrouter", "m", carry_previous_translation=True)({"task": {}, "segments": []})
+        self.assertTrue(seen.get("carry_previous_translation"))
+
+
+class ResyncPreservesProvenanceTest(unittest.TestCase):
+    """MODE=finish 从 TSV 重组 result 时,不能丢 producer type,也不能删待复核的告警。"""
+
+    def _auto_run(self, tmp: Path):
+        src_dir = Path(__file__).resolve().parent / "testdata" / "fixtures" / "pixiv" / "700001"
+
+        def fake(bundle):
+            return {
+                "schema_version": 1, "task_id": bundle["task"]["task_id"],
+                "task_digest": bundle["task_digest"],
+                "producer": {"type": "api", "name": "openrouter", "model": "m"},
+                "candidates": [{"result_candidate_key": "grok", "segment_id": s["segment_id"],
+                                "source_hash": bundle["task"]["source_hashes"][s["segment_id"]],
+                                "text": f"译文{i}"} for i, s in enumerate(bundle["segments"])],
+                "findings": [{"code": "segment_quality", "severity": "warning",
+                              "message": "重试后仍未通过内联复检",
+                              "evidence": json.dumps({"segment_id": bundle["segments"][0]["segment_id"],
+                                                      "errors": ["neighbor_overlap"]}, ensure_ascii=False),
+                              "line": 1}],
+                "recommended_candidate_keys": ["grok"], "completed_at": "2026-08-12T00:00:00+00:00",
+            }
+
+        tu.translate_user("pixiv", src_dir, tmp / "store", tmp / "rendered", fake,
+                          results_dir=tmp / "results", jobs_dir=tmp / "jobs")
+        return src_dir
+
+    def test_finish_keeps_api_producer_type_and_quality_findings(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = self._auto_run(tmp)
+            tu.finish_user("pixiv", src_dir, tmp / "store", tmp / "rendered", tmp / "results",
+                           jobs_dir=tmp / "jobs")
+            result = json.loads((tmp / "results" / "700001.result.json").read_text(encoding="utf-8"))
+            self.assertEqual("api", result["producer"]["type"])       # 不被改写成 harness
+            self.assertIn("segment_quality", [f["code"] for f in result["findings"]])
+
+    def test_finding_is_dropped_after_its_segment_is_edited(self):
+        """人工在 TSV 里修好那段之后,旧告警不该继续声称该段有错。"""
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            src_dir = self._auto_run(tmp)
+            tsv = tmp / "results" / "700001.zh.tsv"
+            rows = [l.split("\t", 2) for l in tsv.read_text(encoding="utf-8").rstrip("\n").split("\n")]
+            rows[0][2] = "人工修好的译文"
+            tsv.write_text("\n".join("\t".join(r) for r in rows) + "\n", encoding="utf-8")
+            tu.finish_user("pixiv", src_dir, tmp / "store", tmp / "rendered", tmp / "results",
+                           jobs_dir=tmp / "jobs")
+            result = json.loads((tmp / "results" / "700001.result.json").read_text(encoding="utf-8"))
+            self.assertNotIn("segment_quality", [f["code"] for f in result["findings"]])

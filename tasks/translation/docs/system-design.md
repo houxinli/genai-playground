@@ -1592,11 +1592,71 @@ finish 的 quarantine、unresolved、document QA failure 都是发布阻断,CLI 
 **GDrive 文件名也用友好名**(`<author>·中文.epub` / `<author>·日中对照.epub`,`_gdrive_display_name`):微信读书对本地
 导入 epub 按**文件名**显示、不读 dc:title,统一 `_var` 会显示成 "作者_zh" 或区分不开;本地合集目录仍保留 `_var` 规范名。
 
+**发布 variant 控制(2026-07-28)**:`build_collection(variants=...)` / `make author-collection VARIANTS=zh,study`
+控制发哪几本,可选 `zh`/`bilingual`/`study`,**默认 `('zh','bilingual')`**。`study` 是注解线(#174)渲染的陪读版
+`<sid>.study.txt`,与翻译线产物同构,所以收集/合并/打包完全共用一套逻辑;EPUB/GDrive 名为 `<author>·陪读`。
+furigana **只施加在 bilingual** 上:study 的源文行已带注解,再叠注音会变成全文注音版(annotation-guide 硬边界)。
+manifest 记 `variants`,`verify_collection` **以 manifest 为准**核对(旧 manifest 无字段→默认 zh+bilingual,向后兼容)——
+否则用非默认 variant 建的合集会被误报成缺 rendered/输出不完整。
+
+**study 渲染产物自带 provenance(2026-08-12)**:annotate finish 渲染 `study.txt` 的同时写
+`<sid>.study.meta.json` 记 {annotate_version_id, translate_version_id}。只在合集 manifest 里记
+current ref 的版本号**证明不了**"这个文件由那个版本渲染"——注解推进后渲染失败时,旧文件仍在、
+会被绑上新版本号且 verify 全绿。合集构建时核对 sidecar 与 current annotate ref,不一致或缺失即拒绝。
+
+**study 合集核对注解通道版本(2026-08-12,Codex #194 review)**:study 是「注解版本 + 当前翻译版本」
+渲染出来的,只记翻译 version 判不出新鲜度——注解推进了但渲染失败、或残留旧 `study.txt`,
+都会把过期内容当成已发布输入交付。manifest 增记 `annotate_version_id`,verify 一并核对;
+缺 annotate current ref 与缺 rendered 同等对待,拒绝出部分合集。
+
+**断点=中断态,产物=完成态(2026-08-12,Codex #194 复审)**:sidecar meta 记 `completed`。
+跑完即写 completed=true,此后同源同 job **同模型**重跑也不复用——改进 prompt 后重译正是这种,
+若当断点会整篇跳过、旧译文原样重发且 published=1 看不出异常。能续的只有 completed=false 的中断态。
+续跑时还要按 names sidecar 回扫已恢复段,重建 `entity_first_use` findings,
+否则中断前发现的名字进不了 entity-review。names sidecar 用 `<sid>.names.tsv`(finish 认的名字),
+不是 `<sid>.zh.tsv.names.tsv`。
+
+**断点归属校验(2026-08-12)**:断点文件与最终产物同名同格式,所以「上一轮完成品」和「本轮中途断点」
+长得一样,只靠 src_echo 分不出——重译时旧产物会通过校验、整篇被跳过、旧译文原样重新发布,
+而且 `published=1` 从输出上看不出没翻(重译 pixiv 9425701 时实测踩到)。
+断点旁写 sidecar `<tsv>.meta.json` 记 task_digest + model,两者都对得上才复用;
+不匹配的断点移到 `.stale` 保留并从头翻。
+
 **作者合集完整性/新鲜度闸门(2026-07-14)**:`author_collection` 构建前必须确认每个 current ref 同时有
-zh/bilingual 两种 rendered；缺任一输入即失败并保留旧合集,不再输出“少几章但命令成功”的部分成品。新整本先在
+本次要发的各 variant 的 rendered；缺任一输入即失败并保留旧合集,不再输出“少几章但命令成功”的部分成品。新整本先在
 临时目录构建并自校验,成功后才替换目标目录；`collection_manifest.json` 记录 schema version、完整 source-id/
 version-id 集合、逐篇 rendered digest、章节数和整本输出 digest。`make author-collection-verify` 只读比较 manifest
 与当前 refs/rendered/output：新增/删除 ref、current version 变化、重渲染或成品被修改都会返回非零,要求重建后再交付。
+
+**执行器内联复检 + 邻段窜入检测(2026-07-28,#gh-27417304)**:API 路线在 `translate_bundle` 里逐段自检
+(`openrouter_executor.segment_quality_errors`:协议残留 / 超长 / 邻段窜入),不通过就**退档重试**——
+①原样重问 ②追加「只译本段」纠正 ③**拿掉 `[上文]`** 重问。三档仍不过:结构错(进不了 TSV)中断整篇,
+质量错照常发布并记 `segment_quality` finding(与 skill「质量问题不阻断发布」一致)。
+判据双阈值:`NEIGHBOR_OVERLAP_EXECUTOR=0.35`(执行器内联,误判成本只是一次重试,宁可宽)、
+`NEIGHBOR_OVERLAP_REPORT=0.55`(finish QA 的 `neighbor_overlap` warning,要给人看,必须窄)。
+`neighbor_leak_suspect` 用「开头相似度 ∪ 上段译文近乎原样出现在本段开头」两条判据取或——
+只用相似度时上一段很短会失灵(实测漏 4 段)。**为什么需要这一层**:deepseek/deepseek-chat 会把
+`[上文]` 邻句一起译进本段(实测约半数段落),而整段并不相同,`duplicate_translation`/`block_paste` 全漏检;
+拿 27417304 的原始产物回放,内联复检拦下 81/213 段、finish QA 报 39 段,修好后分别降到 4 段和 1 段。
+
+**cursor-agent 执行器 + 逐段粒度(2026-08-11)**:`make_translate_fn` 增加 `cursor-agent` 分支,
+与 `openrouter` 并列共用同一个 `translate_bundle`——逐段 prompt、T/E 协议、退档重试、断点续跑全部复用,
+新增的 `cursor_agent.py` 只是传输层(`cursor-agent -p --trust --model ...`)。动机是计费:Cursor 会员额度内免费。
+无头调用必须显式 `--trust`,否则卡在 workspace trust 交互提示上。
+
+**粒度是译文忠实度的主导变量**:同模型同 prompt,agent 路线按 3000–5000 字符批量翻 → 字数比 0.41–0.48(系统性缩写,
+语气词/终助词被砍);改成逐段(batch=1)→ 0.72。实测 pixiv 9425701 六月那批 111 篇有 67 篇(60%)欠译。
+据此:①skill 的批量指导改为 800–1200 字符;②`document_qa` 增加 `undertranslation`(整篇字数比 < 0.55,warning);
+③`E` 行报告范围从"人名或专名"扩到**含称谓**(先輩/お兄さん 这类)——逐段翻译每段是独立起点,
+称谓此前不入译名锁,实测同一篇里「先輩」既译「前辈」又译「学长」;扩范围后 46 段全部统一,漂移归零。
+
+**`--carry-prev-zh`(默认关)**:把上一段已定稿译文注入 prompt 作风格锚点,位置必须紧跟 `[上文]` 源文之后
+(与其源文相邻才构成「日→中」示范对;悬在最前面时模型只当孤立背景)。A/B 实测字数比/窜入/一致性均无差别,
+所以不作默认;跨段一致性靠译名锁解决,不靠它。
+
+**API 路线也落 zh.tsv(2026-07-28)**:`translate_user(results_dir=...)` 让自动路线与 agent 路线产出**同一个**
+`<sid>.zh.tsv`。此前自动路线只往 store 发布,workspace 没有可读可改的译文产物,review/fill 无处下手,
+改一段得写临时脚本从 store 反推 candidate。统一后 `MODE=finish RESULTS_DIR=...` 对两条路线都成立。
 
 **实体库默认接线(2026-07-14)**:`make translate-user` 默认 `ENTITY_STORE=tasks/translation/data/entities`,
 prepare 把该 creator 适用人名/术语解析进 `context_pack.entities`;`openrouter_executor._constraints_block`

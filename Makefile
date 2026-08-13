@@ -261,10 +261,11 @@ extract-entities:
 	$(PY) tasks/translation/src/core/entity_extract.py --revision "$(REVISION)" $(if $(ENTITY_STORE),--entity-store "$(ENTITY_STORE)") $(if $(QUEUE),--queue "$(QUEUE)") $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(CREATOR_ID),--creator-id "$(CREATOR_ID)") $(if $(LINK),--link)
 
 # 作者合集:跨 per-work workspace 收集已发布 rendered → 按作者名合成整本(可选复制 GDrive)。
-# 用法: make author-collection AUTHOR=錆流浪 CREATOR=104039620 [PROVIDER=pixiv] [GDRIVE="/path/to/novels"] [WORKSPACES=...] [OUT=...]
+# 用法: make author-collection AUTHOR=錆流浪 CREATOR=104039620 [PROVIDER=pixiv] [GDRIVE="/path/to/novels"] [WORKSPACES=...] [OUT=...] [VARIANTS=zh,study]
+# VARIANTS 默认 zh,bilingual;study=注解线(#174)的陪读版,需该 creator 每篇都已 annotate finish 渲染出 study。
 author-collection:
 	@test -n "$(AUTHOR)" && test -n "$(CREATOR)" || { echo "author-collection 需要 AUTHOR= CREATOR="; exit 2; }
-	$(PY) tasks/translation/src/core/author_collection.py --author "$(AUTHOR)" --creator "$(CREATOR)" $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(WORKSPACES),--workspaces-root "$(WORKSPACES)") $(if $(OUT),--out "$(OUT)") $(if $(GDRIVE),--gdrive "$(GDRIVE)")
+	$(PY) tasks/translation/src/core/author_collection.py --author "$(AUTHOR)" --creator "$(CREATOR)" $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(WORKSPACES),--workspaces-root "$(WORKSPACES)") $(if $(OUT),--out "$(OUT)") $(if $(GDRIVE),--gdrive "$(GDRIVE)") $(if $(VARIANTS),--variants "$(VARIANTS)")
 
 # 只读核对现有合集是否仍覆盖全部 current refs，且 per-document rendered/整本输出未漂移。
 author-collection-verify:
@@ -308,7 +309,7 @@ ENTITY_STORE ?= tasks/translation/data/entities
 ENTITY_REVIEW_QUEUE ?= tasks/translation/data/entity-reviews
 translate-user:
 	@test -n "$(PROVIDER)" && test -n "$(SOURCE)" && test -n "$(STORE)" || { echo "translate-user 需要 PROVIDER= SOURCE= STORE="; exit 2; }
-	$(PY) tasks/translation/src/core/translate_user.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --store "$(STORE)" $(if $(MODE),--mode "$(MODE)") $(if $(RENDER),--render-dir "$(RENDER)") $(if $(JOBS_DIR),--jobs-dir "$(JOBS_DIR)") $(if $(RESULTS_DIR),--results-dir "$(RESULTS_DIR)") $(if $(BILINGUAL),--bilingual-dir "$(BILINGUAL)") $(if $(ENTITY_STORE),--entity-store "$(ENTITY_STORE)") $(if $(ENTITY_REVIEW_QUEUE),--entity-review-queue "$(ENTITY_REVIEW_QUEUE)") $(if $(EXECUTOR),--executor "$(EXECUTOR)") $(if $(PRODUCER),--producer "$(PRODUCER)") $(if $(MODEL),--model "$(MODEL)") $(if $(LIMIT),--limit $(LIMIT)) $(if $(TASK_TYPE),--task-type "$(TASK_TYPE)") $(if $(PRODUCER_PRIORITY),--producer-priority "$(PRODUCER_PRIORITY)")
+	$(PY) tasks/translation/src/core/translate_user.py --provider "$(PROVIDER)" --source-dir "$(SOURCE)" --store "$(STORE)" $(if $(MODE),--mode "$(MODE)") $(if $(RENDER),--render-dir "$(RENDER)") $(if $(JOBS_DIR),--jobs-dir "$(JOBS_DIR)") $(if $(RESULTS_DIR),--results-dir "$(RESULTS_DIR)") $(if $(BILINGUAL),--bilingual-dir "$(BILINGUAL)") $(if $(ENTITY_STORE),--entity-store "$(ENTITY_STORE)") $(if $(ENTITY_REVIEW_QUEUE),--entity-review-queue "$(ENTITY_REVIEW_QUEUE)") $(if $(EXECUTOR),--executor "$(EXECUTOR)") $(if $(PRODUCER),--producer "$(PRODUCER)") $(if $(MODEL),--model "$(MODEL)") $(if $(LIMIT),--limit $(LIMIT)) $(if $(TASK_TYPE),--task-type "$(TASK_TYPE)") $(if $(PRODUCER_PRIORITY),--producer-priority "$(PRODUCER_PRIORITY)") $(if $(CARRY_PREV_ZH),--carry-prev-zh)
 
 # annotate 薄入口:同一 translate-user 流水线,只把 workspace 下的重复路径集中起来。
 # 用法: make annotate MODE=prepare|finish|status PROVIDER=pixiv WS=tasks/translation/data/workspaces/pixiv-27417304 [PRODUCER_PRIORITY=composer-2.5]

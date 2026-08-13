@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 try:
-    from . import annotate_eval, candidate_eval, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
+    from . import annotate_eval, candidate_eval, cursor_agent, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from .artifact_store import ArtifactStore
     from .pipeline_ingest import merge_author
     from .renderer import render_bilingual, render_zh
@@ -26,7 +26,7 @@ try:
     from .task_export import export_job, ingest_revision, resolve_entities_for_revision
 except ImportError:  # 作为脚本运行
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from core import annotate_eval, candidate_eval, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
+    from core import annotate_eval, candidate_eval, cursor_agent, document_qa, entity_harvest, legacy_import, openrouter_executor as ox, result_assemble, source_identity as si, version_select
     from core.artifact_store import ArtifactStore
     from core.pipeline_ingest import merge_author
     from core.renderer import render_bilingual, render_zh
@@ -36,18 +36,52 @@ except ImportError:  # 作为脚本运行
 TranslateFn = Callable[[Dict[str, Any]], Dict[str, Any]]
 
 
-def _openrouter_fn(model: str = ox.DEFAULT_MODEL) -> TranslateFn:
+def _checkpoint_path(checkpoint_dir: Optional[Path], bundle: Dict[str, Any]) -> Optional[Path]:
+    """断点文件与最终产物同名同格式(`<sid>.zh.tsv`):跑完就是产物,中断了就是续跑输入。"""
+    if checkpoint_dir is None:
+        return None
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    return checkpoint_dir / f"{bundle['task']['document_id'].rsplit(':', 1)[-1]}.zh.tsv"
+
+
+def _openrouter_fn(model: str = ox.DEFAULT_MODEL, checkpoint_dir: Optional[Path] = None,
+                   carry_previous_translation: bool = False) -> TranslateFn:
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         raise RuntimeError("executor=openrouter 需要环境变量 OPENROUTER_API_KEY")
-    return lambda bundle: ox.translate_bundle(bundle, lambda m: ox.openrouter_call(m, model, key), model=model)
+    return lambda bundle: ox.translate_bundle(
+        bundle, lambda m: ox.openrouter_call(m, model, key), model=model,
+        checkpoint_path=_checkpoint_path(checkpoint_dir, bundle),
+        carry_previous_translation=carry_previous_translation,
+    )
 
 
-def make_translate_fn(executor: str, model: Optional[str] = None) -> TranslateFn:
-    """executor 名 → translate_fn(bundle)->result。自动路线在此实现;agent 路线(cursor/claude)
-    不在此(由 skill 薄壳调 prepare/finish 自己翻),CLI 不接受。"""
+def _cursor_agent_fn(model: str = cursor_agent.DEFAULT_MODEL,
+                     checkpoint_dir: Optional[Path] = None,
+                     carry_previous_translation: bool = False) -> TranslateFn:
+    """与 _openrouter_fn 唯一的差别是传输层:同一个 translate_bundle、同一套逐段 prompt 与重试阶梯。
+
+    Cursor 会员额度内免费,所以长篇重译优先走这条;OpenRouter 那条留作额度耗尽时的兜底。
+    """
+    return lambda bundle: ox.translate_bundle(
+        bundle, lambda m: cursor_agent.cursor_agent_call(m, model), model=model,
+        checkpoint_path=_checkpoint_path(checkpoint_dir, bundle),
+        carry_previous_translation=carry_previous_translation,
+        producer_name="cursor-agent", producer_type="harness",
+    )
+
+
+def make_translate_fn(executor: str, model: Optional[str] = None,
+                      checkpoint_dir: Optional[Path] = None,
+                      carry_previous_translation: bool = False) -> TranslateFn:
+    """executor 名 → translate_fn(bundle)->result。IDE 里人工驱动的 agent 路线不在此
+    (由 skill 薄壳调 prepare/finish 自己翻);cursor-agent 是它的无头 CLI 形态,可自动编排。"""
     if executor == "openrouter":
-        return _openrouter_fn(model or ox.DEFAULT_MODEL)
+        return _openrouter_fn(model or ox.DEFAULT_MODEL, checkpoint_dir, carry_previous_translation)
+    if executor == "cursor-agent":
+        return _cursor_agent_fn(model or cursor_agent.DEFAULT_MODEL, checkpoint_dir,
+                                carry_previous_translation)
     raise ValueError(f"未知/不可自动执行的 executor: {executor!r}(cursor/claude 走 skill 薄壳)")
 
 
@@ -216,15 +250,48 @@ def finish_document(
     return report
 
 
+def _write_zh_tsv(results_dir: Path, source_id: str, bundle: Dict[str, Any], result: Dict[str, Any]) -> Path:
+    """把 API 路线的 result 落成与 agent 路线同款的 v2 三列 `<sid>.zh.tsv`。
+
+    自动路线本来只往 store 里发布,workspace 没有可读可改的译文产物 → review/fill 无处下手,
+    修一段就得写临时脚本从 store 反推(pixiv 27417304 的教训)。两条路线统一到同一个 TSV 后,
+    `MODE=finish RESULTS_DIR=...` 对两者都成立。
+    """
+    texts = {c["segment_id"]: c["text"] for c in result.get("candidates", [])}
+    results_dir.mkdir(parents=True, exist_ok=True)
+    out = results_dir / f"{source_id}.zh.tsv"
+    lines = [
+        f"{index}\t{seg['source_text'][:12]}\t{texts.get(seg['segment_id'], '')}"
+        for index, seg in enumerate(bundle["segments"])
+    ]
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
+
+
 def translate_document(
     provider, source_path, store, translate_fn, render_dir=None, bilingual_dir=None, entity_store=None,
-    entity_review_queue=None,
+    entity_review_queue=None, results_dir=None, jobs_dir=None,
 ) -> Dict[str, Any]:
     """自动路线单篇：prepare → translate_fn(边译边锁本文实体) → finish。"""
     prep = prepare_document(provider, source_path, store, bilingual_dir, entity_store=entity_store)
+    if jobs_dir is not None:
+        # **job 必须和 tsv 一起落**:改 tsv 后重跑 finish 要用**本次 prepare 的原始 job** 组装,
+        # 否则要么没有 job、要么用上一轮遗留的旧 job → task_digest 不符被整份 quarantine。
+        jobs_dir = Path(jobs_dir)
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+        (jobs_dir / f"{prep['source_id']}.job.json").write_text(
+            json.dumps(prep["bundle"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     result = translate_fn(prep["bundle"])
-    return finish_document(provider, source_path, store, result, render_dir, bilingual_dir,
-                           entity_store=entity_store, entity_review_queue=entity_review_queue)
+    report = finish_document(provider, source_path, store, result, render_dir, bilingual_dir,
+                             entity_store=entity_store, entity_review_queue=entity_review_queue)
+    if results_dir is not None:
+        report["zh_tsv"] = str(_write_zh_tsv(Path(results_dir), prep["source_id"], prep["bundle"], result))
+        # result.json 是规范业务工件,verify 把它当硬条件;auto 路线的 result 就在手里,由 harness 落盘
+        # (仍不是执行器手写身份字段——身份来自 prepare 的 bundle)。
+        result_path = Path(results_dir) / f"{prep['source_id']}.result.json"
+        result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        report["result_json"] = str(result_path)
+    return report
 
 
 def prepare_user(provider, source_dir, store_root, jobs_dir, *, bilingual_dir=None, entity_store=None, limit=None) -> Dict[str, Any]:
@@ -297,13 +364,35 @@ def _sync_result_from_tsv(
     current_producer = current.get("producer", {}) if current else {}
     effective_producer = producer_name or current_producer.get("name") or "agent"
     effective_model = model if model is not None else current_producer.get("model")
+    # producer type 沿用现有 result:auto 路线产的是 api/<executor>,重组不该把它改写成 harness。
+    effective_type = current_producer.get("type") or "harness"
+    # 内联复检留下的 segment_quality 等**非实体 findings 是待人工复核的告警**,
+    # 重组时若只保留 names 派生的 findings,等于静默删掉它们(Codex #194 复审)。
+    # 它们绑定 segment_id,与 TSV 是否被改无关,原样带过来。
+    # 只保留**对应候选文本未变**的非实体 finding:若人工已在 TSV 里修好那段(例如改掉邻段窜入),
+    # 无条件复制会让 result 继续声称该段有错,与当前候选不符(Codex #194 复审)。
+    current_texts = {c.get("segment_id"): c.get("text") for c in (current or {}).get("candidates", [])}
+    # translations 按**段序号**索引(parse_translations_tsv 的契约),不是 segment_id。
+    index_of = {seg["segment_id"]: i for i, seg in enumerate(bundle["segments"])}
+
+    def _still_applies(finding: Dict[str, Any]) -> bool:
+        try:
+            sid_of = json.loads(finding.get("evidence") or "{}").get("segment_id")
+        except (TypeError, ValueError):
+            sid_of = None
+        if not sid_of or sid_of not in index_of:
+            return False              # 无法定位到段 → 无法证明仍适用,不带过来
+        return current_texts.get(sid_of) == translations.get(index_of[sid_of])
+    carried = [f for f in (current or {}).get("findings", [])
+               if f.get("code") != entity_harvest.ENTITY_FINDING_CODE and _still_applies(f)]
     expected = result_assemble.assemble_result(
         bundle,
         translations,
         producer_name=effective_producer,
+        producer_type=effective_type,
         model=effective_model,
         completed_at=current.get("completed_at") if current else None,
-        findings=findings,
+        findings=carried + findings,
     )
     if current is None or _stable_result_signature(current) != _stable_result_signature(expected):
         result_path.write_text(json.dumps(expected, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -624,6 +713,13 @@ def finish_annotate_document(
             source_text = source_path.read_text(encoding="utf-8")
             (render_dir / f"{sid_short}.study.txt").write_text(
                 render_bilingual(rev, source_text, translations, annotations=annotations), encoding="utf-8")
+            # provenance:study = 注解版本 + 当前翻译版本交织。只在 manifest 里记 ref 的版本号
+            # 证明不了"这个文件是那个版本渲染的"——注解推进后渲染失败时,旧 study.txt 会被绑上
+            # 新版本号且 verify 全绿(Codex #194 三次提出)。渲染产物自带版本,合集据此核对。
+            (render_dir / f"{sid_short}.study.meta.json").write_text(
+                json.dumps({"annotate_version_id": version["version_id"],
+                            "translate_version_id": trans_ref["version_id"]},
+                           ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
             report["study_rendered"] = True
     return report
 
@@ -765,8 +861,13 @@ def translate_user(
     entity_store: Optional[Path] = None,
     entity_review_queue: Optional[Path] = None,
     limit: Optional[int] = None,
+    results_dir: Optional[Path] = None,
+    jobs_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """整作者逐篇翻译并合并整本；首次译名可在发布后送入 review。"""
+    """整作者逐篇翻译并合并整本；首次译名可在发布后送入 review。
+
+    传 results_dir/jobs_dir 时,每篇同时落 v2 三列 `<sid>.zh.tsv` 与本次 prepare 的原始 job
+    (与 agent 路线同款):改 tsv 后 `MODE=finish RESULTS_DIR=... JOBS_DIR=...` 即可重新组装发布。"""
     source_dir, store_root = Path(source_dir), Path(store_root)
     store = ArtifactStore(store_root)
     sources = sorted(source_dir.glob("*.txt"))
@@ -778,6 +879,7 @@ def translate_user(
             docs.append(translate_document(
                 provider, src, store, translate_fn, render_dir, bilingual_dir,
                 entity_store=entity_store, entity_review_queue=entity_review_queue,
+                results_dir=results_dir, jobs_dir=jobs_dir,
             ))
         except Exception as exc:  # 逐篇容错
             docs.append({"source": src.name, "status": "error", "error": f"{type(exc).__name__}: {exc}"})
@@ -814,7 +916,9 @@ def main() -> int:
                         help="本篇首次译名提案的 review 队列根目录(auto/finish 共用)")
     parser.add_argument("--results-dir", type=Path, default=None, help="mode=finish 的 agent result 目录")
     parser.add_argument("--bilingual-dir", type=Path, default=None, help="可选:已有 legacy 译文作 incumbent")
-    parser.add_argument("--executor", default="openrouter", help="mode=auto 的执行器(openrouter)")
+    parser.add_argument("--executor", default="openrouter", help="mode=auto 的执行器(openrouter/cursor-agent)")
+    parser.add_argument("--carry-prev-zh", action="store_true",
+                        help="把上一段已定稿译文也注入 prompt(风格锚点;A/B 验证中)")
     parser.add_argument("--producer", default=None, help="mode=finish 从 TSV 组装 result 时记录的 producer 名")
     parser.add_argument("--model", default=None)
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 篇(控成本)")
@@ -875,11 +979,18 @@ def main() -> int:
         print(json.dumps(m if failed else m["summary"], ensure_ascii=False, indent=2 if failed else None))
         return 1 if failed else 0
 
-    translate_fn = make_translate_fn(args.executor, args.model)
+    # TSV 与它的原始 job 必须成对:只有 TSV 时 `MODE=finish` 组装不了(报"从 tsv 组装需要 jobs_dir"),
+    # 只有 job 时留下没有译文的孤儿。auto 入口在这里拦住,不把这种组合留到 finish 才炸。
+    if bool(args.results_dir) != bool(args.jobs_dir):
+        parser.error("mode=auto 的 --results-dir 与 --jobs-dir 必须同时提供:"
+                     "TSV 要靠同一次 prepare 的 job 才能重新组装发布")
+    translate_fn = make_translate_fn(args.executor, args.model, checkpoint_dir=args.results_dir,
+                                     carry_previous_translation=args.carry_prev_zh)
     manifest = translate_user(
         args.provider, args.source_dir, args.store, args.render_dir, translate_fn,
         bilingual_dir=args.bilingual_dir, entity_store=args.entity_store,
         entity_review_queue=args.entity_review_queue, limit=args.limit,
+        results_dir=args.results_dir, jobs_dir=args.jobs_dir,
     )
     print(json.dumps(manifest["summary"], ensure_ascii=False))
     return 0

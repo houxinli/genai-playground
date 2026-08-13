@@ -53,6 +53,20 @@ class EntityMemoryTest(unittest.TestCase):
             entities,
         )
 
+    def test_parse_accepts_space_collapsed_te_protocol(self):
+        translation, entities = eh.parse_executor_response(
+            "T 卡尔亚笑了。\nE カルア 卡尔亚"
+        )
+        self.assertEqual("卡尔亚笑了。", translation)
+        self.assertEqual([{"source": "カルア", "target": "卡尔亚"}], entities)
+
+    def test_parse_accepts_extra_e_columns(self):
+        translation, entities = eh.parse_executor_response(
+            "T\tK子红了脸。\nE\tＫ子\tＫ子\tK子"
+        )
+        self.assertEqual("K子红了脸。", translation)
+        self.assertEqual([{"source": "Ｋ子", "target": "K子"}], entities)
+
     def test_plain_single_line_response_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "首行"):
             eh.parse_executor_response("普通译文。")
@@ -60,8 +74,16 @@ class EntityMemoryTest(unittest.TestCase):
     def test_multiline_response_requires_te_protocol(self):
         with self.assertRaisesRegex(ValueError, "首行"):
             eh.parse_executor_response("译文\n额外解释")
-        with self.assertRaisesRegex(ValueError, "第 2 行"):
-            eh.parse_executor_response("T\t译文\n多余说明")
+        text, entities = eh.parse_executor_response("T\t译文\n多余说明")
+        self.assertEqual("译文多余说明", text)
+        self.assertEqual([], entities)
+
+    def test_parse_folds_t_continuation_before_entities(self):
+        text, entities = eh.parse_executor_response(
+            "T\t前半\n后半\nE\tカルア\t卡尔亚\n备注忽略"
+        )
+        self.assertEqual("前半后半", text)
+        self.assertEqual([{"source": "カルア", "target": "卡尔亚"}], entities)
 
     def test_first_use_locks_and_later_variant_only_rewrites_current_text(self):
         locked = {}
@@ -170,3 +192,58 @@ class EntityReviewTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrailingEntityRecordTest(unittest.TestCase):
+    """E 记录被空格续在 T 行末尾:解析层拆回来,不要把协议残留当译文发布。"""
+
+    def test_trailing_space_separated_entity_is_split_off(self):
+        text, obs = eh.parse_executor_response("T\t少年的肉棒不会改变。E ペニス 肉棒")
+        self.assertEqual("少年的肉棒不会改变。", text)
+        self.assertEqual([{"source": "ペニス", "target": "肉棒"}], obs)
+
+    def test_plain_translation_is_untouched(self):
+        for good in ("普通译文，句尾没有实体记录", "他说了 E 这个字母", "结尾是英文 THE END"):
+            with self.subTest(good=good):
+                text, obs = eh.parse_executor_response(f"T\t{good}")
+                self.assertEqual(good, text)
+                self.assertEqual([], obs)
+
+
+class TrailingAnnotationVariantsTest(unittest.TestCase):
+    """实测过的几种「模型把注记续在译文末尾」写法,解析层都要摘干净。"""
+
+    def test_bracketed_e_record_with_comma(self):
+        text, obs = eh.parse_executor_response("T\t注入她的乳沟中。[E]ルーナ,露娜")
+        self.assertEqual("注入她的乳沟中。", text)
+        self.assertEqual([{"source": "ルーナ", "target": "露娜"}], obs)
+
+    def test_bracketed_e_record_without_target(self):
+        text, obs = eh.parse_executor_response("T\t用巨乳温柔地夹住。[E] なし")
+        self.assertEqual("用巨乳温柔地夹住。", text)
+        self.assertEqual([], obs)
+
+    def test_trailing_tags_style_annotation(self):
+        text, obs = eh.parse_executor_response("T\t好想揉捏……♡）[乳交 / 乳交]")
+        self.assertEqual("好想揉捏……♡）", text)
+        self.assertEqual([], obs)
+
+    def test_tags_segment_itself_is_untouched(self):
+        # metadata.tags 段整段就是括号列表,不能被尾巴规则吃掉
+        tags = "[R-18 / R-18, パイズリ / 乳交, 爆乳 / 爆乳]"
+        text, obs = eh.parse_executor_response(f"T\t{tags}")
+        self.assertEqual(tags, text)
+        self.assertEqual([], obs)
+
+
+class TrailingTagsNarrowingTest(unittest.TestCase):
+    """尾随 tags 判据必须窄:只认 `X / Y`(斜杠两侧有空格)这种 tags 渲染特征。"""
+
+    def test_legit_bracket_choice_is_kept(self):
+        for good in ("请选择[是/否]", "格式为[年/月/日]", "标注[A/B]测试"):
+            with self.subTest(good=good):
+                self.assertEqual(good, eh.parse_executor_response(f"T\t{good}")[0])
+
+    def test_tags_style_leak_is_still_stripped(self):
+        self.assertEqual("好想揉捏……♡）",
+                         eh.parse_executor_response("T\t好想揉捏……♡）[乳交 / 乳交]")[0])
