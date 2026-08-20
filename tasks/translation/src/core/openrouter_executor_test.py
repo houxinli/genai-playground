@@ -810,3 +810,30 @@ class TenthRoundFixesTest(unittest.TestCase):
             self.assertNotIn("半行没写完", cp.read_text(encoding="utf-8"))
             # 轮换后的新断点必须能再次解析(否则下次恢复仍在同一处失败)
             self.assertIsNotNone(ex._load_checkpoint(cp, bundle))
+
+
+class MarkerPatternTest(unittest.TestCase):
+    """结构标记用模式判定:固定集合每漏一种就重演一次「标记段被塞进邻段正文」。"""
+
+    def test_known_and_symbolic_markers(self):
+        for m in ("[newpage]", "◇", "◇◇◇", "＊＊＊", "＊＊＊＊＊＊", "──────────", "※"):
+            self.assertTrue(ex.is_passthrough_segment(m), m)
+
+    def test_real_text_is_not_a_marker(self):
+        for t in ("「おはよう」", "犬がいた。", "──ぶびゅッッッ♡♡♡", "……", "♡♡♡"):
+            self.assertFalse(ex.is_passthrough_segment(t), t)
+
+    def test_symbolic_marker_passes_through_without_api_call(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        bundle["segments"][0]["source_text"] = "◇"
+        calls = []
+
+        def fake(messages):
+            line = [l for l in messages[1]["content"].splitlines() if l.startswith("[翻译这一段]")][0]
+            calls.append(line)
+            return f"T\t{TR.get(line.split('] ', 1)[1], '译文')}"
+
+        r = ex.translate_bundle(bundle, fake)
+        self.assertEqual("◇", r["candidates"][0]["text"])
+        self.assertFalse(any("◇" in c for c in calls))

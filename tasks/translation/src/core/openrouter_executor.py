@@ -136,9 +136,21 @@ def segment_quality_errors(source_text: str, text: str, previous_text: str = "")
 
 
 # 结构标记段:源文整段就是一个排版标记,没有可译内容。喂给模型只会让它拿邻句填空
-# (实测 pixiv 9425701 三篇都把整段邻段正文塞进了 `[newpage]`),原样透传即可。
-# 语料里 725 处,顺带省掉同等数量的 API 调用。
+# (实测 `[newpage]` 被塞进整段邻段正文;`◇` 被塞进整句对白),原样透传即可。
+# 不用固定集合而用模式:语料里除 [newpage](725)外还有 ＊＊＊(789)、◇(348)、──────(60)、※ 等,
+# 固定集合每漏一种就重演一次同样的故障。
 PASSTHROUGH_SEGMENTS = frozenset({"[newpage]"})
+_MARKER_CHARS = "◇◆※＊*─━-＝=~〜・"
+
+
+def is_passthrough_segment(source_text: str) -> bool:
+    """整段只由排版符号构成(或已知标记),没有可译内容。"""
+    text = source_text.strip()
+    if not text:
+        return False
+    if text in PASSTHROUGH_SEGMENTS:
+        return True
+    return len(text) <= 12 and all(ch in _MARKER_CHARS for ch in text)
 
 
 _FORMAT_REWRITE = (
@@ -399,7 +411,7 @@ def translate_bundle(
     previous_text = ""
     for index, seg in enumerate(bundle["segments"]):
         marker = seg["source_text"].strip()
-        if marker in PASSTHROUGH_SEGMENTS and index not in done:
+        if is_passthrough_segment(seg["source_text"]) and index not in done:
             candidates.append({
                 "result_candidate_key": candidate_key,
                 "segment_id": seg["segment_id"],

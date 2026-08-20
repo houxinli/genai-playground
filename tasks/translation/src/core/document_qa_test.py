@@ -93,3 +93,45 @@ class UndertranslationTest(unittest.TestCase):
         segs, tr = self._doc(0.30)
         f = [x for x in document_qa.audit_document_translations(segs, tr) if x["code"] == "undertranslation"][0]
         self.assertEqual("warning", f["severity"])   # 质量问题不阻断发布
+
+
+class OvertranslationTest(unittest.TestCase):
+    """判据此前只有下限:实测 9 篇 deepseek 译文 0.99–1.85 一路绿灯,含 29 字→4095 字的重复循环段。"""
+
+    @staticmethod
+    def _doc(ratio: float, n: int = 40):
+        segs, tr = [], {}
+        src = "友達とLINEしてただけよ、そんなに楽しそうに見えたの？"
+        for i in range(n):
+            sid = f"rev:{i:06d}:x"
+            segs.append({"segment_id": sid, "kind": "body", "source_text": src})
+            tr[sid] = "译" * max(1, int(len(src) * ratio))
+        return segs, tr
+
+    def test_flags_whole_document_inflation(self):
+        segs, tr = self._doc(1.5)
+        codes = [f["code"] for f in document_qa.audit_document_translations(segs, tr)]
+        self.assertIn("overtranslation", codes)
+
+    def test_normal_ratio_is_clean(self):
+        segs, tr = self._doc(0.72)
+        codes = [f["code"] for f in document_qa.audit_document_translations(segs, tr)]
+        self.assertNotIn("overtranslation", codes)
+        self.assertNotIn("segment_overlong", codes)
+
+    def test_flags_single_runaway_segment(self):
+        # 整篇均值会被正常段稀释,极端段必须单独抓
+        segs, tr = self._doc(0.72)
+        segs.append({"segment_id": "rev:999999:x", "kind": "body", "source_text": "──ぶびゅッッッ♡♡♡"})
+        tr["rev:999999:x"] = "噗" * 4095
+        f = [x for x in document_qa.audit_document_translations(segs, tr) if x["code"] == "segment_overlong"]
+        self.assertEqual(1, len(f))
+        self.assertIn("rev:999999:x", f[0]["segments"])
+
+    def test_short_expansion_is_not_flagged(self):
+        # 「はい♡」→「好的呢♡」这类短段正常膨胀不该报
+        segs, tr = self._doc(0.72)
+        segs.append({"segment_id": "rev:888888:x", "kind": "body", "source_text": "はい♡"})
+        tr["rev:888888:x"] = "好的呢♡"
+        codes = [f["code"] for f in document_qa.audit_document_translations(segs, tr)]
+        self.assertNotIn("segment_overlong", codes)

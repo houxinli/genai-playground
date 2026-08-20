@@ -22,6 +22,13 @@ NEIGHBOR_OVERLAP_REPORT = 0.55
 # 这类问题不会触发 same_as_source / kana_residue / neighbor_overlap 中的任何一条,
 # 实测 pixiv 9425701 六月那批(整批 0.41–0.48)因此一段都没报警。
 UNDERTRANSLATION_RATIO = 0.55
+# 超译:判据此前只有下限,上限完全无人守卫。实测 fanbox momizi813 的 9 篇 deepseek 译文
+# 整篇比值 0.99–1.85,其中单段出现 29 字源文 → 4095 字译文(模型陷入 token 重复循环直到
+# max_tokens 截断),以及结构标记段被塞进整句对白 —— 全部一路绿灯发布并进了 GDrive。
+OVERTRANSLATION_RATIO = 1.10
+# 单段膨胀:整篇均值会被大量正常段稀释,极端段必须单独抓。
+SEGMENT_OVERLONG_RATIO = 3.0
+SEGMENT_OVERLONG_MIN_CHARS = 60
 # 整篇均值才有统计意义:单段短译可能只是原文短。低于这个段数不判。
 UNDERTRANSLATION_MIN_SEGMENTS = 30
 
@@ -116,6 +123,33 @@ def _undertranslation_findings(
     }]
 
 
+def _overtranslation_findings(
+    segments: Sequence[Dict[str, Any]], translations_by_segment: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    ratio = translation_length_ratio(segments, translations_by_segment)
+    if ratio is not None and ratio > OVERTRANSLATION_RATIO:
+        out.append({
+            "code": "overtranslation",
+            "severity": "warning",
+            "message": f"整篇译文/源文字数比 {ratio:.2f} 高于 {OVERTRANSLATION_RATIO}，疑似重复膨胀或混入邻段",
+            "segments": [], "indices": [],
+        })
+    hits = [(i, s["segment_id"]) for i, s in enumerate(segments)
+            if s.get("kind") == "body"
+            and len(_norm(translations_by_segment.get(s["segment_id"], ""))) >= SEGMENT_OVERLONG_MIN_CHARS
+            and len(_norm(translations_by_segment[s["segment_id"]]))
+                > SEGMENT_OVERLONG_RATIO * max(1, len(_norm(s["source_text"])))]
+    if hits:
+        out.append({
+            "code": "segment_overlong",
+            "severity": "warning",
+            "message": f"{len(hits)} 段译文长度超过源文 {SEGMENT_OVERLONG_RATIO} 倍，疑似重复循环或整段窜入",
+            "segments": [sid for _, sid in hits], "indices": [i for i, _ in hits],
+        })
+    return out
+
+
 def audit_document_translations(
     segments: Sequence[Dict[str, Any]], translations_by_segment: Dict[str, str], *, min_run: int = 3
 ) -> List[Dict[str, Any]]:
@@ -126,7 +160,9 @@ def audit_document_translations(
     block_findings = _block_paste_findings(ordered, translations_by_segment, min_run=min_run)
     neighbor_findings = _neighbor_overlap_findings(ordered, translations_by_segment)
     under_findings = _undertranslation_findings(ordered, translations_by_segment)
-    return shape_findings + duplicate_findings + block_findings + neighbor_findings + under_findings
+    over_findings = _overtranslation_findings(ordered, translations_by_segment)
+    return (shape_findings + duplicate_findings + block_findings
+            + neighbor_findings + under_findings + over_findings)
 
 
 def translation_shape_errors(text: str) -> List[str]:
