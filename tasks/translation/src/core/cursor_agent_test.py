@@ -119,3 +119,31 @@ class TransportRetryTest(unittest.TestCase):
                                  retries=3, backoff=2.0, sleep_fn=waits.append)
         self.assertEqual([2.0, 4.0, 8.0], waits)
         self.assertEqual(4, calls["n"])
+
+
+class FatalErrorTest(unittest.TestCase):
+    """额度耗尽不该重试:它一秒都不会自愈,重试只是把失败推迟几十秒。"""
+
+    def test_quota_exhaustion_fails_immediately(self):
+        calls = {"n": 0}
+
+        def out_of_usage(argv, **kw):
+            calls["n"] += 1
+            return _Proc(rc=1, err="ActionRequiredError: You're out of usage. Switch to Auto...")
+
+        waits = []
+        with self.assertRaises(ca.CursorAgentUnavailable):
+            ca.cursor_agent_call([{"role": "user", "content": "x"}], runner=out_of_usage,
+                                 retries=3, sleep_fn=waits.append)
+        self.assertEqual(1, calls["n"])   # 只调一次
+        self.assertEqual([], waits)       # 一次都没退避
+
+    def test_transient_error_still_retries(self):
+        calls = {"n": 0}
+
+        def flaky(argv, **kw):
+            calls["n"] += 1
+            return _Proc(out="T\ta") if calls["n"] > 1 else _Proc(rc=1, err="connection reset")
+
+        ca.cursor_agent_call([{"role": "user", "content": "x"}], runner=flaky, sleep_fn=lambda _s: None)
+        self.assertEqual(2, calls["n"])

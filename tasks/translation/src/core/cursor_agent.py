@@ -14,6 +14,21 @@ import time
 from typing import Dict, List
 
 DEFAULT_MODEL = "cursor-grok-4.5-high"
+# 额度耗尽/需要人工处置的错误**重试毫无意义**,只是把失败推迟几十秒。
+# 实测额度用尽时退避重试了 4 次(3+6+12s)才放弃,而它一秒都不会自愈。
+# 与 openrouter_call 区分"可重试状态码"和"4xx 立即抛出"是同一类判断。
+_FATAL_MARKERS = (
+    "out of usage",
+    "ActionRequiredError",
+    "Increase limits",
+    "Unauthorized",
+    "not logged in",
+    "invalid api key",
+)
+
+
+class CursorAgentUnavailable(RuntimeError):
+    """额度/鉴权类不可重试故障:调用方应当停止本轮而不是继续烧时间。"""
 # 无头模式必须显式 --trust:否则 CLI 会停在 workspace trust 交互提示上,脚本里表现为静默卡死。
 _BASE_ARGS = ("cursor-agent", "-p", "--trust", "--output-format", "text")
 
@@ -47,11 +62,17 @@ def cursor_agent_call(messages: List[Dict[str, str]], model: str = DEFAULT_MODEL
         try:
             proc = runner(argv, capture_output=True, text=True, timeout=timeout)
             if proc.returncode != 0:
-                raise RuntimeError(f"cursor-agent 退出码 {proc.returncode}: {(proc.stderr or '')[:200]}")
+                detail = ((proc.stderr or "") + (proc.stdout or ""))[:400]
+                if any(m.lower() in detail.lower() for m in _FATAL_MARKERS):
+                    raise CursorAgentUnavailable(
+                        f"cursor-agent 不可用(额度/鉴权,重试无意义): {detail[:200]}")
+                raise RuntimeError(f"cursor-agent 退出码 {proc.returncode}: {detail[:200]}")
             out = (proc.stdout or "").strip()
             if not out:
                 raise RuntimeError("cursor-agent 无输出")
             return out
+        except CursorAgentUnavailable:
+            raise                     # 不可重试:立刻上抛,断点已保住已完成段
         except (RuntimeError, subprocess.TimeoutExpired, OSError) as exc:
             last = exc
             if attempt == retries:
