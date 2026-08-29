@@ -837,3 +837,67 @@ class MarkerPatternTest(unittest.TestCase):
         r = ex.translate_bundle(bundle, fake)
         self.assertEqual("◇", r["candidates"][0]["text"])
         self.assertFalse(any("◇" in c for c in calls))
+
+
+class NarrationPovTest(unittest.TestCase):
+    """滚动叙述视角:逐段翻译丢失了"本篇是第一人称"这个信息,无主语旁白句只能靠猜。"""
+
+    def test_pov_only_from_narration_not_dialogue(self):
+        self.assertEqual("俺", ex.narration_pov("俺は立ち上がった。"))
+        self.assertIsNone(ex.narration_pov("「俺がやるよ」"))   # 台词里的自称与叙述视角无关
+        self.assertIsNone(ex.narration_pov("彼は立ち上がった。"))
+
+    def test_pov_block_only_constrains_subjectless(self):
+        b = ex._pov_block("俺")
+        self.assertIn("第一人称", b)
+        self.assertIn("省略主语", b)
+        self.assertIn("仍按第三人称译", b)      # 源文明写「彼が」的不动
+
+    def test_pov_is_injected_and_rolls_forward(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        bundle["segments"][0]["source_text"] = "俺は歩いた。"
+        bundle["segments"][1]["source_text"] = "立ち上がった。"       # 无主语,应沿用上一段视角
+        seen = []
+
+        def spy(messages):
+            seen.append(messages[0]["content"])
+            return "T\t译文"
+
+        ex.translate_bundle(bundle, spy)
+        self.assertIn("「俺」", seen[0])              # 该段自带证据,注入无害
+        self.assertIn("「俺」", seen[1])              # **关键**:无主语段沿用了上一段的视角
+
+    def test_scene_marker_resets_pov(self):
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+        segs = bundle["segments"]
+        segs[0]["source_text"] = "俺は歩いた。"
+        segs.insert(1, {"segment_id": "mk", "kind": "body", "source_text": "[newpage]"})
+        segs.insert(2, {"segment_id": "s2", "kind": "body", "source_text": "立ち上がった。"})
+        for sid in ("mk", "s2"):
+            bundle["task"]["source_hashes"][sid] = "h"
+        seen = []
+
+        def spy(messages):
+            seen.append(messages[0]["content"])
+            return "T\t译文"
+
+        ex.translate_bundle(bundle, spy)
+        # 场景标记后的无主语段不该继承上一场景的视角(实测 5 篇在场景边界切换人称)
+        self.assertNotIn("本场景叙述视角", seen[1])
+
+    def test_inline_quotes_are_stripped_before_pov(self):
+        # 段内嵌台词里的自称不能当叙述视角(实测让第三人称篇被误判成第一人称)
+        self.assertIsNone(ex.narration_pov("彼は「私がやる」と言って立ち上がった。"))
+        self.assertIsNone(ex.narration_pov("少年は「わしに任せろ」と笑った。"))
+        self.assertEqual("俺", ex.narration_pov("「任せろ」と彼が言うので、俺は頷いた。"))
+
+    def test_pronoun_lookalikes_are_not_pov(self):
+        # 「わしわし」是揉搓拟声、「思わしき」是构词,都不是人称代词(实测让视角乱跳)
+        self.assertIsNone(ex.narration_pov("そのままわしわしと揉みこみ始める。"))
+        self.assertIsNone(ex.narration_pov("女子高生と思わしき彼女は小さな体格をしていた。"))
+        self.assertEqual("わたし", ex.narration_pov("わたしは頷いた。"))   # 假名形态后接助词才算
+        self.assertIn("我", ex._pov_block("わたし"))                      # 目标译法仍是「我」
+        self.assertIsNone(ex.narration_pov("（私だって揉みたい……）"))   # 整段心声不是旁白
+        self.assertEqual("私", ex.narration_pov("私は頷いた。"))

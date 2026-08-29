@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -67,6 +68,51 @@ def _constraints_block(context_pack: Dict[str, Any]) -> str:
     return "【人名/术语硬约束,必须遵守】\n" + "\n".join(lines) if lines else ""
 
 
+# 第一人称代词(旁白里出现即视为叙述者自称)。「彼女」是"女朋友"这个名词,不能当第三人称证据,
+# 所以判定第三人称要用**独立的「彼」**(总数减去「彼女」)。
+# 汉字形态无歧义;假名形态(わたし/あたし)必须后接助词才算代词——否则「わしわし」(揉搓拟声)、
+# 「思わしき」这类构词会被当成人称,导致视角乱跳(实测 16321738/28277797)。
+# 「わし」「ぼく」在本语料里几乎只出现在台词,且与常用词高度撞形,不作为叙述视角证据。
+_FIRST_PERSON_KANJI = ("俺", "僕", "私")
+_FIRST_PERSON_KANA = ("わたし", "あたし")
+_PARTICLES = "はがもをにでとのへや、。…♡」』！？!?"
+_FP_TARGET = {"俺": "我", "僕": "我", "私": "我", "わたし": "我", "あたし": "我"}
+
+
+_QUOTED_RE = re.compile(r"[「『（(][^「『（()）」』]*[)）」』]")
+
+
+def narration_pov(source_text: str) -> Optional[str]:
+    """旁白段里的第一人称自称;台词/心声不算(角色说「俺」与叙述视角无关)。
+
+    **必须剥掉段内嵌的引号**,不能只看开头:实测 `17444543`(第三人称叙述,彼 155 次)因为台词里的
+    「私」被判成第一人称、覆盖 82% 段落;`16321738` 也因某角色台词里的「わし」而视角乱跳。
+    """
+    text = _QUOTED_RE.sub("", source_text).lstrip()
+    # 整段就是心声/台词(以引号或括号开头)→ 不是旁白
+    if not text or text[0] in "「『（(":
+        return None
+    for pron in _FIRST_PERSON_KANJI:
+        if pron in text:
+            return pron
+    for pron in _FIRST_PERSON_KANA:
+        for m in re.finditer(re.escape(pron), text):
+            tail = text[m.end():m.end() + 1]
+            if not tail or tail in _PARTICLES:      # 代词后面几乎总跟助词/标点
+                return pron
+    return None
+
+
+def _pov_block(pov: Optional[str]) -> str:
+    """把当前场景的叙述视角拼成约束。**只约束无主语的旁白句**——
+    源文明写「彼が」的句子照常译成"他",否则会把第三人称段落一并改错。"""
+    if not pov:
+        return ""
+    return (f"【本场景叙述视角】第一人称,叙述者自称「{pov}」=>「{_FP_TARGET.get(pov, '我')}」。"
+            f"旁白中省略主语的句子按第一人称处理,不要译成「他/她」;"
+            f"源文明确写出第三人称主语(彼/少年/人名)的句子仍按第三人称译。台词按说话人自称译。")
+
+
 def _document_targets_block(document_targets: Dict[str, str]) -> str:
     lines = [f"- {source} => {target}" for source, target in document_targets.items()]
     if not lines:
@@ -81,6 +127,7 @@ def build_messages(
     *,
     neighbors_mode: str = "both",
     previous_translation: Optional[str] = None,
+    pov: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     """单段 → chat messages。注入硬约束 + 邻句上下文(邻句只供参考,不翻译/不输出)。
 
@@ -94,6 +141,9 @@ def build_messages(
     document_constraints = _document_targets_block(document_targets or {})
     if document_constraints:
         system += "\n\n" + document_constraints
+    pov_constraints = _pov_block(pov)
+    if pov_constraints:
+        system += "\n\n" + pov_constraints
     neighbors = context_pack.get("neighbors", {}).get(segment["segment_id"], {})
     parts: List[str] = []
     if neighbors.get("prev") and neighbors_mode == "both":
@@ -172,6 +222,7 @@ def _translate_segment(
     call_fn: Callable[[List[Dict[str, str]]], str],
     *,
     carry_previous_translation: bool = False,
+    pov: Optional[str] = None,
 ):
     """一段的三档重试:正常 → 带纠正指令重问 → 拿掉 `[上文]` 重问。返回 (译文, 观察, 剩余问题码)。
 
@@ -189,6 +240,7 @@ def _translate_segment(
         messages = build_messages(
             seg, context_pack, document_targets, neighbors_mode=neighbors_mode,
             previous_translation=previous_text if carry_previous_translation else None,
+            pov=pov,
         )
         if correction is not None:
             messages = messages + [{"role": "user", "content": correction}]
@@ -409,8 +461,17 @@ def translate_bundle(
                     findings.append(entity_harvest.entity_finding(source, target, seg["segment_id"], index + 1))
                     break
     previous_text = ""
+    # 滚动叙述视角:旁白里出现显式第一人称即记录,**场景标记处清空**。
+    # 逐段翻译时 prompt 里没有任何视角信息,无主语的旁白句只能靠猜 → 同篇一会儿"我"一会儿"他"。
+    # 不用全篇锁定是因为实测 111 篇里有 5 篇在场景之间切换叙述人称(俺→私→俺),
+    # 全篇锁会把这些篇整段译错;而它们的切换点全在场景边界,所以在边界清空正好跟上。
+    scene_pov: Optional[str] = None
     for index, seg in enumerate(bundle["segments"]):
         marker = seg["source_text"].strip()
+        if is_passthrough_segment(seg["source_text"]):
+            scene_pov = None                      # 新场景,等它自己声明视角
+        else:
+            scene_pov = narration_pov(seg["source_text"]) or scene_pov
         if is_passthrough_segment(seg["source_text"]) and index not in done:
             candidates.append({
                 "result_candidate_key": candidate_key,
@@ -438,6 +499,7 @@ def translate_bundle(
         text, observations, seg_errors = _translate_segment(
             seg, context_pack, document_targets, previous_text, call_fn,
             carry_previous_translation=carry_previous_translation,
+            pov=scene_pov,
         )
         if seg_errors:
             # 退无可退:结构错(进不了 TSV)仍然中断整篇;质量错(邻段窜入/超长)照常发布并记 finding,

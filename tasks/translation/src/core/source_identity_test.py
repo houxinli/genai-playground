@@ -151,3 +151,23 @@ class FixtureHygieneTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FrontMatterErrorMessageTest(unittest.TestCase):
+    """区分"没有 front matter"与"有但解析失败":后者报同一句话会把排查引向错误方向。"""
+
+    def test_unparsable_front_matter_says_so(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "x.txt"
+            p.write_text("---\ntitle: サークル名 : Pillow talk\n---\n\n正文\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "front matter 存在但解析失败"):
+                si.parse_source(p)
+
+    def test_missing_front_matter_still_reported(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "y.txt"
+            p.write_text("没有任何 front matter\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "缺少 YAML front matter"):
+                si.parse_source(p)

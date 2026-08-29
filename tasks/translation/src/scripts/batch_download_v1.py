@@ -135,11 +135,21 @@ def build_yaml_frontmatter(meta: Dict[str, Any]) -> str:
     # 仅序列化关键字段，保持与需求一致
     # 注意：简单手写 YAML，避免引入额外依赖
     def yaml_escape(s: Optional[str]) -> str:
+        """转成合法的 YAML 标量。
+
+        原来只替换换行、什么都没转义,名不副实:caption 里出现 ` : `(空格冒号空格)时
+        YAML 会当成嵌套映射 → 整块 front matter 解析失败返回 None → 下游报"缺少 front matter"。
+        实测 pixiv 9425701:18137868 因此从下载起就无法进入流水线,一直没人发现。
+        """
         if s is None:
             return ""
-        s = str(s)
-        s = s.replace("\n", " ")
-        return s
+        text = str(s).replace("\n", " ").replace("\r", " ")
+        # 需要加引号的形态:含 ` : `/`: `、以 YAML 指示符开头、含 ` #`、或首尾空白
+        risky = (": " in text or text.endswith(":") or " #" in text
+                 or text[:1] in "-?:,[]{}#&*!|>%@`\"'" or text != text.strip())
+        if not risky:
+            return text
+        return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'  
 
     series = meta.get("series") or {}
     author = meta.get("user") or {}

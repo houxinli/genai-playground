@@ -90,6 +90,17 @@ def parse_source(path: Path) -> Tuple[Dict[str, Any], List[str]]:
     content = Path(path).read_text(encoding="utf-8")
     meta, body = parse_yaml_front_matter(content)
     if not isinstance(meta, dict):
+        # 区分"没有 front matter"和"有但解析失败":后者报同一句话会把人引向文件复制/BOM/
+        # 分隔符等错误方向(实测绕了好几步才定位到 caption 里的 ` : ` 让 YAML 解析返回 None)。
+        head = content.lstrip()
+        if head.startswith("---"):
+            detail = ""
+            try:
+                import yaml
+                yaml.safe_load(head[3:].split("\n---", 1)[0])
+            except Exception as exc:
+                detail = f": {str(exc).splitlines()[0]}"
+            raise ValueError(f"{path}: front matter 存在但解析失败{detail}")
         raise ValueError(f"{path}: 缺少 YAML front matter")
     body_lines = [line.strip() for line in body.splitlines() if line.strip()]
     return meta, body_lines
