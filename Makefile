@@ -99,7 +99,7 @@ mlx-logs:
 	./scripts/manage_mlx.sh logs
 
 # 下载任务管理
-.PHONY: pixiv-download fanbox-download fanbox-browser-script
+.PHONY: provenance pixiv-download fanbox-download fanbox-browser-script
 
 pixiv-download:
 	@echo "📥 下载 Pixiv 作者小说..."
@@ -266,6 +266,12 @@ extract-entities:
 author-collection:
 	@test -n "$(AUTHOR)" && test -n "$(CREATOR)" || { echo "author-collection 需要 AUTHOR= CREATOR="; exit 2; }
 	$(PY) tasks/translation/src/core/author_collection.py --author "$(AUTHOR)" --creator "$(CREATOR)" $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(WORKSPACES),--workspaces-root "$(WORKSPACES)") $(if $(OUT),--out "$(OUT)") $(if $(GDRIVE),--gdrive "$(GDRIVE)") $(if $(VARIANTS),--variants "$(VARIANTS)")
+
+# 翻译溯源:一个 creator 每篇的执行器/模型/时间/质量指标(只读)。
+# 用法: make provenance CREATOR=9425701 [PROVIDER=pixiv] [FORMAT=table|json]
+provenance:
+	@test -n "$(CREATOR)" || { echo "provenance 需要 CREATOR="; exit 2; }
+	$(PY) tasks/translation/src/scripts/provenance_report.py --creator "$(CREATOR)" $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(FORMAT),--format "$(FORMAT)")
 
 # 只读核对现有合集是否仍覆盖全部 current refs，且 per-document rendered/整本输出未漂移。
 author-collection-verify:
