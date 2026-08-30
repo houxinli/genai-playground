@@ -215,6 +215,44 @@ class SegmentQualityGateTest(unittest.TestCase):
         self.assertEqual([], validate_artifact("result", result))
         self.assertEqual([], check_result_against_task(bundle["task"], result))
 
+    def test_content_block_falls_through_the_ladder(self):
+        """内容策略拒绝是**单条 prompt** 的问题:换档位(尤其拿掉 `[上文]`)常常就过了。
+
+        此前它被当成账号级故障直接上抛,一段被拒整篇作废(12240198 停在 340/494 段)。
+        """
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+
+        def blocked_while_prev_context_present(messages):
+            if "[上文" in messages[1]["content"]:
+                raise ex.ContentBlocked("Request blocked ... usage guidelines")
+            line = [l for l in messages[1]["content"].splitlines()
+                    if l.startswith("[翻译这一段]")][0]
+            src = line.split("] ", 1)[1]
+            return f"T\t{TR[src]}"
+
+        result = ex.translate_bundle(bundle, blocked_while_prev_context_present)
+        self.assertEqual(len(bundle["segments"]), len(result["candidates"]))
+        self.assertNotIn("", [c["text"] for c in result["candidates"]])
+
+    def test_content_block_on_every_rung_leaves_the_segment_empty(self):
+        """每一档都被拒:该段留空、继续下一段,不丢掉已译的几百段。
+
+        空候选会阻断建版(#153),这篇会停在 unresolved 等人处理——「宁可空,不要假」。
+        """
+        rev = _rev()
+        bundle = te.export_job(rev, _body_ids(rev))
+
+        def always_blocked(_messages):
+            raise ex.ContentBlocked("Request blocked ... usage guidelines")
+
+        result = ex.translate_bundle(bundle, always_blocked)
+        self.assertEqual(len(bundle["segments"]), len(result["candidates"]))
+        self.assertEqual({""}, {c["text"] for c in result["candidates"]})
+        codes = [f["code"] for f in result["findings"]]
+        self.assertIn("segment_quality", codes)
+        self.assertEqual([], validate_artifact("result", result))
+
     def test_trailing_entity_record_is_recovered_not_published(self):
         # deepseek 把 T 行和 E 行挤在同一物理行:整条协议曾被原样当成译文发布。
         # 现在解析层把它拆回去——译文干净,实体照收。

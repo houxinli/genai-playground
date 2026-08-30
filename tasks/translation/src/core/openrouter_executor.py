@@ -214,6 +214,15 @@ _ONLY_THIS_SEGMENT = (
 )
 
 
+class ContentBlocked(RuntimeError):
+    """模型提供方按内容策略拒绝了**这一条 prompt**(不是账号级故障)。
+
+    传输层抛,`_translate_segment` 接:这是一段的问题,换个档位(尤其是拿掉 `[上文]`,
+    prompt 显著变短)常常就过了,不该像额度耗尽那样中止整篇。各传输层共用这一个类型,
+    所以定义在编排侧而不是某个具体 transport 里。
+    """
+
+
 def _translate_segment(
     seg: Dict[str, Any],
     context_pack: Dict[str, Any],
@@ -236,6 +245,7 @@ def _translate_segment(
         ("next", None),   # 上文是污染源,直接不给
     ]
     best: Optional[tuple] = None
+    blocked = 0
     for neighbors_mode, correction in attempts:
         messages = build_messages(
             seg, context_pack, document_targets, neighbors_mode=neighbors_mode,
@@ -244,15 +254,23 @@ def _translate_segment(
         )
         if correction is not None:
             messages = messages + [{"role": "user", "content": correction}]
-        response = call_fn(messages)
+        try:
+            response = call_fn(messages)
+        except ContentBlocked:
+            blocked += 1
+            continue
         try:
             text, observations = entity_harvest.parse_executor_response(response)
         except ValueError:
             # 协议漂移:同一档内先给一次严格格式纠错机会,避免整篇因一次跑偏中断。
-            response = call_fn(messages + [
-                {"role": "assistant", "content": response},
-                {"role": "user", "content": _FORMAT_REWRITE},
-            ])
+            try:
+                response = call_fn(messages + [
+                    {"role": "assistant", "content": response},
+                    {"role": "user", "content": _FORMAT_REWRITE},
+                ])
+            except ContentBlocked:
+                blocked += 1
+                continue
             try:
                 text, observations = entity_harvest.parse_executor_response(response)
             except ValueError:
@@ -262,6 +280,11 @@ def _translate_segment(
             return text, observations, []
         if best is None or len(errors) < len(best[2]):
             best = (text, observations, errors)
+    if best is None and blocked:
+        # 每一档都被内容策略拒了。按 executor-instructions「宁可空,不要假」:该段留空,
+        # 继续下一段。空候选会阻断建版(#153),所以这篇会停在 unresolved 等人处理,
+        # 而不是丢掉已译的几百段。
+        return "", [], ["content_blocked"]
     if best is None:
         raise ValueError(f"segment {seg['segment_id']} 返回结构污染: 三次重试都无法解析 T/E 协议")
     return best

@@ -138,6 +138,25 @@ class FatalErrorTest(unittest.TestCase):
         self.assertEqual(1, calls["n"])   # 只调一次
         self.assertEqual([], waits)       # 一次都没退避
 
+    def test_content_block_is_not_an_account_level_failure(self):
+        """CLI 把内容策略拒绝也报成 ActionRequiredError,不能按额度耗尽处理:
+
+        那样一段被拒就中止整篇(momizi813:12240198 在 340/494 段处整篇作废),
+        而换个档位重问常常就过了。
+        """
+        calls = {"n": 0}
+
+        def blocked(argv, **kw):
+            calls["n"] += 1
+            return _Proc(rc=1, err="ActionRequiredError: Request blocked We are unable to "
+                                   "complete this request because it was blocked under the "
+                                   "model provider's usage guidelines. Try a less sensitive prompt.")
+
+        with self.assertRaises(ca.ContentBlocked):
+            ca.cursor_agent_call([{"role": "user", "content": "x"}], runner=blocked,
+                                 retries=3, sleep_fn=lambda _s: None)
+        self.assertEqual(1, calls["n"])   # 同一条 prompt 原样重试没意义
+
     def test_transient_error_still_retries(self):
         calls = {"n": 0}
 

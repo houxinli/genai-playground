@@ -13,6 +13,11 @@ import subprocess
 import time
 from typing import Dict, List
 
+try:
+    from .openrouter_executor import ContentBlocked
+except ImportError:  # 直接以脚本方式引入时(仓库里两种 import 形态都在用)
+    from openrouter_executor import ContentBlocked  # type: ignore
+
 DEFAULT_MODEL = "cursor-grok-4.5-high"
 # 额度耗尽/需要人工处置的错误**重试毫无意义**,只是把失败推迟几十秒。
 # 实测额度用尽时退避重试了 4 次(3+6+12s)才放弃,而它一秒都不会自愈。
@@ -24,6 +29,14 @@ _FATAL_MARKERS = (
     "Unauthorized",
     "not logged in",
     "invalid api key",
+)
+# CLI 把内容策略拒绝也报成 ActionRequiredError,于是它落进上面的账号级清单,
+# 一段被拒就中止整篇(momizi813:12240198 在 340/494 段处整篇作废)。
+# 这类是**单条 prompt** 的问题,必须先于 _FATAL_MARKERS 判定。
+_CONTENT_BLOCK_MARKERS = (
+    "request blocked",
+    "usage guidelines",
+    "less sensitive prompt",
 )
 
 
@@ -63,6 +76,8 @@ def cursor_agent_call(messages: List[Dict[str, str]], model: str = DEFAULT_MODEL
             proc = runner(argv, capture_output=True, text=True, timeout=timeout)
             if proc.returncode != 0:
                 detail = ((proc.stderr or "") + (proc.stdout or ""))[:400]
+                if any(m in detail.lower() for m in _CONTENT_BLOCK_MARKERS):
+                    raise ContentBlocked(f"cursor-agent 内容策略拒绝本条 prompt: {detail[:200]}")
                 if any(m.lower() in detail.lower() for m in _FATAL_MARKERS):
                     raise CursorAgentUnavailable(
                         f"cursor-agent 不可用(额度/鉴权,重试无意义): {detail[:200]}")
@@ -71,8 +86,8 @@ def cursor_agent_call(messages: List[Dict[str, str]], model: str = DEFAULT_MODEL
             if not out:
                 raise RuntimeError("cursor-agent 无输出")
             return out
-        except CursorAgentUnavailable:
-            raise                     # 不可重试:立刻上抛,断点已保住已完成段
+        except (CursorAgentUnavailable, ContentBlocked):
+            raise                     # 不可重试:立刻上抛(内容拒绝交给退档阶梯换档位)
         except (RuntimeError, subprocess.TimeoutExpired, OSError) as exc:
             last = exc
             if attempt == retries:
