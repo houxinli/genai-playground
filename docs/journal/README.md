@@ -17,6 +17,9 @@
 
 ## 📅 2026年
 
+### 08月
+- [2026-08-30 翻译覆盖率报告与内容拦截的按段处理](./2026-08-30-coverage-and-content-block.md)
+
 ### 07月
 - [2026-07-18 Finish 隔离状态显式失败](./2026-07-18-finish-quarantine-feedback.md)
 - [2026-07-18 陪读复合词完整读音](./2026-07-18-annotation-full-readings.md)
