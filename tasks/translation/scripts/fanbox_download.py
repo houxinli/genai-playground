@@ -315,9 +315,19 @@ def extract_body_text(detail: Dict) -> Tuple[str, str]:
 
 
 def yaml_escape(value: Optional[str]) -> str:
+    """转成合法的 YAML 标量。
+
+    与 `src/scripts/batch_download_v1.py` 同口径:只替换换行是不够的——title/excerpt 里
+    出现 ` : ` 时 YAML 会当成嵌套映射,整块 front matter 解析失败,下游报"缺少 front matter"。
+    """
     if value is None:
         return ""
-    return str(value).replace("\n", " ").strip()
+    text = str(value).replace("\n", " ").replace("\r", " ").strip()
+    risky = (": " in text or text.endswith(":") or " #" in text
+             or text[:1] in "-?:,[]{}#&*!|>%@`\"'")
+    if not risky:
+        return text
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def build_yaml_frontmatter(detail: Dict, body_type: str, creator_id: str) -> str:

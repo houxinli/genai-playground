@@ -58,7 +58,11 @@ def collect(provider: str, creator: str, workspaces_root: Path) -> List[Dict[str
                 if rec.get("candidate_id"):
                     producers[rec["candidate_id"]] = rec.get("producer") or {}
                     if rec["candidate_id"] in selections.values():
-                        published_at = rec.get("created_at") or published_at
+                        # attestation.created_at = 该候选被产出并背书的时刻,即这段译文的翻译时间。
+                        # 取选中候选里最晚的一条:整篇按最后一段译完的时间算。
+                        when = rec.get("created_at")
+                        if when and (published_at is None or when > published_at):
+                            published_at = when
         counts = collections.Counter(
             (producers.get(cid, {}).get("type"), producers.get(cid, {}).get("name"),
              producers.get(cid, {}).get("model"))
@@ -80,7 +84,8 @@ def collect(provider: str, creator: str, workspaces_root: Path) -> List[Dict[str
             "segments": len(rev["segments"]),
             "producer_type": top[0], "producer": top[1], "model": top[2],
             "mixed_producers": len(counts) > 1,
-            "published_at": published_at,
+            "translated_at": published_at,
+            "published_at": published_at,  # 兼容旧字段名
             "version_id": current,
             "length_ratio": document_qa.translation_length_ratio(rev["segments"], texts),
             "issues": dict(issue),
@@ -90,16 +95,16 @@ def collect(provider: str, creator: str, workspaces_root: Path) -> List[Dict[str
 
 
 def render_table(rows: List[Dict[str, Any]]) -> str:
-    out = [f"{'#':>4} {'source_id':<10} {'执行器':<14} {'模型':<24} {'段':>5} {'比':>5}  {'时间':<10} 问题"]
+    out = [f"{'#':>4} {'source_id':<10} {'执行器':<14} {'模型':<24} {'段':>5} {'比':>5}  {'翻译时间':<16} 问题"]
     for i, r in enumerate(rows, 1):
         if r.get("error"):
             out.append(f"{i:>4} {r['source_id']:<10} ERROR {r['error'][:60]}")
             continue
         ratio = f"{r['length_ratio']:.2f}" if r["length_ratio"] else "  - "
-        when = (r["published_at"] or "")[:10]
+        when = (r.get("translated_at") or r.get("published_at") or "")[:16].replace("T", " ")
         issues = ",".join(f"{k}:{v}" for k, v in r["issues"].items()) or "-"
         out.append(f"{i:>4} {r['source_id']:<10} {(r['producer'] or '?'):<14} {(r['model'] or '-'):<24} "
-                   f"{r['segments']:>5} {ratio:>5}  {when:<10} {issues}")
+                   f"{r['segments']:>5} {ratio:>5}  {when:<16} {issues}")
     counts = collections.Counter((r.get("producer"), r.get("model")) for r in rows if not r.get("error"))
     out.append("")
     for (name, model), n in counts.most_common():
@@ -159,8 +164,7 @@ tr:last-child td{border-bottom:none}
 .bar{position:relative;width:74px;height:6px;border-radius:3px;background:var(--line);overflow:hidden;}
 .bar i{position:absolute;inset:0 auto 0 0;display:block;border-radius:3px;background:var(--accent);}
 .bar b{position:absolute;top:0;bottom:0;background:var(--band);opacity:.55;}
-.grp td{background:var(--accent-soft);font-weight:600;font-size:12px;letter-spacing:.05em;
-  color:var(--accent);padding:7px 12px;}
+.date em{display:block;font-style:normal;font-size:11px;color:var(--muted);}
 .iss{font-size:11.5px;color:var(--warn);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
 .iss.none{color:var(--muted);opacity:.5}
 footer{margin-top:26px;color:var(--muted);font-size:12.5px;}
@@ -184,7 +188,7 @@ def render_html(rows: List[Dict[str, Any]], provider: str, creator: str) -> str:
              f'<p class="eyebrow">翻译溯源 · {_h.escape(provider)}:{_h.escape(creator)}</p>',
              "<h1>每篇译文的来源与时间</h1>",
              '<p class="sub">数据取自 Artifact Store：只统计各篇 current ref 指向的那个版本'
-             '实际选中的候选，按 attestation 反查执行器与模型。</p>',
+             '实际选中的候选，按 attestation 反查执行器、模型与翻译时间。</p>',
              '<div class="cards">']
     for n, label in cards:
         parts.append(f'<div class="card"><div class="n">{n}</div><div class="l">{label}</div></div>')
@@ -195,14 +199,11 @@ def render_html(rows: List[Dict[str, Any]], provider: str, creator: str) -> str:
                      f' · {_h.escape(model or "未记录")} × {n}</span>')
     parts.append("</div>")
     parts.append('<div class="scroll"><table><thead><tr>'
-                 "<th>#</th><th>作品 ID</th><th>标题</th><th>执行器 / 模型</th>"
+                 "<th>#</th><th>作品 ID</th><th>标题</th><th>翻译时间</th><th>执行器 / 模型</th>"
                  "<th>段数</th><th>字数比</th><th>QA</th></tr></thead><tbody>")
-    last_day = None
     for i, r in enumerate(ok, 1):
-        day = (r["published_at"] or "")[:10]
-        if day != last_day:
-            parts.append(f'<tr class="grp"><td colspan="7">发布于 {day or "时间未记录"}</td></tr>')
-            last_day = day
+        when = r.get("translated_at") or r.get("published_at") or ""
+        day, clock = when[:10], when[11:16]
         ratio = r["length_ratio"] or 0
         # 0.6–0.9 是日译中的健康带;条形按 0–1.2 映射
         fill, band_l, band_w = min(ratio / 1.2, 1) * 100, 0.6 / 1.2 * 100, 0.3 / 1.2 * 100
@@ -210,6 +211,8 @@ def render_html(rows: List[Dict[str, Any]], provider: str, creator: str) -> str:
         parts.append(
             f'<tr><td class="num">{i}</td><td class="sid">{_h.escape(r["source_id"])}</td>'
             f'<td class="title"><span title="{_h.escape(r["title"])}">{_h.escape(r["title"])}</span></td>'
+            f'<td class="date">{day or "—"}'
+            f'{f"<em>{clock}</em>" if clock else ""}</td>'
             f'<td class="sid">{_h.escape(r.get("producer") or "?")} / {_h.escape(r.get("model") or "-")}</td>'
             f'<td class="seg">{r["segments"]}</td>'
             f'<td><div class="meter"><span class="ratio">{ratio:.2f}</span>'

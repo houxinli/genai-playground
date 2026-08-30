@@ -273,6 +273,11 @@ provenance:
 	@test -n "$(CREATOR)" || { echo "provenance 需要 CREATOR="; exit 2; }
 	$(PY) tasks/translation/src/scripts/provenance_report.py --creator "$(CREATOR)" $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(FORMAT),--format "$(FORMAT)")
 
+# 翻译覆盖率:已下载但至今没有发布译文的篇(只读)。provenance 只看已发布的篇，看不见漏网的。
+# 用法: make coverage [PROVIDER=pixiv] [CREATOR=9425701] [FORMAT=table|json]
+coverage:
+	$(PY) tasks/translation/src/scripts/coverage_report.py $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(CREATOR),--creator "$(CREATOR)") $(if $(FORMAT),--format "$(FORMAT)")
+
 # 只读核对现有合集是否仍覆盖全部 current refs，且 per-document rendered/整本输出未漂移。
 author-collection-verify:
 	@test -n "$(CREATOR)" || { echo "author-collection-verify 需要 CREATOR="; exit 2; }
