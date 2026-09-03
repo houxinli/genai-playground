@@ -119,6 +119,34 @@ class EntityMemoryTest(unittest.TestCase):
         self.assertEqual("普通的一句。", text)
         self.assertEqual(([], [], {}), (first, conflicts, locked))
 
+    def test_pronoun_is_never_locked(self):
+        """`彼女` 兼作「她」与「女朋友」,锁进译名表就是全篇替换。
+
+        pixiv:9425701:16852374 实测:某段里 彼女 确实是「女朋友」,first-wins 锁定后
+        全篇 103 处「她」都被替换掉,而那篇的 彼女 多半指女友的姐姐——等于换了施事者。
+        """
+        locked = {}
+        text, first, conflicts = eh.apply_observations(
+            "僕の彼女が笑った。", "我的女朋友笑了。",
+            [{"source": "彼女", "target": "女朋友"}], locked
+        )
+        self.assertEqual("我的女朋友笑了。", text)   # 本段译文不动
+        self.assertEqual(([], [], {}), (first, conflicts, locked))   # 但不留下约束
+
+    def test_pronoun_in_legacy_names_tsv_is_dropped(self):
+        self.assertEqual({"乙葉": "乙叶"},
+                         eh.parse_locked_names_tsv("彼女\t女朋友\n乙葉\t乙叶\n"))
+
+    def test_address_terms_are_still_locked(self):
+        """`彼氏`/`彼女さん` 是称呼、没有代词义,照常锁定——停用表不能误伤称谓。"""
+        locked = {}
+        _, first, _ = eh.apply_observations(
+            "彼氏くんが来た。", "男朋友来了。",
+            [{"source": "彼氏くん", "target": "男朋友"}], locked
+        )
+        self.assertEqual([{"source": "彼氏くん", "target": "男朋友"}], first)
+        self.assertEqual({"彼氏くん": "男朋友"}, locked)
+
     def test_finding_round_trip(self):
         finding = eh.entity_finding("カルア", "卡尔亚", _segment(0, "x")["segment_id"], 1)
         entities = eh.entities_from_result({"findings": [finding]})

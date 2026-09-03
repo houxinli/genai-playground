@@ -131,6 +131,23 @@ def context_targets(context_pack: Dict[str, Any]) -> Dict[str, str]:
     return {entity["source"]: entity["target"] for entity in context_pack.get("entities", [])}
 
 
+# 代词的正确译法逐句依赖上下文，锁进篇内译名表就是全篇替换。
+# `彼女` 兼作「她」与「女朋友」，实测 pixiv:9425701:16852374 因此把 103 处「她」全译成
+# 「女朋友」——那篇有女友与其姐姐两个女性角色，后半段的 `彼女` 多指姐姐，锁定后等于把
+# 施事者说成了另一个人。`彼氏`/`彼女さん`/`彼女ちゃん` 不在此列：它们是称呼，没有代词义。
+_UNLOCKABLE_SOURCES = frozenset({
+    "彼", "彼女",
+    "私", "わたし", "あたし", "僕", "ぼく", "俺", "おれ", "自分",
+    "あなた", "あんた", "君", "きみ", "お前", "おまえ",
+    "こいつ", "そいつ", "あいつ", "この人", "その人", "あの人",
+})
+
+
+def is_lockable_name(source: str) -> bool:
+    """该 source 能否进入篇内译名表（进而成为后续段的硬约束）。"""
+    return source not in _UNLOCKABLE_SOURCES
+
+
 def apply_observations(
     source_text: str,
     translation: str,
@@ -148,6 +165,8 @@ def apply_observations(
         source = observation["source"].strip()
         observed_target = observation["target"].strip()
         if not source or not observed_target or source not in source_text or observed_target not in translation:
+            continue
+        if not is_lockable_name(source):
             continue
         canonical = locked_targets.get(source)
         if canonical is None:
@@ -217,6 +236,8 @@ def parse_locked_names_tsv(content: str) -> Dict[str, str]:
         source, target = parts[0].strip(), parts[1].strip()
         if not source or not target:
             raise ValueError(f"names.tsv 第 {line_number} 行 source/target 不得为空")
+        if not is_lockable_name(source):
+            continue   # 代词不锁；与 API 路线同一口径，历史 names.tsv 里的残留也一并失效
         previous = locked.get(source)
         if previous is not None and previous != target:
             raise ValueError(
