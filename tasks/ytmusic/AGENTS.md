@@ -33,15 +33,17 @@ data/qqmusic/*.csv        QQ 音乐导出的原始 CSV
 
 - 环境:conda `llm`,依赖仅 `ytmusicapi`(`requirements.txt`)。
 - **必须从 `genai-playground` 仓库根目录运行**,代码统一使用 `tasks.ytmusic.src.*` 绝对导入。
-- 测试:`conda run -n llm python -m pytest tasks/ytmusic/tests -q`(当前 8 个,全绿;纯离线,外部调用全部打桩)。
+- 测试:`conda run -n llm python -m pytest tasks/ytmusic/tests -q`(当前 23 个,全绿;纯离线,外部调用全部打桩)。
 - 认证:两种模式,headers(浏览器导出)与 oauth,见 `config/AGENTS.md`。
 
-## 已知问题(2026-07-09 快照,修复后请删掉对应条目)
+## 已知问题(2026-09-03 快照,修复后请删掉对应条目)
 
-- **config/ 下所有凭据(headers×2、oauth)均已过期**(2025-11 导出;oauth refresh_token 已 invalid_grant)。读公开数据仍可用,写操作 401。"昨日重现"的推送已于 2026-07-09 通过浏览器内 InnerTube 方案完成;下次需要 Python 侧写操作前要重新导出 headers。
-- 库内有两个同名歌单 "Yesterday once more":`PL...DlJET...NorM` 是正主(外语老歌,对应 `local/Yesterday_once_more.csv`,越晚越靠前);`PL...vDL8...N3F3` 已清空,等用户手动删除。
-- 原唱不在 YT 曲库、videoId 留空待补的:YOM 的 Butter-Fly(和田光司)、いつも何度でも(木村弓);昨日重现的 偷心海盗(栗儿);not yet 的 ここにいるよ(SoulJa)。
-- QQ 线上三歌单(昨日重现 8780163574 / not yet 8913623853 / YOM 9026345074)与本地的搬移结果不同步,QQ 侧需用户手动整理;本地+YT 已按规则于 2026-07-10 对齐。
+- **config/ 下所有凭据(headers×2、oauth)均已过期**(2025-11 导出;oauth refresh_token 已 invalid_grant)。读公开数据仍可用,写操作 401。三歌单推送一直走浏览器内 InnerTube 方案;下次需要 Python 侧写操作前要重新导出 headers。
+- 库内有个 `memo` 歌单(`PLcTZTCAAg9Kc`,公开):内容是昨日重现某段的连续切片 + 用户手工找到的王菲《旋木》官方 MV,是用户自己的暂存区,**同步流程不要碰它**。
+- 原唱不在 YT 曲库、videoId 留空待补:YOM 的 Butter-Fly(和田光司)、いつも何度でも(木村弓);not yet 的 ここにいるよ(SoulJa);昨日重现 12 首(偷心海盗、流年、永远永远、化蝶飞、美人吟、娃娃、遇、恋爱达人、你是风儿我是沙、不得了、第三天、今生你作伴)。
+- QQ 线上三歌单(昨日重现 8780163574 / not yet 8913623853 / YOM 9026345074)与本地的搬移结果不同步,QQ 侧需用户手动整理;本地+YT 已按规则于 2026-09-03 对齐。
+- **YT 视频会持续失效**:2026-09-03 体检 518+71+78 首,发现 8 首 UNPLAYABLE(约 1.2%,距上次审计 2 个月)。建议每次流转时顺带跑一次可播放性体检。
+- **搜索要带 MV/视频类型**:`filter="songs"` 搜不到官方 MV。王菲《旋木》一度被判"YT 无原唱",实际官方 MV(`1Z4fpTnLZDA`)一直在。`audit.pick_video` 目前仍只吃 songs 结果,调用方需自行补搜。
 
 ## 目录导航
 
