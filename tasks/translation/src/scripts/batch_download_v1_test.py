@@ -5,13 +5,14 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.batch_download_v1 import build_yaml_frontmatter  # noqa: E402
+from scripts.batch_download_v1 import build_yaml_frontmatter, existing_source_with_header  # noqa: E402
 
 
 def _parse(meta):
@@ -45,3 +46,29 @@ class FrontMatterEscapeTest(unittest.TestCase):
 
     def test_newlines_are_flattened(self):
         self.assertEqual("第一行 第二行", _parse({**BASE, "caption": "第一行\n第二行"})["caption"])
+
+
+class ExistingSourceTest(unittest.TestCase):
+    """跳过检查必须在抓取前做:已有作品不该再花 API 请求,否则整作者重跑必然限流。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_plain_and_series_filenames_are_recognised(self):
+        (self.dir / "111.txt").write_text("---\nnovel_id: 111\n---\n正文", encoding="utf-8")
+        (self.dir / "9_002_222.txt").write_text("---\nnovel_id: 222\n---\n正文", encoding="utf-8")
+        self.assertEqual(self.dir / "111.txt", existing_source_with_header(self.dir, 111))
+        self.assertEqual(self.dir / "9_002_222.txt", existing_source_with_header(self.dir, 222))
+
+    def test_missing_or_headerless_file_is_not_a_hit(self):
+        (self.dir / "333.txt").write_text("没有 front matter", encoding="utf-8")
+        self.assertIsNone(existing_source_with_header(self.dir, 333))
+        self.assertIsNone(existing_source_with_header(self.dir, 444))
+
+    def test_id_suffix_does_not_match_longer_ids(self):
+        (self.dir / "9_001_1111.txt").write_text("---\nx: 1\n---\n", encoding="utf-8")
+        self.assertIsNone(existing_source_with_header(self.dir, 111))

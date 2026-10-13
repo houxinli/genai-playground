@@ -209,6 +209,22 @@ def build_meta(detail: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def existing_source_with_header(user_dir: Path, novel_id: int) -> Optional[Path]:
+    """本地已有该作品的带 front matter 源文件则返回路径。
+
+    必须在抓取**之前**判断:此前跳过检查放在抓完正文之后,每个已有作品也要白花
+    2–3 次 API 请求,整作者重跑既慢又极易触发限流,限流又进一步放大失败。
+    系列作品文件名是 `<series>_<order>_<id>.txt`,所以两种形态都要认。
+    """
+    for path in (user_dir / f"{novel_id}.txt", *user_dir.glob(f"*_{novel_id}.txt")):
+        try:
+            if path.is_file() and path.read_text(encoding="utf-8", errors="ignore").lstrip().startswith("---\n"):
+                return path
+        except OSError:
+            continue
+    return None
+
+
 def filename_for(meta: Dict[str, Any]) -> str:
     series = meta.get("series") or {}
     series_id = series.get("id")
@@ -433,9 +449,14 @@ def main() -> None:
         logf.write(f"[{iso_now()}] to_process={len(collected)} ids={collected}\n")
 
         for novel_id in collected:
+            if not args.overwrite and existing_source_with_header(user_dir, novel_id):
+                skipped += 1
+                continue
             try:
                 text, detail = fetch_novel_text_with_fallback(api, novel_id, rate_state, args.rate_limit, args.retries)
                 meta = build_meta(detail)
+                if not meta.get("novel_id"):
+                    raise RuntimeError(f"元数据缺少 novel_id(详情接口可能被限流): novel_id={novel_id}")
                 yaml_front = build_yaml_frontmatter(meta)
                 fname = filename_for(meta)
                 txt_path = user_dir / fname
