@@ -273,6 +273,12 @@ provenance:
 	@test -n "$(CREATOR)" || { echo "provenance 需要 CREATOR="; exit 2; }
 	$(PY) tasks/translation/src/scripts/provenance_report.py --creator "$(CREATOR)" $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(FORMAT),--format "$(FORMAT)")
 
+# 补被内容策略拦截而留空的 tags 行(查全库已发布译名,词典外标签不猜)。之后照常 MODE=finish 重发。
+# 用法: make fill-tags SID=27298835 [GLOSS='インピオ=因皮奥(音译,待确认)']
+fill-tags:
+	@test -n "$(SID)" || { echo "fill-tags 需要 SID="; exit 2; }
+	$(PY) tasks/translation/src/scripts/fill_blocked_tags.py --sid "$(SID)" $(if $(GLOSS),--gloss "$(GLOSS)")
+
 # 翻译覆盖率:已下载但至今没有发布译文的篇(只读)。provenance 只看已发布的篇，看不见漏网的。
 # 用法: make coverage [PROVIDER=pixiv] [CREATOR=9425701] [FORMAT=table|json]
 coverage:
