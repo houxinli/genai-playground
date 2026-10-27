@@ -10,6 +10,16 @@ argument-hint: "<歌单名或CSV路径> [audit|fix|push|move-old]"
 
 所有命令在仓库根目录、conda `llm` 环境下运行。数据文件(CSV/缓存/overrides)都在 `tasks/ytmusic/data/`,git-ignored。
 
+## 先看:歌单真相源在 paperbridge 服务器(2026-10-27 起)
+
+用户在 https://app.paperbridge.dev/music/ 试听选版并一键同步到 YT;**服务器快照是真相源**,本地 CSV 跟随。
+
+- 动本地之前先拉回:`./scripts/vps_ssh.sh 'cd ~/paperbridge && docker compose exec -T api python -m paperbridge_api.music.cli export --owner admin' > library.json`(在 paperbridge 仓库根目录),
+  再 `python -m tasks.ytmusic.src.cli import-paperbridge --library library.json`(先 `--dry-run`)。
+- 本地改完(补候选、move-old 等)要发回服务器:`cli export-paperbridge --out x.json`,再 `music.cli publish --owner admin < x.json`;
+  网页同步过后服务器会拒绝覆盖,确认拉回过再加 `--force`。
+- 新候选写 `data/candidates.json`(export 时合并进快照);用户的选择不要在对话里手工推送,让用户点网页上的同步。
+
 ## 标准流程:审计 → 修 → 推送
 
 ### 1. 审计
