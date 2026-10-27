@@ -17,6 +17,9 @@
 
 ## 📅 2026年
 
+### 10月
+- [2026-10-27 ytmusic 选版搬到 paperbridge 网页](./2026-10-27-ytmusic-paperbridge.md)
+
 ### 07月
 - [2026-07-18 Finish 隔离状态显式失败](./2026-07-18-finish-quarantine-feedback.md)
 - [2026-07-18 陪读复合词完整读音](./2026-07-18-annotation-full-readings.md)
