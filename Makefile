@@ -99,7 +99,7 @@ mlx-logs:
 	./scripts/manage_mlx.sh logs
 
 # 下载任务管理
-.PHONY: provenance pixiv-download fanbox-download fanbox-browser-script
+.PHONY: novels-export novels-import provenance pixiv-download fanbox-download fanbox-browser-script
 
 pixiv-download:
 	@echo "📥 下载 Pixiv 作者小说..."
@@ -278,6 +278,18 @@ provenance:
 fill-tags:
 	@test -n "$(SID)" || { echo "fill-tags 需要 SID="; exit 2; }
 	$(PY) tasks/translation/src/scripts/fill_blocked_tags.py --sid "$(SID)" $(if $(GLOSS),--gloss "$(GLOSS)")
+
+# paperbridge /novels/ 译文修订:导出已发布版本给网页逐段改;取回修改后写回 TSV 走 finish 重新发布。
+# 发布/取回走 paperbridge 仓库的 SSH CLI,见 docs/projects/novels/README.md(paperbridge)。
+# 用法: make novels-export CREATOR=9425701 [PROVIDER=pixiv] [IDS=16852374,18137868] [FLAGGED=1] OUT=batch.json
+#       make novels-import EDITS=edits.json [DRY_RUN=1]
+novels-export:
+	@test -n "$(CREATOR)" && test -n "$(OUT)" || { echo "novels-export 需要 CREATOR= OUT="; exit 2; }
+	$(PY) tasks/translation/src/scripts/paperbridge_novels.py export --creator "$(CREATOR)" --out "$(OUT)" $(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(IDS),--ids "$(IDS)") $(if $(FLAGGED),--flagged-only)
+
+novels-import:
+	@test -n "$(EDITS)" || { echo "novels-import 需要 EDITS="; exit 2; }
+	$(PY) tasks/translation/src/scripts/paperbridge_novels.py import --edits "$(EDITS)" $(if $(DRY_RUN),--dry-run)
 
 # 翻译覆盖率:已下载但至今没有发布译文的篇(只读)。provenance 只看已发布的篇，看不见漏网的。
 # 用法: make coverage [PROVIDER=pixiv] [CREATOR=9425701] [FORMAT=table|json]

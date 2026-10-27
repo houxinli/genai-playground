@@ -17,6 +17,9 @@
 
 ## 📅 2026年
 
+### 10月
+- [2026-10-27 译文修订搬到 paperbridge 网页](./2026-10-27-paperbridge-novel-review.md)
+
 ### 08月
 - [2026-08-30 翻译覆盖率报告与内容拦截的按段处理](./2026-08-30-coverage-and-content-block.md)
 
