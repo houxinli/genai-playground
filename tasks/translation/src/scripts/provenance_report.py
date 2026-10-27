@@ -32,47 +32,61 @@ def _shard(ws: Path, kind: str, provider: str, creator: str, sid: str) -> Path:
     return ws / "store" / kind / provider / creator / f"{sid}.jsonl"
 
 
+def load_published(ref_path: Path) -> Dict[str, Any]:
+    """读 current ref 指向的发布版本:revision、逐段选中译文、主执行器与翻译时间。
+
+    ref 路径形如 `<ws>/store/refs/<provider>/<creator>/<sid>.json`。读不到时抛 OSError/KeyError/
+    IndexError/JSONDecodeError,由调用方决定是报错行还是跳过。
+    """
+    sid, creator, provider, ws = ref_path.stem, ref_path.parent.name, ref_path.parents[1].name, ref_path.parents[4]
+    rev = [json.loads(l) for l in _shard(ws, "document-revision", provider, creator, sid).open(encoding="utf-8")][-1]
+    versions = {v["version_id"]: v for v in
+                (json.loads(l) for l in _shard(ws, "document-version", provider, creator, sid).open(encoding="utf-8"))}
+    current = json.loads(ref_path.read_text(encoding="utf-8"))["version_id"]
+    selections = versions[current]["selections"]
+    candidates = {c["candidate_id"]: c for c in
+                  (json.loads(l) for l in _shard(ws, "candidate", provider, creator, sid).open(encoding="utf-8"))}
+
+    producers: Dict[str, Dict[str, Any]] = {}
+    attest = _shard(ws, "attestation", provider, creator, sid)
+    translated_at = None
+    if attest.is_file():
+        for line in attest.open(encoding="utf-8"):
+            rec = json.loads(line)
+            if rec.get("candidate_id"):
+                producers[rec["candidate_id"]] = rec.get("producer") or {}
+                if rec["candidate_id"] in selections.values():
+                    # attestation.created_at = 该候选被产出并背书的时刻,即这段译文的翻译时间。
+                    # 取选中候选里最晚的一条:整篇按最后一段译完的时间算。
+                    when = rec.get("created_at")
+                    if when and (translated_at is None or when > translated_at):
+                        translated_at = when
+    counts = collections.Counter(
+        (producers.get(cid, {}).get("type"), producers.get(cid, {}).get("name"),
+         producers.get(cid, {}).get("model"))
+        for cid in selections.values()
+    )
+    texts = {s["segment_id"]: candidates[selections[s["segment_id"]]]["text"]
+             for s in rev["segments"]
+             if selections.get(s["segment_id"]) in candidates}
+    return {
+        "workspace": ws, "source_id": sid, "revision": rev, "version_id": current, "texts": texts,
+        "producer_counts": counts, "translated_at": translated_at,
+    }
+
+
 def collect(provider: str, creator: str, workspaces_root: Path) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for ref_path in sorted(glob.glob(str(workspaces_root / "*" / "store" / "refs" / provider / creator / "*.json"))):
-        p = Path(ref_path)
-        sid, ws = p.stem, p.parents[4]
+        sid = Path(ref_path).stem
         try:
-            rev = [json.loads(l) for l in _shard(ws, "document-revision", provider, creator, sid).open(encoding="utf-8")][-1]
-            versions = {v["version_id"]: v for v in
-                        (json.loads(l) for l in _shard(ws, "document-version", provider, creator, sid).open(encoding="utf-8"))}
-            current = json.loads(p.read_text(encoding="utf-8"))["version_id"]
-            selections = versions[current]["selections"]
-            candidates = {c["candidate_id"]: c for c in
-                          (json.loads(l) for l in _shard(ws, "candidate", provider, creator, sid).open(encoding="utf-8"))}
+            pub = load_published(Path(ref_path))
         except (OSError, KeyError, IndexError, json.JSONDecodeError) as exc:
             rows.append({"source_id": sid, "error": f"{type(exc).__name__}: {exc}"})
             continue
-
-        producers: Dict[str, Dict[str, Any]] = {}
-        attest = _shard(ws, "attestation", provider, creator, sid)
-        published_at = None
-        if attest.is_file():
-            for line in attest.open(encoding="utf-8"):
-                rec = json.loads(line)
-                if rec.get("candidate_id"):
-                    producers[rec["candidate_id"]] = rec.get("producer") or {}
-                    if rec["candidate_id"] in selections.values():
-                        # attestation.created_at = 该候选被产出并背书的时刻,即这段译文的翻译时间。
-                        # 取选中候选里最晚的一条:整篇按最后一段译完的时间算。
-                        when = rec.get("created_at")
-                        if when and (published_at is None or when > published_at):
-                            published_at = when
-        counts = collections.Counter(
-            (producers.get(cid, {}).get("type"), producers.get(cid, {}).get("name"),
-             producers.get(cid, {}).get("model"))
-            for cid in selections.values()
-        )
+        rev, texts, counts = pub["revision"], pub["texts"], pub["producer_counts"]
+        current, published_at = pub["version_id"], pub["translated_at"]
         top = counts.most_common(1)[0][0] if counts else (None, None, None)
-
-        texts = {s["segment_id"]: candidates[selections[s["segment_id"]]]["text"]
-                 for s in rev["segments"]
-                 if selections.get(s["segment_id"]) in candidates}
         findings = document_qa.audit_document_translations(rev["segments"], texts)
         issue = collections.Counter()
         for f in findings:
