@@ -132,6 +132,13 @@ def create_parser() -> argparse.ArgumentParser:
     )
     export_parser.add_argument("--out", type=Path, required=True, help="输出快照 JSON 路径")
 
+    import_parser = subparsers.add_parser("import-paperbridge", help="把 paperbridge 服务器快照(music.cli export)拉回本地")
+    import_parser.add_argument("--library", type=Path, required=True, help="music.cli export 的输出 JSON")
+    import_parser.add_argument(
+        "--playlists-json", type=Path, default=Path("tasks/ytmusic/data/local/playlists.json"), help="歌单名->CSV 映射"
+    )
+    import_parser.add_argument("--dry-run", action="store_true", help="只报告不落盘")
+
     pull_parser = subparsers.add_parser("pull-qq", help="拉取 QQ 音乐线上歌单并写成导出格式 CSV")
     pull_parser.add_argument("--playlist-id", required=True, help="QQ 歌单 id(分享链接里的 id 参数)")
     pull_parser.add_argument("--out", type=Path, required=True, help="输出 CSV 路径(data/qqmusic/ 下)")
@@ -252,6 +259,26 @@ def main(argv: Sequence[str] | None = None) -> None:
         return
     if args.command == "pull-qq":
         run_pull_qq(args)
+        return
+    if args.command == "import-paperbridge":
+        from tasks.ytmusic.src.core.paperbridge_import import import_library
+
+        payload = json.loads(args.library.read_text(encoding="utf-8"))
+        data_dir = Path("tasks/ytmusic/data")
+        result = import_library(
+            payload.get("library", payload),
+            playlists_json=args.playlists_json,
+            repo_root=Path.cwd(),
+            overrides_path=data_dir / "overrides.json",
+            cache_path=data_dir / "cache_mb.json",
+            candidates_path=data_dir / "candidates.json",
+            dry_run=args.dry_run,
+        )
+        for change in result["changes"]:
+            print(f"{change['playlist']} {change['key']}: {change['from'] or '(空)'} -> {change['to'] or '(空)'}")
+        for note in result["unmatched"]:
+            print(f"对不上: {note}")
+        print(f"{'预览' if args.dry_run else '已写回'} {len(result['changes'])} 处改动")
         return
     if args.command == "export-paperbridge":
         from tasks.ytmusic.src.core.paperbridge_export import build_library
