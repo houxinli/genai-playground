@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import List, Sequence
@@ -122,6 +123,15 @@ def create_parser() -> argparse.ArgumentParser:
         help="videoId->视频信息 的缓存 JSON,重跑时避免重复请求",
     )
 
+    export_parser = subparsers.add_parser("export-paperbridge", help="导出歌单+候选版本快照给 paperbridge /music/")
+    export_parser.add_argument(
+        "--playlists-json", type=Path, default=Path("tasks/ytmusic/data/local/playlists.json"), help="歌单名->CSV 映射"
+    )
+    export_parser.add_argument(
+        "--candidates", type=Path, default=Path("tasks/ytmusic/data/candidates.json"), help="候选版本 JSON(可缺省)"
+    )
+    export_parser.add_argument("--out", type=Path, required=True, help="输出快照 JSON 路径")
+
     pull_parser = subparsers.add_parser("pull-qq", help="拉取 QQ 音乐线上歌单并写成导出格式 CSV")
     pull_parser.add_argument("--playlist-id", required=True, help="QQ 歌单 id(分享链接里的 id 参数)")
     pull_parser.add_argument("--out", type=Path, required=True, help="输出 CSV 路径(data/qqmusic/ 下)")
@@ -243,6 +253,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.command == "pull-qq":
         run_pull_qq(args)
         return
+    if args.command == "export-paperbridge":
+        from tasks.ytmusic.src.core.paperbridge_export import build_library
+
+        library = build_library(args.playlists_json, args.candidates, Path.cwd())
+        args.out.write_text(json.dumps(library, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        counts = ", ".join(f"{p['name']} {len(p['tracks'])}" for p in library["playlists"])
+        print(f"已导出 {args.out}: {counts}")
+        return
 
     client = get_client("headers", headers_path=args.headers)
     manager = PlaylistManager(client)
@@ -299,8 +317,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(f"删除请求已发送，匹配 {len(matches)} 条，提交 {len(items)} 条 -> {result}")
     elif args.command == "move-old":
         if args.sync and args.playlists_json.exists():
-            import json
-
             raw = json.loads(args.playlists_json.read_text())
             # 新格式是 [{title,id,path}] 列表,旧格式是 {title: id} 字典
             if isinstance(raw, list):
