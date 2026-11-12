@@ -13,11 +13,14 @@ argument-hint: "<歌单名或CSV路径> [audit|fix|push|move-old]"
 ## 先看:歌单真相源在 paperbridge 服务器(2026-10-27 起)
 
 用户在 https://app.paperbridge.dev/music/ 试听选版并一键同步到 YT;**服务器快照是真相源**,本地 CSV 跟随。
+2026-11-11 起歌单的**增删、跨歌单移动、改日期、满 20 年搬歌(move-old)也都在网页上做**(用户决定),不要再在本地做这些再发布。
 
 - 动本地之前先拉回:`./scripts/vps_ssh.sh 'cd ~/paperbridge && docker compose exec -T api python -m paperbridge_api.music.cli export --owner admin' > library.json`(在 paperbridge 仓库根目录),
-  再 `python -m tasks.ytmusic.src.cli import-paperbridge --library library.json`(先 `--dry-run`)。
-- 本地改完(补候选、move-old 等)要发回服务器:`cli export-paperbridge --out x.json`,再 `music.cli publish --owner admin < x.json`;
-  网页同步过后服务器会拒绝覆盖,确认拉回过再加 `--force`。
+  再 `python -m tasks.ytmusic.src.cli import-paperbridge --library library.json`(先 `--dry-run`)。拉回会让本地 CSV
+  跟着服务器增删移、改日期;网页删掉的歌记在 `data/paperbridge_removed.json`。
+- **不要再用 `build_local_csv` 从 QQ 导出重建这几个歌单的 CSV**:那会把网页上删掉/移走的歌加回来。
+- 只补候选时:拉回 → 改 `data/candidates.json` → `cli export-paperbridge --out x.json` → 和刚拉回的快照核对只多了候选 →
+  `music.cli publish --owner admin --force < x.json`。publish 会整个覆盖服务器歌单,发布前必须先拉回,并经用户同意。
 - 新候选写 `data/candidates.json`(export 时合并进快照);用户的选择不要在对话里手工推送,让用户点网页上的同步。
 
 ## 标准流程:审计 → 修 → 推送

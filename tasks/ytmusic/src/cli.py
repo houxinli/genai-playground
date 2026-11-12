@@ -132,7 +132,8 @@ def create_parser() -> argparse.ArgumentParser:
     )
     export_parser.add_argument("--out", type=Path, required=True, help="输出快照 JSON 路径")
 
-    import_parser = subparsers.add_parser("import-paperbridge", help="把 paperbridge 服务器快照(music.cli export)拉回本地")
+    import_parser = subparsers.add_parser(
+        "import-paperbridge", help="把 paperbridge 服务器快照(music.cli export)拉回本地:版本、增删移、日期都跟随服务器")
     import_parser.add_argument("--library", type=Path, required=True, help="music.cli export 的输出 JSON")
     import_parser.add_argument(
         "--playlists-json", type=Path, default=Path("tasks/ytmusic/data/local/playlists.json"), help="歌单名->CSV 映射"
@@ -272,13 +273,20 @@ def main(argv: Sequence[str] | None = None) -> None:
             overrides_path=data_dir / "overrides.json",
             cache_path=data_dir / "cache_mb.json",
             candidates_path=data_dir / "candidates.json",
+            removed_path=data_dir / "paperbridge_removed.json",
             dry_run=args.dry_run,
         )
         for change in result["changes"]:
             print(f"{change['playlist']} {change['key']}: {change['from'] or '(空)'} -> {change['to'] or '(空)'}")
+        labels = {"add": "网页加歌", "remove": "网页删除", "move_in": "移入", "move_out": "移出", "date": "改日期", "duplicate": "去掉重复行"}
+        for item in result["membership"]:
+            extra = f" -> {item['to']}" if item.get("to") else ""
+            if item["op"] == "date":
+                extra = f": {item['from'] or '(空)'} -> {item['to']}"
+            print(f"{labels[item['op']]} {item['playlist']} {item['key']}{extra}")
         for note in result["unmatched"]:
             print(f"对不上: {note}")
-        print(f"{'预览' if args.dry_run else '已写回'} {len(result['changes'])} 处改动")
+        print(f"{'预览' if args.dry_run else '已写回'} 换版本 {len(result['changes'])} 处，增删移改 {len(result['membership'])} 处")
         return
     if args.command == "export-paperbridge":
         from tasks.ytmusic.src.core.paperbridge_export import build_library
