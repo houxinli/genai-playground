@@ -19,6 +19,7 @@
 
 ### 10月
 - [2026-10-27 ytmusic 选版搬到 paperbridge 网页](./2026-10-27-ytmusic-paperbridge.md)
+- [2026-11-11 ytmusic 本地跟随网页上的增删移改](./2026-11-11-ytmusic-web-membership.md)
 
 ### 07月
 - [2026-07-18 Finish 隔离状态显式失败](./2026-07-18-finish-quarantine-feedback.md)
